@@ -1,0 +1,1 @@
+{% extends 'base.html' %}{% block content %}<div class="page-header"><div><span class="eyebrow">Configuração</span><h1>{{ title }}</h1></div></div><form method="post" class="content-card" style="max-width:700px">{% csrf_token %}{{ form.as_p }}<button class="btn btn-brand">Salvar alterações</button></form>{% endblock %}

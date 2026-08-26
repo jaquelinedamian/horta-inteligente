@@ -1,0 +1,1 @@
+{% extends 'base.html' %}{% block area_name %}Administração operacional{% endblock %}{% block content %}<div class="page-header"><div><span class="eyebrow">Operação</span><h1>{{ title }}</h1></div></div><form method="post" class="content-card" style="max-width:760px">{% csrf_token %}{{ form.as_p }}<button class="btn btn-brand">Salvar</button></form>{% endblock %}

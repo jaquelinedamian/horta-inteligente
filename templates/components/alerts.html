@@ -1,0 +1,1 @@
+{% if messages %}<div class="message-stack">{% for message in messages %}<div class="alert alert-{{ message.tags|default:'success' }} alert-dismissible fade show shadow-sm" role="alert">{{ message }}<button class="btn-close" data-bs-dismiss="alert"></button></div>{% endfor %}</div>{% endif %}
