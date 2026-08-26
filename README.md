@@ -169,6 +169,26 @@ posteriormente apenas por variáveis como `EMAIL_HOST`, `EMAIL_HOST_USER`,
 
 ## API IoT
 
+## Backoffice operacional
+
+Administradores com `is_staff=True` acessam `/gestao/`. Gestores de organizações,
+clientes e técnicos não recebem acesso administrativo automaticamente. O backoffice
+oferece listagem, pesquisa, paginação, detalhe, criação e edição para os cadastros
+operacionais; telemetria, heartbeats, credenciais e históricos permanecem protegidos
+como consulta.
+
+A ação opcional **Criar dados demo** só aparece para superusuários quando estas duas
+variáveis estiverem configuradas explicitamente:
+
+```text
+ENABLE_DEMO_SEED=True
+DEMO_PASSWORD=uma-senha-forte-e-nao-versionada
+```
+
+Ela nunca é executada no build, migration ou startup.
+
+## API IoT
+
 Autenticação: `Authorization: Device <prefixo.segredo>`.
 
 - `POST /api/v1/device/telemetry/`

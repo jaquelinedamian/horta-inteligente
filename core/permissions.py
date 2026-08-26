@@ -27,4 +27,4 @@ def role_required(*roles, staff_allowed=True):
 
 customer_required = role_required(Membership.Role.OWNER, Membership.Role.MANAGER, Membership.Role.VIEWER, staff_allowed=False)
 technician_required = role_required(Membership.Role.TECHNICIAN)
-operations_required = role_required(Membership.Role.MANAGER, staff_allowed=True)
+operations_required = role_required(staff_allowed=True)

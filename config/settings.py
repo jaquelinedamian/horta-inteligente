@@ -185,6 +185,7 @@ LOGOUT_REDIRECT_URL = "/"
 LOGIN_URL = "/conta/entrar/"
 
 DEVICE_API_MAX_CLOCK_SKEW_SECONDS = int(os.environ.get("DEVICE_API_MAX_CLOCK_SKEW_SECONDS", "300"))
+ENABLE_DEMO_SEED = env_bool("ENABLE_DEMO_SEED", default=False)
 
 LOGGING = {
     "version": 1,
