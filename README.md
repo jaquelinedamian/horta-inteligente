@@ -34,6 +34,21 @@ oculto. A senha demo vem somente de `DEMO_PASSWORD` e não é impressa. Não
 execute `seed_demo` automaticamente nem em produção. O valor acima é apenas um
 placeholder: escolha outro valor local e nunca o versione.
 
+Usuários criados pelo seed (todos usam a senha fornecida em `DEMO_PASSWORD`):
+
+| Perfil | E-mail |
+|---|---|
+| Cliente completo | `cliente@hortaviva.local` |
+| Técnico | `tecnico@hortaviva.local` |
+| Administrador | `admin@hortaviva.local` |
+| Cliente sem assinatura | `semassinatura@hortaviva.local` |
+| Cliente sem horta | `semhorta@hortaviva.local` |
+| Cliente sem dispositivo | `semdispositivo@hortaviva.local` |
+| Cliente sem telemetria | `semtelemetria@hortaviva.local` |
+
+O seed é idempotente: pode ser executado novamente para atualizar a demonstração sem
+apagar outros clientes. Ele redefine somente as senhas dos usuários demo listados.
+
 ```powershell
 python scripts\simulate_device.py --token "TOKEN_EMITIDO_PELO_SEED" --once
 ```
@@ -48,6 +63,8 @@ python scripts\simulate_device.py --token "TOKEN_EMITIDO_PELO_SEED" --once
 | `ALLOWED_HOSTS` | Recomendada | Hosts adicionais separados por vírgula |
 | `CSRF_TRUSTED_ORIGINS` | Recomendada | Origens HTTPS adicionais separadas por vírgula |
 | `WEB_CONCURRENCY` | Não | Número de workers Gunicorn; padrão 2 |
+| `LOG_LEVEL` | Não | Nível de log em stdout; padrão `INFO` |
+| `DEMO_PASSWORD` | Somente demo | Senha dos usuários fictícios do `seed_demo` |
 | `RENDER_EXTERNAL_HOSTNAME` | Automática | Host público fornecido pelo Render |
 | `SQLITE_DB_PATH` | Apenas local | Caminho opcional do SQLite |
 

@@ -1,5 +1,6 @@
 from django import forms
 from django.contrib.auth.forms import UserCreationForm
+from django.utils import timezone
 
 from accounts.models import Address, User
 from devices.models import LightingSchedule
@@ -66,3 +67,9 @@ class InstallationSurveyForm(StyledFormMixin, forms.Form):
 
 class InstallationDateForm(StyledFormMixin, forms.Form):
     scheduled_for = forms.DateTimeField(label="Data e horário", widget=forms.DateTimeInput(attrs={"type": "datetime-local"}))
+
+    def clean_scheduled_for(self):
+        value = self.cleaned_data["scheduled_for"]
+        if value <= timezone.now():
+            raise forms.ValidationError("Escolha uma data futura para a instalação.")
+        return value

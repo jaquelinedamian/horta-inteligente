@@ -1,0 +1,2 @@
+.sidebar nav a.active{background:rgba(255,255,255,.12);color:#fff}
+.checkout-steps + .content-card .errorlist{list-style:none;padding:10px 14px;border-radius:12px;background:#fbe8e8;color:var(--danger)}

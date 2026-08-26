@@ -4,10 +4,13 @@ from uuid import uuid4
 from django.contrib import messages
 from django.contrib.auth import login
 from django.contrib.auth.decorators import login_required
+from django.db import transaction
 from django.db.models import Avg, Count, Q
 from django.db.models.functions import TruncHour
 from django.http import Http404, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
+from django.utils.http import url_has_allowed_host_and_scheme
 from django.utils import timezone
 from django.views.decorators.http import require_POST
 
@@ -48,27 +51,78 @@ def crop_detail(request, code):
 def signup(request):
     form = SignupForm(request.POST or None)
     if request.method == "POST" and form.is_valid():
-        user = form.save(); login(request, user); return redirect("checkout", step=1)
-    return render(request, "registration/signup.html", {"form": form})
+        user = form.save(); login(request, user)
+        next_url = request.POST.get("next")
+        if next_url and url_has_allowed_host_and_scheme(next_url, allowed_hosts={request.get_host()}, require_https=request.is_secure()):
+            return redirect(next_url)
+        return redirect("checkout", step=1)
+    return render(request, "registration/signup.html", {"form": form, "next": request.GET.get("next", "")})
 
 
 @login_required
 def post_login(request):
-    membership = request.user.memberships.filter(is_active=True).first()
     if request.user.is_staff: return redirect("ops-dashboard")
-    if membership and membership.role == Membership.Role.TECHNICIAN: return redirect("tech-dashboard")
-    if membership: return redirect("customer-dashboard")
-    return redirect("checkout", step=1)
+    memberships = request.user.memberships.filter(is_active=True).order_by("created_at", "id")
+    customer = memberships.filter(role__in=[Membership.Role.OWNER, Membership.Role.MANAGER, Membership.Role.VIEWER]).first()
+    technician = memberships.filter(role=Membership.Role.TECHNICIAN).first()
+    if customer:
+        request.session["active_organization_id"] = str(customer.organization_id)
+        return redirect("customer-dashboard")
+    if technician:
+        request.session["active_organization_id"] = str(technician.organization_id)
+        return redirect("tech-dashboard")
+    if request.session.get("checkout", {}).get("plan"):
+        return redirect("checkout", step=2)
+    return render(request, "registration/account_pending.html")
 
 
-@login_required
+def _plan_module_limit(plan_version):
+    feature = plan_version.features.filter(Q(key="modules") | Q(key__icontains="módulo")).order_by("created_at").first()
+    return feature.limit if feature and feature.limit is not None else None
+
+
+def _checkout_missing_step(state, plan=None):
+    if not plan: return 1
+    if not state.get("cultures"): return 2
+    if not state.get("address"): return 3
+    if not state.get("survey"): return 4
+    if not state.get("scheduled_for"): return 5
+    if not state.get("payment"): return 6
+    return None
+
+
 def checkout(request, step):
     if step not in range(1, 8): raise Http404
     state = request.session.get("checkout", {})
     available_plans = PlanVersion.objects.filter(plan__is_active=True, retired_at__isnull=True).select_related("plan").prefetch_related("features")
+    selected_plan = available_plans.filter(id=state.get("plan")).first()
+    missing_step = _checkout_missing_step(state, selected_plan)
+    if step > 1 and (not selected_plan or (missing_step and missing_step < step)):
+        messages.warning(request, "Complete a etapa anterior para continuar.")
+        return redirect("checkout", step=missing_step or 1)
     form = None
-    if step == 1 and request.method == "POST": state["plan"] = str(get_object_or_404(available_plans, id=request.POST.get("plan")).id)
-    elif step == 2 and request.method == "POST": state["cultures"] = request.POST.getlist("cultures")
+    if step == 1 and request.method == "POST":
+        selected_plan = available_plans.filter(id=request.POST.get("plan")).first()
+        if not selected_plan:
+            messages.error(request, "Escolha um plano disponível para continuar.")
+        else:
+            state = {"plan": str(selected_plan.id)}
+            request.session["checkout"] = state
+            if not request.user.is_authenticated:
+                return redirect(f"{reverse('signup')}?next={reverse('checkout', args=[2])}")
+            return redirect("checkout", step=2)
+    elif step == 2 and request.method == "POST":
+        culture_ids = request.POST.getlist("cultures")
+        valid_ids = list(Cultivar.objects.filter(id__in=culture_ids, crop__is_available=True).values_list("id", flat=True))
+        limit = _plan_module_limit(selected_plan)
+        if not valid_ids:
+            messages.error(request, "Escolha pelo menos uma cultura.")
+        elif len(valid_ids) != len(set(culture_ids)):
+            messages.error(request, "Uma das culturas selecionadas não está disponível.")
+        elif limit is not None and len(valid_ids) > limit:
+            messages.error(request, f"Este plano permite até {limit} culturas iniciais.")
+        else:
+            state["cultures"] = [str(value) for value in valid_ids]
     elif step == 3:
         form = CheckoutAddressForm(request.POST or None, initial=state.get("address"))
         if request.method == "POST" and form.is_valid(): state["address"] = form.cleaned_data
@@ -79,25 +133,47 @@ def checkout(request, step):
         form = InstallationDateForm(request.POST or None)
         if request.method == "POST" and form.is_valid(): state["scheduled_for"] = form.cleaned_data["scheduled_for"].isoformat()
     elif step == 6 and request.method == "POST": state["payment"] = "simulated-approved"
-    if request.method == "POST" and (form is None or form.is_valid()):
-        request.session["checkout"] = state; return redirect("checkout", step=min(step + 1, 7))
-    selected_plan = PlanVersion.objects.filter(id=state.get("plan")).select_related("plan").first()
+    if request.method == "POST" and step != 1 and (form is None or form.is_valid()):
+        next_missing_step = _checkout_missing_step(state, selected_plan)
+        if next_missing_step is None or next_missing_step > step:
+            request.session["checkout"] = state
+            return redirect("checkout", step=min(step + 1, 7))
     selected_cultures = Cultivar.objects.filter(id__in=state.get("cultures", [])).select_related("crop")
-    return render(request, "public/checkout.html", {"step": step, "state": state, "plans": available_plans, "cultivars": Cultivar.objects.filter(crop__is_available=True).select_related("crop"), "form": form, "selected_plan": selected_plan, "selected_cultures": selected_cultures})
+    return render(request, "public/checkout.html", {"step": step, "state": state, "plans": available_plans, "cultivars": Cultivar.objects.filter(crop__is_available=True).select_related("crop"), "form": form, "selected_plan": selected_plan, "selected_cultures": selected_cultures, "module_limit": _plan_module_limit(selected_plan) if selected_plan else None})
 
 
 @login_required
 @require_POST
+@transaction.atomic
 def checkout_complete(request):
-    state = request.session.get("checkout", {}); plan = get_object_or_404(PlanVersion, id=state.get("plan"))
-    org, _ = Organization.objects.get_or_create(slug=f"cliente-{request.user.id.hex[:8]}", defaults={"name": request.user.full_name or request.user.email})
+    state = request.session.get("checkout", {})
+    plan = PlanVersion.objects.select_for_update().filter(id=state.get("plan"), plan__is_active=True, retired_at__isnull=True).select_related("plan").prefetch_related("features").first()
+    missing_step = _checkout_missing_step(state, plan)
+    if missing_step:
+        messages.error(request, "Seu checkout está incompleto. Revise as etapas antes de confirmar.")
+        return redirect("checkout", step=missing_step)
+    culture_ids = state.get("cultures", [])
+    valid_cultures = Cultivar.objects.filter(id__in=culture_ids, crop__is_available=True)
+    limit = _plan_module_limit(plan)
+    if valid_cultures.count() != len(set(culture_ids)) or (limit is not None and valid_cultures.count() > limit):
+        messages.error(request, "Revise as culturas selecionadas.")
+        return redirect("checkout", step=2)
+    membership = request.user.memberships.filter(is_active=True, role__in=[Membership.Role.OWNER, Membership.Role.MANAGER]).select_related("organization").order_by("created_at").first()
+    org = membership.organization if membership else None
+    if not org:
+        org, _ = Organization.objects.get_or_create(slug=f"cliente-{str(request.user.id)[:8]}", defaults={"name": request.user.full_name or request.user.email})
     Membership.objects.get_or_create(user=request.user, organization=org, defaults={"role": Membership.Role.OWNER})
+    existing = Subscription.objects.select_for_update().filter(organization=org, status__in=[Subscription.Status.ACTIVE, Subscription.Status.TRIALING]).select_related("plan_version__plan").first()
+    if existing:
+        request.session.pop("checkout", None)
+        messages.info(request, "Sua organização já possui uma assinatura ativa.")
+        return render(request, "public/checkout_success.html", {"subscription": existing, "already_active": True})
     address_data = state.get("address", {})
     if address_data: Address.objects.get_or_create(organization=org, postal_code=address_data["postal_code"], defaults=address_data)
     subscription = Subscription.objects.create(organization=org, plan_version=plan, status=Subscription.Status.ACTIVE, current_period_start=timezone.now(), current_period_end=timezone.now() + timedelta(days=30))
     Payment.objects.create(subscription=subscription, amount_cents=plan.price_cents, status=Payment.Status.PAID, due_at=timezone.now(), paid_at=timezone.now(), provider_reference=f"SIM-{uuid4().hex[:10]}")
     checkout_request = CheckoutRequest.objects.create(user=request.user, plan_version=plan, installation_data={"address": address_data, "survey": state.get("survey", {})}, scheduled_for=state.get("scheduled_for") or None, status=CheckoutRequest.Status.CONFIRMED)
-    checkout_request.selected_cultures.set(state.get("cultures", [])); request.session.pop("checkout", None)
+    checkout_request.selected_cultures.set(valid_cultures); request.session.pop("checkout", None)
     return render(request, "public/checkout_success.html", {"subscription": subscription})
 
 
@@ -109,11 +185,12 @@ def _customer_context(request):
 @customer_required
 def customer_dashboard(request):
     org, gardens, devices = _customer_context(request); device = devices.order_by("name").first(); metrics = {}; schedule = None
+    active_subscription = Subscription.objects.filter(organization=org, status__in=[Subscription.Status.ACTIVE, Subscription.Status.TRIALING]).select_related("plan_version__plan").first()
     if device:
         for channel in device.channels.filter(kind=Channel.Kind.SENSOR):
             reading = channel.readings.order_by("-recorded_at").first(); metrics[channel.metric] = {"value": reading.decimal_value if reading else None, "unit": channel.unit}
         schedule = LightingSchedule.objects.filter(actuator__device=device, enabled=True).first()
-    return render(request, "customer/dashboard.html", {"organization": org, "gardens": gardens, "device": device, "metrics": metrics, "schedule": schedule, "cycles": PlantingCycle.objects.filter(module__organization=org, status=PlantingCycle.Status.ACTIVE).select_related("cultivar__crop", "module")[:6], "alerts": Alert.objects.filter(rule__organization=org).select_related("rule")[:5], "next_visit": Visit.objects.filter(organization=org, scheduled_start__gte=timezone.now()).select_related("technician").order_by("scheduled_start").first()})
+    return render(request, "customer/dashboard.html", {"organization": org, "gardens": gardens, "has_garden": gardens.exists(), "active_subscription": active_subscription, "device": device, "has_telemetry": any(item["value"] is not None for item in metrics.values()), "metrics": metrics, "schedule": schedule, "cycles": PlantingCycle.objects.filter(module__organization=org, status=PlantingCycle.Status.ACTIVE).select_related("cultivar__crop", "module")[:6], "alerts": Alert.objects.filter(rule__organization=org).select_related("rule")[:5], "next_visit": Visit.objects.filter(organization=org, scheduled_start__gte=timezone.now()).select_related("technician").order_by("scheduled_start").first()})
 
 
 @customer_required
