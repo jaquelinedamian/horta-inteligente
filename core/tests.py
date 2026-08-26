@@ -1,3 +1,5 @@
+import secrets
+
 from django.core.management import call_command
 from django.test import TestCase
 from django.urls import reverse
@@ -10,7 +12,7 @@ from operations.models import Visit
 class PortalSmokeTests(TestCase):
     @classmethod
     def setUpTestData(cls):
-        call_command("seed_demo", verbosity=0)
+        call_command("seed_demo", password=secrets.token_urlsafe(18), verbosity=0)
 
     def test_public_navigation_renders(self):
         for name in ("home", "how-it-works", "plans", "crop-catalog", "about", "faq", "contact", "login", "signup"):

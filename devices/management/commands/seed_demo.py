@@ -1,6 +1,7 @@
+import os
 from datetime import time, timedelta
 
-from django.core.management.base import BaseCommand
+from django.core.management.base import BaseCommand, CommandError
 from django.utils import timezone
 
 from accounts.models import Membership, Organization, User
@@ -14,19 +15,26 @@ from subscriptions.models import Payment, Plan, PlanFeature, PlanVersion, Subscr
 class Command(BaseCommand):
     help = "Cria uma demonstração navegável e emite uma credencial para o simulador."
 
-    def set_password_if_new(self, user, created):
+    def add_arguments(self, parser):
+        parser.add_argument("--password", help="Senha dos usuários demo; prefira a variável DEMO_PASSWORD.")
+        parser.add_argument("--show-device-token", action="store_true", help="Exibe o token recém-emitido somente no terminal local.")
+
+    def set_password_if_new(self, user, created, password):
         if created or not user.has_usable_password():
-            user.set_password("demo1234")
+            user.set_password(password)
             user.save(update_fields=["password"])
 
     def handle(self, *args, **options):
+        demo_password = options.get("password") or os.environ.get("DEMO_PASSWORD")
+        if not demo_password:
+            raise CommandError("Defina DEMO_PASSWORD apenas no ambiente local para executar o seed.")
         now = timezone.now()
         customer, created = User.objects.get_or_create(email="cliente@hortaviva.local", defaults={"full_name": "Marina Oliveira", "phone": "11988887777"})
-        self.set_password_if_new(customer, created)
+        self.set_password_if_new(customer, created, demo_password)
         technician, created = User.objects.get_or_create(email="tecnico@hortaviva.local", defaults={"full_name": "Carlos Mendes", "phone": "11999990000"})
-        self.set_password_if_new(technician, created)
+        self.set_password_if_new(technician, created, demo_password)
         admin_user, created = User.objects.get_or_create(email="admin@hortaviva.local", defaults={"full_name": "Ana Gestora", "is_staff": True, "is_superuser": True})
-        self.set_password_if_new(admin_user, created)
+        self.set_password_if_new(admin_user, created, demo_password)
 
         org, _ = Organization.objects.get_or_create(slug="horta-demo", defaults={"name": "Residência Oliveira"})
         Membership.objects.get_or_create(organization=org, user=customer, defaults={"role": Membership.Role.OWNER})
@@ -81,5 +89,8 @@ class Command(BaseCommand):
         DeviceCredential.objects.filter(device=device, name="simulator").update(is_active=False)
         _, token = DeviceCredential.issue(device, name="simulator")
         self.stdout.write(self.style.SUCCESS("Demonstração criada."))
-        self.stdout.write("Acessos: cliente@hortaviva.local / tecnico@hortaviva.local / admin@hortaviva.local (senha: demo1234)")
-        self.stdout.write(f"DEVICE_API_TOKEN={token}")
+        self.stdout.write("Usuários demo criados. A senha não é exibida.")
+        if options.get("show_device_token"):
+            self.stdout.write(f"DEVICE_API_TOKEN={token}")
+        else:
+            self.stdout.write("Credencial do simulador emitida e ocultada. Use --show-device-token apenas localmente se necessário.")
