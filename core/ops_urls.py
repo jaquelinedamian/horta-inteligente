@@ -4,6 +4,14 @@ from . import ops_views
 
 urlpatterns = [
     path("", ops_views.dashboard, name="ops-dashboard"),
+    path("area/<slug:area>/", ops_views.area_dashboard, name="ops-area"),
+    path("comercial/", ops_views.area_dashboard, {"area": "comercial"}),
+    path("cultivo/", ops_views.area_dashboard, {"area": "cultivo"}),
+    path("hortas/", ops_views.area_dashboard, {"area": "hortas"}),
+    path("iot/", ops_views.area_dashboard, {"area": "iot"}),
+    path("operacao/", ops_views.area_dashboard, {"area": "operacao"}),
+    path("estoque/", ops_views.area_dashboard, {"area": "estoque"}),
+    path("administracao/", ops_views.area_dashboard, {"area": "administracao"}),
     path("clientes/novo/", ops_views.client_create, name="ops-client-create"),
     path("clientes/<int:user_id>/editar/", ops_views.client_edit, name="ops-client-edit"),
     path("clientes/<int:user_id>/", ops_views.client_detail, name="ops-client-detail"),

@@ -173,6 +173,10 @@ class Supplier(BaseModel):
     is_active = models.BooleanField(default=True)
     notes = models.TextField(blank=True)
 
+    class Meta:
+        verbose_name = "fornecedor"
+        verbose_name_plural = "fornecedores"
+
     def __str__(self):
         return self.name
 
@@ -183,6 +187,7 @@ class InventoryCategory(BaseModel):
     is_active = models.BooleanField(default=True)
 
     class Meta:
+        verbose_name = "categoria de estoque"
         verbose_name_plural = "categorias de estoque"
 
     def __str__(self):
@@ -217,6 +222,10 @@ class InventoryItem(BaseModel):
     is_active = models.BooleanField(default=True)
     physical_location = models.CharField(max_length=120, blank=True)
 
+    class Meta:
+        verbose_name = "item de estoque"
+        verbose_name_plural = "itens de estoque"
+
     @property
     def available_quantity(self):
         return self.quantity - self.reserved_quantity
@@ -238,6 +247,8 @@ class StockLot(BaseModel):
     notes = models.TextField(blank=True)
 
     class Meta:
+        verbose_name = "lote de estoque"
+        verbose_name_plural = "lotes de estoque"
         constraints = [models.UniqueConstraint(fields=["item", "code"], name="uniq_item_stock_lot")]
 
     def __str__(self):
@@ -269,6 +280,10 @@ class StockMovement(BaseModel):
     garden = models.ForeignKey(Garden, on_delete=models.SET_NULL, null=True, blank=True, related_name="stock_movements")
     cycle = models.ForeignKey("crops.PlantingCycle", on_delete=models.SET_NULL, null=True, blank=True, related_name="stock_movements")
     notes = models.TextField(blank=True)
+
+    class Meta:
+        verbose_name = "movimentação de estoque"
+        verbose_name_plural = "movimentações de estoque"
 
     def __str__(self):
         return f"{self.get_kind_display()} — {self.item.name} ({self.quantity} {self.unit})"

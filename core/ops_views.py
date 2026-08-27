@@ -24,6 +24,40 @@ from .backoffice_forms import ClientOnboardingForm, resource_form_class
 from .permissions import operations_required
 
 
+AREAS = {
+    "comercial": ("Comercial", "Clientes, planos, assinaturas e faturamento.", ("clients", "organizations", "plans", "subscriptions", "coupons", "payments")),
+    "cultivo": ("Cultivo", "Catálogo agronômico, ciclos, colheitas e insumos.", ("crops", "cultivars", "cultivation-profiles", "crop-stages", "cycles", "harvests", "substrates", "substrate-recipes", "fertilizers", "nutrition-plans")),
+    "hortas": ("Hortas", "Estrutura instalada, módulos e instalações.", ("gardens", "module-types", "modules", "installations", "qrcodes")),
+    "iot": ("IoT", "Dispositivos, métricas, telemetria e automações.", ("device-models", "devices", "metrics", "channels", "telemetry", "calibrations", "commands", "alert-rules", "alerts", "lighting")),
+    "operacao": ("Operação", "Agenda, ordens, manutenção e atendimento.", ("visits", "orders", "maintenance", "maintenance-records", "tickets")),
+    "estoque": ("Estoque", "Itens, categorias, fornecedores, lotes e movimentações.", ("inventory", "inventory-categories", "suppliers", "stock-lots", "stock-movements")),
+    "administracao": ("Administração", "Equipe e configurações operacionais.", ("employees", "settings")),
+}
+SECTION_AREA = {section: slug for slug, (_, _, sections) in AREAS.items() for section in sections}
+
+
+@operations_required
+def area_dashboard(request, area):
+    if area not in AREAS:
+        raise Http404
+    title, description, sections = AREAS[area]
+    cards = []
+    for section in sections:
+        resource = get_resource(section)
+        cards.append({"section": section, "title": resource.title if resource else ("QR Codes" if section == "qrcodes" else "Configurações"), "count": resource.model.objects.count() if resource else None, "readonly": resource.readonly if resource else True})
+    return render(request, "admin_portal/area.html", {"area": area, "title": title, "description": description, "cards": cards})
+
+
+def _form_context(form, section, title, obj=None):
+    links = {"inventory_category": ("inventory-categories", "Nova categoria"), "primary_supplier": ("suppliers", "Novo fornecedor"), "supplier": ("suppliers", "Novo fornecedor"), "organization": ("organizations", "Nova organização"), "plan_version": ("plan-versions", "Novo plano"), "coupon": ("coupons", "Novo cupom"), "subscription": ("subscriptions", "Nova assinatura"), "crop": ("crops", "Nova cultura"), "cultivar": ("cultivars", "Nova variedade"), "cultivation_profile": ("cultivation-profiles", "Novo perfil"), "fertilizer": ("fertilizers", "Novo fertilizante"), "material": ("substrates", "Novo material"), "module_type": ("module-types", "Novo tipo de módulo"), "garden": ("gardens", "Nova horta"), "model": ("device-models", "Novo modelo"), "metric_definition": ("metrics", "Nova métrica"), "technician": ("employees", "Novo funcionário"), "work_order": ("orders", "Nova ordem")}
+    actions = {name: {"section": target, "label": label} for name, (target, label) in links.items() if name in form.fields}
+    groups = [("Dados do cadastro", list(form))]
+    if section == "inventory":
+        spec = (("Identificação", "sku name inventory_category description"), ("Fornecimento", "primary_supplier brand"), ("Controle", "unit tracks_lots tracks_expiration"), ("Estoque", "minimum_quantity reorder_point physical_location"), ("Financeiro", "average_cost_cents reference_price_cents"), ("Status", "is_active"))
+        groups = [(label, [form[name] for name in names.split() if name in form.fields]) for label, names in spec]
+    return {"title": title, "form": form, "section": section, "object": obj, "related_actions": actions, "field_groups": groups, "area": SECTION_AREA.get(section)}
+
+
 def _display_fields(obj):
     hidden = {"password", "secret_hash", "raw", "diagnostics"}
     values = []
@@ -78,7 +112,7 @@ def collection(request, section):
         if query:
             queryset = queryset.filter(Q(full_name__icontains=query) | Q(email__icontains=query) | Q(memberships__organization__name__icontains=query)).distinct()
         page = Paginator(queryset, 25).get_page(request.GET.get("page"))
-        return render(request, "admin_portal/collection.html", {"title": "Clientes", "section": section, "page_obj": page, "objects": page.object_list, "query": query, "resource": resource})
+        return render(request, "admin_portal/collection.html", {"title": "Clientes", "section": section, "area": "comercial", "page_obj": page, "objects": page.object_list, "query": query, "resource": resource})
     queryset = resource.model.objects.all().order_by(*resource.ordering)
     if section == "employees":
         queryset = queryset.filter(Q(is_staff=True) | Q(memberships__role=Membership.Role.TECHNICIAN)).distinct()
@@ -96,7 +130,7 @@ def collection(request, section):
     if organization and "organization" in field_names:
         queryset = queryset.filter(organization_id=organization)
     page = Paginator(queryset, 25).get_page(request.GET.get("page"))
-    return render(request, "admin_portal/collection.html", {"title": resource.title, "section": section, "page_obj": page, "objects": page.object_list, "query": query, "resource": resource, "organizations": Organization.objects.filter(is_active=True).order_by("name")})
+    return render(request, "admin_portal/collection.html", {"title": resource.title, "section": section, "area": SECTION_AREA.get(section), "page_obj": page, "objects": page.object_list, "query": query, "resource": resource, "organizations": Organization.objects.filter(is_active=True).order_by("name")})
 
 
 @operations_required
@@ -118,7 +152,7 @@ def create(request, section):
         obj = form.save()
         messages.success(request, "Registro criado com sucesso.")
         return redirect("ops-detail", section=section, pk=obj.pk)
-    return render(request, "admin_portal/form.html", {"title": f"Novo — {resource.title}", "form": form, "section": section})
+    return render(request, "admin_portal/form.html", _form_context(form, section, f"Novo — {resource.title}"))
 
 
 @operations_required
@@ -132,7 +166,7 @@ def edit(request, section, pk):
         form.save()
         messages.success(request, "Alterações salvas.")
         return redirect("ops-detail", section=section, pk=obj.pk)
-    return render(request, "admin_portal/form.html", {"title": f"Editar — {resource.title}", "form": form, "section": section, "object": obj})
+    return render(request, "admin_portal/form.html", _form_context(form, section, f"Editar — {resource.title}", obj))
 
 
 @operations_required

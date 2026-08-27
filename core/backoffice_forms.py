@@ -15,6 +15,38 @@ LABELS = {
     "current_period_end": "Fim do período", "scheduled_start": "Início agendado", "scheduled_end": "Fim agendado",
     "scheduled_for": "Data agendada", "opened_by": "Aberto por", "performed_by": "Executado por",
     "minimum_quantity": "Quantidade mínima", "price_cents": "Preço em centavos", "interval_days": "Periodicidade em dias",
+    "sku": "SKU", "name": "Nome", "inventory_category": "Categoria de estoque",
+    "category": "Categoria", "description": "Descrição", "primary_supplier": "Fornecedor principal",
+    "supplier": "Fornecedor", "unit": "Unidade", "quantity": "Quantidade",
+    "reserved_quantity": "Estoque reservado", "reorder_point": "Ponto de reposição",
+    "average_cost_cents": "Custo médio em centavos", "reference_price_cents": "Preço de referência em centavos",
+    "tracks_lots": "Controlar lotes?", "tracks_expiration": "Controlar validade?",
+    "physical_location": "Localização física", "brand": "Marca", "is_required": "Obrigatória",
+    "created_at": "Criado em", "updated_at": "Atualizado em", "code": "Código",
+    "commercial_title": "Título comercial", "short_copy": "Resumo comercial", "ideal_for": "Público ideal",
+    "installation_fee_cents": "Taxa de instalação em centavos", "display_order": "Ordem de exibição",
+    "is_public": "Visível no site", "is_featured": "Destaque", "metric_definition": "Métrica monitorada",
+    "default_unit": "Unidade padrão", "data_type": "Tipo de dado",
+    "slug": "Identificador", "kind": "Tipo", "tax_id": "CPF/CNPJ", "primary_contact": "Responsável principal",
+    "phone": "Telefone", "email": "E-mail", "billing_email": "E-mail financeiro", "internal_notes": "Observações internas",
+    "full_name": "Nome completo", "birth_date": "Data de nascimento", "is_staff": "Acesso administrativo",
+    "version": "Versão", "currency": "Moeda", "billing_interval_months": "Periodicidade em meses",
+    "effective_from": "Vigência inicial", "retired_at": "Encerrado em", "benefit_type": "Tipo de benefício",
+    "period": "Período", "unlimited": "Ilimitado", "carries_balance": "Acumula saldo",
+    "discount_type": "Tipo de desconto", "value": "Valor", "valid_from": "Início da validade", "valid_until": "Fim da validade",
+    "maximum_uses": "Quantidade máxima de usos", "limit_per_customer": "Limite por cliente", "notes": "Observações",
+    "status": "Status", "current_period_start": "Início", "current_period_end": "Fim", "contracted_price_cents": "Preço contratado em centavos",
+    "billing_day": "Dia de vencimento", "next_billing_at": "Próxima cobrança", "auto_renew": "Renovação automática",
+    "competence": "Competência", "gross_amount_cents": "Valor bruto em centavos", "discount_cents": "Desconto em centavos",
+    "amount_cents": "Valor final em centavos", "due_at": "Vencimento", "paid_at": "Data do pagamento",
+    "payment_method": "Forma de pagamento", "provider_reference": "Identificador externo",
+    "scientific_name": "Nome científico", "difficulty": "Dificuldade", "light_requirement": "Necessidade de luz",
+    "uses": "Usos", "botanical_family": "Família botânica", "origin": "Origem", "is_available": "Disponível",
+    "manufacturer": "Fabricante", "stock_unit": "Unidade de estoque", "intended_use": "Uso indicado",
+    "organization": "Organização", "address": "Endereço", "responsible": "Responsável", "module": "Módulo",
+    "device": "Dispositivo", "channel": "Canal", "position": "Ordem", "enabled": "Ativo",
+    "occurred_at": "Data", "received_at": "Data de entrada", "expires_at": "Validade", "manufactured_at": "Fabricação",
+    "received_quantity": "Quantidade recebida", "available_quantity": "Quantidade disponível", "unit_cost_cents": "Custo unitário em centavos",
 }
 
 
@@ -26,6 +58,8 @@ class OperationalModelForm(forms.ModelForm):
             model_field = self._meta.model._meta.get_field(name)
             if model_field.has_default():
                 field.required = False
+            if isinstance(field, forms.ModelChoiceField):
+                field.empty_label = "Selecione uma opção"
             field.widget.attrs.setdefault("class", "form-check-input" if isinstance(field.widget, forms.CheckboxInput) else "form-control")
             if isinstance(field.widget, forms.DateTimeInput):
                 field.widget.input_type = "datetime-local"

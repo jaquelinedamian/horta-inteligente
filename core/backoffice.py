@@ -77,7 +77,7 @@ RESOURCES = {
     "maintenance-tasks": r("Tarefas de manutenção", MaintenanceTask, "plan name description is_required position", ("name",)),
     "maintenance-records": r("Registros de manutenção", MaintenanceRecord, "work_order performed_by started_at finished_at notes parts_used cost_cents", ("work_order__title",)),
     "tickets": r("Suporte", SupportTicket, "organization opened_by garden module device category priority subject description status assigned_to concluded_at generated_order", ("subject",)),
-    "inventory": r("Itens de estoque", InventoryItem, "sku name inventory_category category description brand primary_supplier unit quantity reserved_quantity minimum_quantity reorder_point average_cost_cents reference_price_cents tracks_lots tracks_expiration is_active physical_location", ("name", "sku")),
+    "inventory": r("Itens de estoque", InventoryItem, "sku name inventory_category description brand primary_supplier unit minimum_quantity reorder_point average_cost_cents reference_price_cents tracks_lots tracks_expiration is_active physical_location", ("name", "sku")),
     "inventory-categories": r("Categorias", InventoryCategory, "name description is_active", ("name",)),
     "stock-lots": r("Lotes", StockLot, "item code supplier received_at manufactured_at expires_at received_quantity available_quantity unit_cost_cents notes", ("item__name", "code")),
     "stock-movements": r("Movimentações", StockMovement, "item lot kind quantity unit occurred_at user supplier visit work_order garden cycle notes", ("item__name", "item__sku")),
