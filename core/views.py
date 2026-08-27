@@ -20,12 +20,16 @@ from devices.models import Alert, Channel, Device, DeviceCommand, LightingSchedu
 from gardens.models import Garden, GardenModule, ModuleInstallation
 from operations.models import ChecklistExecution, InventoryItem, SupportTicket, Visit, WorkOrder
 from subscriptions.models import CheckoutRequest, Payment, Plan, PlanVersion, Subscription
+from subscriptions.selectors import get_available_plan_versions, get_customer_subscription, get_public_plans
+from crops.selectors import get_available_cultivars, get_customer_cycles, get_public_crops
+from gardens.selectors import get_customer_devices, get_customer_gardens
+from operations.selectors import get_customer_visits, get_technician_orders, get_technician_visits
 from .forms import CheckoutAddressForm, InstallationDateForm, InstallationSurveyForm, LightingScheduleForm, ProfileForm, SignupForm, SupportTicketForm, WorkOrderForm
 from .permissions import customer_required, operations_required, technician_required
 
 
 def home(request):
-    return render(request, "public/home.html", {"plans": PlanVersion.objects.filter(plan__is_active=True).select_related("plan").order_by("price_cents")[:3], "crops": Crop.objects.filter(is_available=True)[:3]})
+    return render(request, "public/home.html", {"plans": get_public_plans()[:3], "crops": get_public_crops()[:3]})
 
 
 def public_page(request, page):
@@ -37,11 +41,16 @@ def public_page(request, page):
 
 
 def plans(request):
-    return render(request, "public/plans.html", {"plans": PlanVersion.objects.filter(plan__is_active=True, retired_at__isnull=True).select_related("plan").prefetch_related("features")})
+    return render(request, "public/plans.html", {"plans": get_public_plans()})
+
+
+def plan_detail(request, code):
+    version = get_object_or_404(get_public_plans(), plan__code=code)
+    return render(request, "public/plan_detail.html", {"version": version, "plan": version.plan})
 
 
 def crop_catalog(request):
-    return render(request, "public/crops.html", {"crops": Crop.objects.all().prefetch_related("cultivars")})
+    return render(request, "public/crops.html", {"crops": get_public_crops()})
 
 
 def crop_detail(request, code):
@@ -94,7 +103,7 @@ def _checkout_missing_step(state, plan=None):
 def checkout(request, step):
     if step not in range(1, 8): raise Http404
     state = request.session.get("checkout", {})
-    available_plans = PlanVersion.objects.filter(plan__is_active=True, retired_at__isnull=True).select_related("plan").prefetch_related("features")
+    available_plans = get_public_plans()
     selected_plan = available_plans.filter(id=state.get("plan")).first()
     missing_step = _checkout_missing_step(state, selected_plan)
     if step > 1 and (not selected_plan or (missing_step and missing_step < step)):
@@ -113,7 +122,7 @@ def checkout(request, step):
             return redirect("checkout", step=2)
     elif step == 2 and request.method == "POST":
         culture_ids = request.POST.getlist("cultures")
-        valid_ids = list(Cultivar.objects.filter(id__in=culture_ids, crop__is_available=True).values_list("id", flat=True))
+        valid_ids = list(get_available_cultivars().filter(id__in=culture_ids).values_list("id", flat=True))
         limit = _plan_module_limit(selected_plan)
         if not valid_ids:
             messages.error(request, "Escolha pelo menos uma cultura.")
@@ -139,7 +148,7 @@ def checkout(request, step):
             request.session["checkout"] = state
             return redirect("checkout", step=min(step + 1, 7))
     selected_cultures = Cultivar.objects.filter(id__in=state.get("cultures", [])).select_related("crop")
-    return render(request, "public/checkout.html", {"step": step, "state": state, "plans": available_plans, "cultivars": Cultivar.objects.filter(crop__is_available=True).select_related("crop"), "form": form, "selected_plan": selected_plan, "selected_cultures": selected_cultures, "module_limit": _plan_module_limit(selected_plan) if selected_plan else None})
+    return render(request, "public/checkout.html", {"step": step, "state": state, "plans": available_plans, "cultivars": get_available_cultivars(), "form": form, "selected_plan": selected_plan, "selected_cultures": selected_cultures, "module_limit": _plan_module_limit(selected_plan) if selected_plan else None})
 
 
 @login_required
@@ -147,7 +156,7 @@ def checkout(request, step):
 @transaction.atomic
 def checkout_complete(request):
     state = request.session.get("checkout", {})
-    plan = PlanVersion.objects.select_for_update().filter(id=state.get("plan"), plan__is_active=True, retired_at__isnull=True).select_related("plan").prefetch_related("features").first()
+    plan = get_public_plans().select_for_update().filter(id=state.get("plan")).first()
     missing_step = _checkout_missing_step(state, plan)
     if missing_step:
         messages.error(request, "Seu checkout está incompleto. Revise as etapas antes de confirmar.")
@@ -179,24 +188,24 @@ def checkout_complete(request):
 
 def _customer_context(request):
     org = request.membership.organization
-    return org, Garden.objects.filter(organization=org), Device.objects.filter(organization=org).prefetch_related("channels")
+    return org, get_customer_gardens(org), get_customer_devices(org)
 
 
 @customer_required
 def customer_dashboard(request):
     org, gardens, devices = _customer_context(request); device = devices.order_by("name").first(); metrics = {}; schedule = None
-    active_subscription = Subscription.objects.filter(organization=org, status__in=[Subscription.Status.ACTIVE, Subscription.Status.TRIALING]).select_related("plan_version__plan").first()
+    active_subscription = get_customer_subscription(org)
     if device:
         for channel in device.channels.filter(kind=Channel.Kind.SENSOR):
             reading = channel.readings.order_by("-recorded_at").first(); metrics[channel.metric] = {"value": reading.decimal_value if reading else None, "unit": channel.unit}
         schedule = LightingSchedule.objects.filter(actuator__device=device, enabled=True).first()
-    return render(request, "customer/dashboard.html", {"organization": org, "gardens": gardens, "has_garden": gardens.exists(), "active_subscription": active_subscription, "device": device, "has_telemetry": any(item["value"] is not None for item in metrics.values()), "metrics": metrics, "schedule": schedule, "cycles": PlantingCycle.objects.filter(module__organization=org, status=PlantingCycle.Status.ACTIVE).select_related("cultivar__crop", "module")[:6], "alerts": Alert.objects.filter(rule__organization=org).select_related("rule")[:5], "next_visit": Visit.objects.filter(organization=org, scheduled_start__gte=timezone.now()).select_related("technician").order_by("scheduled_start").first()})
+    return render(request, "customer/dashboard.html", {"organization": org, "gardens": gardens, "has_garden": gardens.exists(), "active_subscription": active_subscription, "device": device, "has_telemetry": any(item["value"] is not None for item in metrics.values()), "metrics": metrics, "schedule": schedule, "cycles": get_customer_cycles(org).filter(status=PlantingCycle.Status.ACTIVE)[:6], "alerts": Alert.objects.filter(rule__organization=org).select_related("rule")[:5], "next_visit": get_customer_visits(org).filter(scheduled_start__gte=timezone.now()).order_by("scheduled_start").first()})
 
 
 @customer_required
 def customer_section(request, section):
     org, gardens, devices = _customer_context(request)
-    sections = {"garden": ("Minha horta", gardens.prefetch_related("module_installations__module")), "crops": ("Minhas culturas", PlantingCycle.objects.filter(module__organization=org).select_related("cultivar__crop", "module")), "alerts": ("Alertas", Alert.objects.filter(rule__organization=org).select_related("rule", "reading__channel")), "visits": ("Visitas", Visit.objects.filter(organization=org).select_related("technician", "garden")), "subscription": ("Assinatura", Subscription.objects.filter(organization=org).select_related("plan_version__plan")), "payments": ("Pagamentos", Payment.objects.filter(subscription__organization=org).select_related("subscription"))}
+    sections = {"garden": ("Minha horta", gardens), "crops": ("Minhas culturas", get_customer_cycles(org)), "alerts": ("Alertas", Alert.objects.filter(rule__organization=org).select_related("rule", "reading__channel")), "visits": ("Visitas", get_customer_visits(org)), "subscription": ("Assinatura", Subscription.objects.filter(organization=org).select_related("plan_version__plan").prefetch_related("plan_version__entitlements")), "payments": ("Pagamentos", Payment.objects.filter(subscription__organization=org).select_related("subscription__plan_version__plan"))}
     if section not in sections: raise Http404
     title, objects = sections[section]
     context = {"title": title, "objects": objects, "organization": org}
@@ -288,13 +297,13 @@ def profile(request):
 
 @technician_required
 def tech_dashboard(request):
-    visits = Visit.objects.filter(technician=request.user, scheduled_start__date=timezone.localdate()).select_related("organization", "garden").order_by("scheduled_start")
-    return render(request, "operations/dashboard.html", {"visits": visits, "today_count": visits.count(), "work_orders": WorkOrder.objects.filter(assignments__user=request.user).exclude(status__in=[WorkOrder.Status.COMPLETED, WorkOrder.Status.CANCELED])})
+    visits = get_technician_visits(request.user).filter(scheduled_start__date=timezone.localdate())
+    return render(request, "operations/dashboard.html", {"visits": visits, "today_count": visits.count(), "work_orders": get_technician_orders(request.user).exclude(status__in=[WorkOrder.Status.COMPLETED, WorkOrder.Status.CANCELED])})
 
 
 @technician_required
 def tech_visits(request):
-    return render(request, "operations/visits.html", {"visits": Visit.objects.filter(technician=request.user).select_related("organization", "garden").order_by("scheduled_start")})
+    return render(request, "operations/visits.html", {"visits": get_technician_visits(request.user)})
 
 
 @technician_required

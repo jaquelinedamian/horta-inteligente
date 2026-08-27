@@ -13,11 +13,11 @@ from django.utils import timezone
 from django.views.decorators.http import require_POST
 
 from accounts.models import Membership, Organization, User
-from crops.models import PlantingCycle
+from crops.models import Crop, PlantingCycle
 from devices.models import Alert, Device, DeviceCredential
 from gardens.models import Garden, GardenModule
 from operations.models import SupportTicket, Visit, WorkOrder
-from subscriptions.models import Payment, Subscription
+from subscriptions.models import Payment, Plan, Subscription
 
 from .backoffice import get_resource
 from .backoffice_forms import ClientOnboardingForm, resource_form_class
@@ -74,6 +74,9 @@ def dashboard(request):
     today = timezone.localdate()
     now = timezone.now()
     cards = [
+        ("Planos ativos sem preço vigente", Plan.objects.filter(is_active=True).exclude(versions__retired_at__isnull=True).distinct().count(), "plans"),
+        ("Culturas disponíveis sem perfil", Crop.objects.filter(is_available=True, cultivation_profiles__isnull=True).count(), "crops"),
+        ("Módulos instalados sem ciclo", GardenModule.objects.filter(status=GardenModule.Status.INSTALLED, planting_cycles__isnull=True).count(), "modules"),
         ("Clientes ativos", Organization.objects.filter(is_active=True).count(), "clients"),
         ("Organizações", Organization.objects.count(), "organizations"),
         ("Assinaturas ativas", Subscription.objects.filter(status=Subscription.Status.ACTIVE).count(), "subscriptions"),

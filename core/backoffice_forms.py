@@ -1,11 +1,15 @@
 from django import forms
 from django.contrib.auth.password_validation import validate_password
-from django.db import transaction
+from django.db import models, transaction
 from django.forms import modelform_factory
+from django.core.exceptions import FieldDoesNotExist
+from django.utils import timezone
 
 from accounts.models import Address, Membership, Organization, User
 from devices.models import Channel
-from subscriptions.models import PlanVersion, Subscription
+from subscriptions.models import Plan, PlanEntitlement, PlanVersion, Subscription
+from subscriptions.selectors import get_available_plan_versions
+from crops.selectors import get_available_cultivars
 
 
 LABELS = {
@@ -55,11 +59,22 @@ class OperationalModelForm(forms.ModelForm):
         super().__init__(*args, **kwargs)
         for name, field in self.fields.items():
             field.label = LABELS.get(name, field.label)
-            model_field = self._meta.model._meta.get_field(name)
-            if model_field.has_default():
+            try:
+                model_field = self._meta.model._meta.get_field(name)
+            except FieldDoesNotExist:
+                model_field = None
+            if model_field and model_field.has_default():
                 field.required = False
             if isinstance(field, forms.ModelChoiceField):
                 field.empty_label = "Selecione uma opção"
+        if "plan_version" in self.fields:
+            available = get_available_plan_versions()
+            selected_id = self.data.get(self.add_prefix("plan_version")) if self.is_bound else getattr(self.instance, "plan_version_id", None)
+            if selected_id:
+                available = (available | PlanVersion.objects.filter(pk=selected_id)).distinct()
+            self.fields["plan_version"].queryset = available
+        if "cultivar" in self.fields:
+            self.fields["cultivar"].queryset = get_available_cultivars()
             field.widget.attrs.setdefault("class", "form-check-input" if isinstance(field.widget, forms.CheckboxInput) else "form-control")
             if isinstance(field.widget, forms.DateTimeInput):
                 field.widget.input_type = "datetime-local"
@@ -84,7 +99,51 @@ class OperationalModelForm(forms.ModelForm):
 def resource_form_class(resource):
     if resource.model is User:
         return EmployeeForm
+    if resource.model is Plan:
+        return CommercialPlanForm
     return modelform_factory(resource.model, form=OperationalModelForm, fields=resource.fields)
+
+
+class CommercialPlanForm(OperationalModelForm):
+    monthly_price = forms.DecimalField(label="Preço mensal", max_digits=10, decimal_places=2, min_value=0.01, required=False, help_text="Obrigatório para publicar o plano no site e disponibilizá-lo para novas assinaturas.")
+    effective_from = forms.DateTimeField(label="Início da vigência", required=False, widget=forms.DateTimeInput(attrs={"type": "datetime-local"}), help_text="Se vazio, a nova versão entra em vigor imediatamente.")
+    included_items = forms.CharField(label="Itens incluídos", required=False, widget=forms.Textarea(attrs={"rows": 5, "placeholder": "Um benefício por linha. Ex.: 3 módulos"}), help_text="Cria os benefícios da versão atual do plano.")
+
+    class Meta:
+        model = Plan
+        fields = ("name", "code", "commercial_title", "subtitle", "short_copy", "description", "ideal_for", "installation_fee_cents", "is_public", "is_featured", "display_order", "image_url", "exclusions", "is_active")
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        current = self.instance.versions.filter(retired_at__isnull=True).order_by("-version").first() if self.instance.pk else None
+        if current and not self.is_bound:
+            self.initial["monthly_price"] = current.price_cents / 100
+            self.initial["effective_from"] = current.effective_from
+            self.initial["included_items"] = "\n".join(current.entitlements.order_by("display_order").values_list("name", flat=True))
+
+    def clean(self):
+        cleaned = super().clean()
+        if cleaned.get("is_public") and cleaned.get("is_active") and not cleaned.get("monthly_price"):
+            self.add_error("monthly_price", "Informe um preço para disponibilizar este plano no site e no checkout.")
+        return cleaned
+
+    @transaction.atomic
+    def save(self, commit=True):
+        plan = super().save(commit=commit)
+        if not self.cleaned_data.get("monthly_price"):
+            return plan
+        price_cents = int(self.cleaned_data["monthly_price"] * 100)
+        effective_from = self.cleaned_data.get("effective_from") or timezone.now()
+        current = plan.versions.filter(retired_at__isnull=True).order_by("-version").first()
+        if not current or current.price_cents != price_cents:
+            if current:
+                current.retired_at = effective_from
+                current.save(update_fields=["retired_at", "updated_at"])
+            current = PlanVersion.objects.create(plan=plan, version=(plan.versions.aggregate(max_version=models.Max("version"))["max_version"] or 0) + 1, price_cents=price_cents, effective_from=effective_from, installation_fee_cents=plan.installation_fee_cents)
+        items = [line.strip() for line in self.cleaned_data.get("included_items", "").splitlines() if line.strip()]
+        for position, name in enumerate(items):
+            PlanEntitlement.objects.update_or_create(plan_version=current, benefit_type=f"item-{position + 1}", defaults={"name": name, "unlimited": False, "display_order": position})
+        return plan
 
 
 class EmployeeForm(OperationalModelForm):
@@ -130,7 +189,7 @@ class ClientOnboardingForm(forms.Form):
     def __init__(self, *args, instance=None, **kwargs):
         self.instance = instance
         super().__init__(*args, **kwargs)
-        self.fields["plan_version"].queryset = PlanVersion.objects.filter(plan__is_active=True, retired_at__isnull=True).select_related("plan")
+        self.fields["plan_version"].queryset = get_available_plan_versions()
         for field in self.fields.values():
             field.widget.attrs.setdefault("class", "form-check-input" if isinstance(field.widget, forms.CheckboxInput) else "form-control")
         if instance and not self.is_bound:
