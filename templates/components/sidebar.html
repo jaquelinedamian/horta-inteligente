@@ -1,12 +1,24 @@
-<aside class="sidebar" id="sidebar"><a class="brand brand-light" href="{% url 'home' %}"><span class="brand-mark"><i class="bi bi-flower1"></i></span><span>Horta<span>Viva</span></span></a>
-{% if '/gestao/' in request.path %}<nav class="backoffice-nav"><a href="{% url 'ops-dashboard' %}"><i class="bi bi-grid"></i> Dashboard</a>
-<details open><summary>Comercial</summary><a href="{% url 'ops-area' 'comercial' %}">Visão da área</a><a href="{% url 'ops-collection' 'clients' %}">Clientes</a><a href="{% url 'ops-collection' 'organizations' %}">Organizações</a><a href="{% url 'ops-collection' 'plans' %}">Planos</a><a href="{% url 'ops-collection' 'subscriptions' %}">Assinaturas</a><a href="{% url 'ops-collection' 'coupons' %}">Cupons</a><a href="{% url 'ops-collection' 'payments' %}">Pagamentos</a></details>
-<details><summary>Cultivo</summary><a href="{% url 'ops-area' 'cultivo' %}">Visão da área</a><a href="{% url 'ops-collection' 'crops' %}">Culturas</a><a href="{% url 'ops-collection' 'cultivars' %}">Variedades</a><a href="{% url 'ops-collection' 'cultivation-profiles' %}">Perfis de cultivo</a><a href="{% url 'ops-collection' 'cycles' %}">Ciclos e colheitas</a><a href="{% url 'ops-collection' 'substrates' %}">Substratos</a><a href="{% url 'ops-collection' 'fertilizers' %}">Fertilizantes</a></details>
-<details><summary>Hortas</summary><a href="{% url 'ops-area' 'hortas' %}">Visão da área</a><a href="{% url 'ops-collection' 'gardens' %}">Hortas</a><a href="{% url 'ops-collection' 'module-types' %}">Tipos de módulos</a><a href="{% url 'ops-collection' 'modules' %}">Módulos</a></details>
-<details><summary>IoT</summary><a href="{% url 'ops-area' 'iot' %}">Visão da área</a><a href="{% url 'ops-collection' 'devices' %}">Dispositivos</a><a href="{% url 'ops-collection' 'metrics' %}">Métricas</a><a href="{% url 'ops-collection' 'channels' %}">Canais</a><a href="{% url 'ops-collection' 'telemetry' %}">Telemetria</a><a href="{% url 'ops-collection' 'alerts' %}">Alertas</a></details>
-<details><summary>Operação</summary><a href="{% url 'ops-area' 'operacao' %}">Visão da área</a><a href="{% url 'ops-collection' 'visits' %}">Agenda e visitas</a><a href="{% url 'ops-collection' 'orders' %}">Ordens de serviço</a><a href="{% url 'ops-collection' 'maintenance' %}">Manutenção</a><a href="{% url 'ops-collection' 'tickets' %}">Suporte</a></details>
-<details><summary>Estoque</summary><a href="{% url 'ops-area' 'estoque' %}">Visão da área</a><a href="{% url 'ops-collection' 'inventory' %}">Itens</a><a href="{% url 'ops-collection' 'inventory-categories' %}">Categorias</a><a href="{% url 'ops-collection' 'suppliers' %}">Fornecedores</a><a href="{% url 'ops-collection' 'stock-lots' %}">Lotes</a><a href="{% url 'ops-collection' 'stock-movements' %}">Movimentações</a></details>
-<details><summary>Administração</summary><a href="{% url 'ops-area' 'administracao' %}">Visão da área</a><a href="{% url 'ops-collection' 'employees' %}">Funcionários</a><a href="{% url 'ops-collection' 'settings' %}">Configurações</a></details></nav>
-{% elif '/operacao/' in request.path %}<small>ÁREA DO TÉCNICO</small><nav><a href="{% url 'tech-dashboard' %}">Visão geral</a><a href="{% url 'tech-visits' %}">Visitas e agenda</a><a href="{% url 'customer-profile' %}">Perfil</a></nav>
-{% else %}<small>MINHA HORTA</small><nav><a href="{% url 'customer-dashboard' %}">Visão geral</a><a href="{% url 'customer-section' 'garden' %}">Minha horta</a><a href="{% url 'customer-section' 'crops' %}">Minhas culturas</a><a href="{% url 'customer-history' %}">Histórico</a><a href="{% url 'customer-section' 'subscription' %}">Assinatura</a><a href="{% url 'customer-support' %}">Suporte</a><a href="{% url 'customer-profile' %}">Perfil</a></nav>{% endif %}
-<form method="post" action="{% url 'logout' %}" class="sidebar-logout">{% csrf_token %}<button><i class="bi bi-box-arrow-left"></i> Sair</button></form></aside><div class="sidebar-backdrop" data-sidebar-toggle></div>
+<aside class="sidebar" id="sidebar">
+  <a class="brand brand-light" href="{% url 'home' %}"><span class="brand-mark"><i class="bi bi-flower1"></i></span><span>Horta<span>Viva</span></span></a>
+  {% if '/gestao/' in request.path %}
+    <nav class="backoffice-nav" aria-label="Navegação administrativa">
+      <a class="sidebar-dashboard" href="{% url 'ops-dashboard' %}" data-nav-path="{% url 'ops-dashboard' %}"><i class="bi bi-grid"></i> Dashboard</a>
+      <div class="area-selector-wrap">
+        <label for="backoffice-area-selector">Área atual</label>
+        <select id="backoffice-area-selector" class="area-selector" aria-label="Selecionar área administrativa">
+          {% for slug,config in backoffice_areas.items %}<option value="{% url 'ops-area' slug %}" {% if slug == backoffice_current_area %}selected{% endif %}>{{ config.label }}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="area-links" aria-label="Links da área {{ backoffice_area_config.label }}">
+        {% for label,section in backoffice_area_config.links %}
+          {% if section %}<a href="{% url 'ops-collection' section %}" data-section="{{ section }}" {% if section == backoffice_current_section %}class="active" aria-current="page"{% endif %}>{{ label }}</a>
+          {% else %}<a href="{% url 'ops-area' backoffice_current_area %}" data-area-overview {% if request.resolver_match.url_name == 'ops-area' %}class="active" aria-current="page"{% endif %}>{{ label }}</a>{% endif %}
+        {% endfor %}
+        {% if backoffice_current_area == 'administracao' and request.user.is_superuser %}<a href="{% url 'ops-dashboard' %}#dados-demonstrativos">Dados demonstrativos</a>{% endif %}
+      </div>
+    </nav>
+    <div class="sidebar-user"><span class="sidebar-avatar">{{ request.user.full_name|default:request.user.email|slice:':1' }}</span><div><strong>{{ request.user.full_name|default:request.user.email }}</strong><small>Administrador</small></div></div>
+  {% elif '/operacao/' in request.path %}<small>ÁREA DO TÉCNICO</small><nav><a href="{% url 'tech-dashboard' %}">Visão geral</a><a href="{% url 'tech-visits' %}">Visitas e agenda</a><a href="{% url 'customer-profile' %}">Perfil</a></nav>
+  {% else %}<small>MINHA HORTA</small><nav><a href="{% url 'customer-dashboard' %}">Visão geral</a><a href="{% url 'customer-section' 'garden' %}">Minha horta</a><a href="{% url 'customer-section' 'crops' %}">Minhas culturas</a><a href="{% url 'customer-history' %}">Histórico</a><a href="{% url 'customer-section' 'subscription' %}">Assinatura</a><a href="{% url 'customer-support' %}">Suporte</a><a href="{% url 'customer-profile' %}">Perfil</a></nav>{% endif %}
+  <form method="post" action="{% url 'logout' %}" class="sidebar-logout">{% csrf_token %}<button><i class="bi bi-box-arrow-left"></i> Sair</button></form>
+</aside><div class="sidebar-backdrop" data-sidebar-toggle></div>

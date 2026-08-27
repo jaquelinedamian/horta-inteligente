@@ -44,3 +44,17 @@ class BackofficeUXTests(TestCase):
         for email in ("cliente@hortaviva.local", "tecnico@hortaviva.local"):
             self.client.force_login(User.objects.get(email=email))
             self.assertEqual(self.client.get(reverse("ops-area", args=["estoque"])).status_code, 403)
+
+    def test_sidebar_detects_area_from_direct_resource_url(self):
+        cases = (("devices", "iot", "Dispositivos", "Planos"), ("plans", "comercial", "Planos", "Telemetria"), ("inventory", "estoque", "Itens", "Culturas"))
+        for section, area, visible, hidden in cases:
+            response = self.client.get(reverse("ops-collection", args=[section]))
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.context["backoffice_current_area"], area)
+            self.assertContains(response, visible)
+            self.assertNotContains(response, f'>{hidden}</a>')
+
+    def test_current_sidebar_item_is_accessible_and_active(self):
+        response = self.client.get(reverse("ops-collection", args=["devices"]))
+        self.assertContains(response, 'data-section="devices" class="active" aria-current="page"', html=False)
+        self.assertContains(response, 'id="backoffice-area-selector"')

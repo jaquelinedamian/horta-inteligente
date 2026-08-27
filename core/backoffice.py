@@ -87,6 +87,17 @@ RESOURCES = {
 
 ALIASES = {"clients": "organizations", "agenda": "visits", "finance": "payments"}
 
+BACKOFFICE_AREAS = {
+    "comercial": {"label": "Comercial", "description": "Clientes, planos, assinaturas e faturamento.", "links": (("Visão geral", None), ("Clientes", "clients"), ("Organizações", "organizations"), ("Planos", "plans"), ("Assinaturas", "subscriptions"), ("Cupons", "coupons"), ("Pagamentos", "payments"))},
+    "cultivo": {"label": "Cultivo", "description": "Catálogo agronômico, ciclos, colheitas e insumos.", "links": (("Visão geral", None), ("Culturas", "crops"), ("Variedades", "cultivars"), ("Perfis de cultivo", "cultivation-profiles"), ("Estágios", "crop-stages"), ("Ciclos e colheitas", "cycles"), ("Substratos", "substrates"), ("Receitas de substrato", "substrate-recipes"), ("Fertilizantes", "fertilizers"), ("Planos nutricionais", "nutrition-plans"))},
+    "hortas": {"label": "Hortas", "description": "Estrutura instalada, módulos e instalações.", "links": (("Visão geral", None), ("Hortas", "gardens"), ("Tipos de módulos", "module-types"), ("Módulos", "modules"), ("Instalações", "installations"), ("QR Codes", "qrcodes"))},
+    "iot": {"label": "IoT", "description": "Dispositivos, métricas, telemetria e automações.", "links": (("Visão geral", None), ("Modelos de dispositivos", "device-models"), ("Dispositivos", "devices"), ("Métricas", "metrics"), ("Canais", "channels"), ("Telemetria", "telemetry"), ("Calibrações", "calibrations"), ("Comandos", "commands"), ("Regras de alerta", "alert-rules"), ("Alertas", "alerts"), ("Iluminação", "lighting"))},
+    "operacao": {"label": "Operação", "description": "Agenda, ordens, manutenção e atendimento.", "links": (("Visão geral", None), ("Agenda e visitas", "visits"), ("Ordens de serviço", "orders"), ("Planos de manutenção", "maintenance"), ("Registros de manutenção", "maintenance-records"), ("Suporte", "tickets"))},
+    "estoque": {"label": "Estoque", "description": "Itens, categorias, fornecedores, lotes e movimentações.", "links": (("Visão geral", None), ("Itens", "inventory"), ("Categorias", "inventory-categories"), ("Fornecedores", "suppliers"), ("Lotes", "stock-lots"), ("Movimentações", "stock-movements"))},
+    "administracao": {"label": "Administração", "description": "Equipe e configurações operacionais.", "links": (("Visão geral", None), ("Funcionários", "employees"), ("Configurações", "settings"))},
+}
+SECTION_AREA = {section: area for area, config in BACKOFFICE_AREAS.items() for _, section in config["links"] if section}
+
 
 def get_resource(section):
     return RESOURCES.get(ALIASES.get(section, section))
