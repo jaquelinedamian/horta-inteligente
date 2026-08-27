@@ -1,6 +1,7 @@
 from django.conf import settings
 from django.contrib.auth.models import AbstractUser, BaseUserManager
 from django.db import models
+import uuid
 from django.db.models import Q
 
 from core.models import BaseModel
@@ -28,10 +29,13 @@ class UserManager(BaseUserManager):
 
 
 class User(AbstractUser):
+    public_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
     username = None
     email = models.EmailField(unique=True)
     full_name = models.CharField(max_length=180)
     phone = models.CharField(max_length=30, blank=True)
+    tax_id = models.CharField("CPF", max_length=14, blank=True)
+    birth_date = models.DateField("data de nascimento", null=True, blank=True)
 
     USERNAME_FIELD = "email"
     REQUIRED_FIELDS = []
@@ -50,6 +54,11 @@ class Organization(BaseModel):
     slug = models.SlugField(unique=True)
     kind = models.CharField(max_length=20, choices=Kind.choices, default=Kind.PERSON)
     tax_id = models.CharField(max_length=30, blank=True)
+    primary_contact = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name="primary_organizations")
+    phone = models.CharField(max_length=30, blank=True)
+    email = models.EmailField(blank=True)
+    billing_email = models.EmailField(blank=True)
+    internal_notes = models.TextField(blank=True)
     is_active = models.BooleanField(default=True)
 
     def __str__(self):
@@ -77,6 +86,11 @@ class Membership(BaseModel):
 
 
 class Address(BaseModel):
+    class PropertyType(models.TextChoices):
+        HOUSE = "house", "Casa"
+        APARTMENT = "apartment", "Apartamento"
+        COMMERCIAL = "commercial", "Comercial"
+
     organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name="addresses")
     label = models.CharField(max_length=80, blank=True)
     street = models.CharField(max_length=180)
@@ -86,6 +100,15 @@ class Address(BaseModel):
     city = models.CharField(max_length=100)
     state = models.CharField(max_length=2)
     postal_code = models.CharField(max_length=12)
+    country = models.CharField(max_length=2, default="BR")
+    address_type = models.CharField(max_length=40, default="installation")
+    access_instructions = models.TextField(blank=True)
+    property_type = models.CharField(max_length=20, choices=PropertyType.choices, blank=True)
+    floor = models.CharField(max_length=20, blank=True)
+    has_elevator = models.BooleanField(null=True, blank=True)
+    has_doorman = models.BooleanField(null=True, blank=True)
+    condominium_restrictions = models.TextField(blank=True)
+    access_notes = models.TextField(blank=True)
     latitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
     longitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
 

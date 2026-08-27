@@ -46,6 +46,20 @@ class Device(BaseModel):
         return self.name
 
 
+class TelemetryMetric(BaseModel):
+    code = models.SlugField(max_length=80, unique=True)
+    name = models.CharField(max_length=120)
+    description = models.TextField(blank=True)
+    default_unit = models.CharField(max_length=24, blank=True)
+    data_type = models.CharField(max_length=16, choices=(("decimal", "Decimal"), ("boolean", "Booleano"), ("integer", "Inteiro"), ("text", "Texto")), default="decimal")
+    minimum_expected = models.DecimalField(max_digits=18, decimal_places=6, null=True, blank=True)
+    maximum_expected = models.DecimalField(max_digits=18, decimal_places=6, null=True, blank=True)
+    is_active = models.BooleanField(default=True)
+
+    def __str__(self):
+        return f"{self.name} ({self.default_unit})" if self.default_unit else self.name
+
+
 class DeviceCredential(BaseModel):
     device = models.ForeignKey(Device, on_delete=models.CASCADE, related_name="credentials")
     name = models.CharField(max_length=80, default="principal")
@@ -84,6 +98,7 @@ class Channel(BaseModel):
     name = models.CharField(max_length=120)
     kind = models.CharField(max_length=16, choices=Kind.choices)
     metric = models.CharField(max_length=50)
+    metric_definition = models.ForeignKey(TelemetryMetric, on_delete=models.SET_NULL, null=True, blank=True, related_name="channels")
     unit = models.CharField(max_length=24, blank=True)
     value_type = models.CharField(max_length=16, choices=ValueType.choices, default=ValueType.DECIMAL)
     pin = models.CharField(max_length=20, blank=True)
@@ -107,6 +122,8 @@ class TelemetryReading(BaseModel):
     quality = models.CharField(max_length=30, default="good")
     idempotency_key = models.CharField(max_length=120)
     raw = models.JSONField(default=dict, blank=True)
+    source = models.CharField(max_length=20, choices=(("device", "Dispositivo"), ("simulator", "Simulador"), ("manual", "Manual/teste"), ("import", "Importação")), default="device")
+    notes = models.TextField(blank=True)
 
     class Meta:
         constraints = [models.UniqueConstraint(fields=["channel", "idempotency_key"], name="uniq_channel_ingestion")]
@@ -125,6 +142,21 @@ class DeviceHeartbeat(BaseModel):
 
     class Meta:
         indexes = [models.Index(fields=["device", "recorded_at"])]
+
+
+class SensorCalibration(BaseModel):
+    channel = models.ForeignKey(Channel, on_delete=models.PROTECT, related_name="calibrations")
+    calibrated_at = models.DateTimeField()
+    reference_value = models.DecimalField(max_digits=18, decimal_places=6)
+    measured_value = models.DecimalField(max_digits=18, decimal_places=6)
+    offset = models.DecimalField(max_digits=18, decimal_places=6, default=0)
+    scale_factor = models.DecimalField(max_digits=18, decimal_places=6, default=1)
+    responsible = models.ForeignKey("accounts.User", on_delete=models.PROTECT, related_name="sensor_calibrations")
+    next_calibration_at = models.DateTimeField(null=True, blank=True)
+    notes = models.TextField(blank=True)
+
+    def __str__(self):
+        return f"{self.channel} — {self.calibrated_at:%d/%m/%Y}"
 
 
 class DeviceCommand(BaseModel):

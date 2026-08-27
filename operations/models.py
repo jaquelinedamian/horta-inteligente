@@ -13,6 +13,23 @@ class MaintenancePlan(BaseModel):
     is_active = models.BooleanField(default=True)
     checklist = models.JSONField(default=list, blank=True)
 
+    def __str__(self):
+        return self.name
+
+
+class MaintenanceTask(BaseModel):
+    plan = models.ForeignKey(MaintenancePlan, on_delete=models.CASCADE, related_name="tasks")
+    name = models.CharField(max_length=140)
+    description = models.TextField(blank=True)
+    is_required = models.BooleanField(default=True)
+    position = models.PositiveSmallIntegerField(default=0)
+
+    class Meta:
+        ordering = ("plan", "position")
+
+    def __str__(self):
+        return f"{self.plan.name} — {self.name}"
+
 
 class WorkOrder(BaseModel):
     class Kind(models.TextChoices):
@@ -102,6 +119,10 @@ class Visit(BaseModel):
     scheduled_end = models.DateTimeField()
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.SCHEDULED)
     notes = models.TextField(blank=True)
+    actual_start = models.DateTimeField(null=True, blank=True)
+    actual_end = models.DateTimeField(null=True, blank=True)
+    reason = models.TextField(blank=True)
+    conclusion = models.TextField(blank=True)
 
     class Meta:
         indexes = [models.Index(fields=["technician", "scheduled_start", "status"])]
@@ -128,6 +149,44 @@ class SupportTicket(BaseModel):
     subject = models.CharField(max_length=180)
     description = models.TextField()
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.OPEN)
+    garden = models.ForeignKey(Garden, on_delete=models.SET_NULL, null=True, blank=True, related_name="support_tickets")
+    module = models.ForeignKey(GardenModule, on_delete=models.SET_NULL, null=True, blank=True, related_name="support_tickets")
+    device = models.ForeignKey("devices.Device", on_delete=models.SET_NULL, null=True, blank=True, related_name="support_tickets")
+    priority = models.PositiveSmallIntegerField(default=3)
+    assigned_to = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="assigned_support_tickets")
+    concluded_at = models.DateTimeField(null=True, blank=True)
+    generated_order = models.ForeignKey(WorkOrder, on_delete=models.SET_NULL, null=True, blank=True, related_name="support_tickets")
+
+    def __str__(self):
+        return self.subject
+
+
+class Supplier(BaseModel):
+    name = models.CharField(max_length=180)
+    tax_id = models.CharField("CNPJ", max_length=30, blank=True)
+    contact_name = models.CharField(max_length=120, blank=True)
+    phone = models.CharField(max_length=30, blank=True)
+    email = models.EmailField(blank=True)
+    website = models.URLField(blank=True)
+    address = models.TextField(blank=True)
+    product_types = models.JSONField(default=list, blank=True)
+    is_active = models.BooleanField(default=True)
+    notes = models.TextField(blank=True)
+
+    def __str__(self):
+        return self.name
+
+
+class InventoryCategory(BaseModel):
+    name = models.CharField(max_length=100, unique=True)
+    description = models.TextField(blank=True)
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        verbose_name_plural = "categorias de estoque"
+
+    def __str__(self):
+        return self.name
 
 
 class InventoryItem(BaseModel):
@@ -145,3 +204,83 @@ class InventoryItem(BaseModel):
     quantity = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     minimum_quantity = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     unit = models.CharField(max_length=20, default="un")
+    inventory_category = models.ForeignKey(InventoryCategory, on_delete=models.SET_NULL, null=True, blank=True, related_name="items")
+    description = models.TextField(blank=True)
+    brand = models.CharField(max_length=120, blank=True)
+    primary_supplier = models.ForeignKey(Supplier, on_delete=models.SET_NULL, null=True, blank=True, related_name="inventory_items")
+    reserved_quantity = models.DecimalField(max_digits=12, decimal_places=3, default=0)
+    reorder_point = models.DecimalField(max_digits=12, decimal_places=3, default=0)
+    average_cost_cents = models.PositiveIntegerField(default=0)
+    reference_price_cents = models.PositiveIntegerField(null=True, blank=True)
+    tracks_lots = models.BooleanField(default=False)
+    tracks_expiration = models.BooleanField(default=False)
+    is_active = models.BooleanField(default=True)
+    physical_location = models.CharField(max_length=120, blank=True)
+
+    @property
+    def available_quantity(self):
+        return self.quantity - self.reserved_quantity
+
+    def __str__(self):
+        return f"{self.sku} — {self.name}"
+
+
+class StockLot(BaseModel):
+    item = models.ForeignKey(InventoryItem, on_delete=models.PROTECT, related_name="lots")
+    code = models.CharField(max_length=80)
+    supplier = models.ForeignKey(Supplier, on_delete=models.SET_NULL, null=True, blank=True, related_name="stock_lots")
+    received_at = models.DateTimeField()
+    manufactured_at = models.DateField(null=True, blank=True)
+    expires_at = models.DateField(null=True, blank=True)
+    received_quantity = models.DecimalField(max_digits=12, decimal_places=3)
+    available_quantity = models.DecimalField(max_digits=12, decimal_places=3)
+    unit_cost_cents = models.PositiveIntegerField(default=0)
+    notes = models.TextField(blank=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["item", "code"], name="uniq_item_stock_lot")]
+
+    def __str__(self):
+        return f"{self.item.name} — lote {self.code}"
+
+
+class StockMovement(BaseModel):
+    class Kind(models.TextChoices):
+        ENTRY = "entry", "Entrada"
+        EXIT = "exit", "Saída"
+        VISIT_USAGE = "visit_usage", "Consumo em visita"
+        RESERVE = "reserve", "Reserva"
+        RELEASE = "release", "Liberação de reserva"
+        ADJUSTMENT = "adjustment", "Ajuste"
+        LOSS = "loss", "Perda"
+        EXPIRATION = "expiration", "Vencimento"
+        TRANSFER = "transfer", "Transferência"
+
+    item = models.ForeignKey(InventoryItem, on_delete=models.PROTECT, related_name="movements")
+    lot = models.ForeignKey(StockLot, on_delete=models.PROTECT, null=True, blank=True, related_name="movements")
+    kind = models.CharField(max_length=20, choices=Kind.choices)
+    quantity = models.DecimalField(max_digits=12, decimal_places=3)
+    unit = models.CharField(max_length=20)
+    occurred_at = models.DateTimeField()
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="stock_movements")
+    supplier = models.ForeignKey(Supplier, on_delete=models.SET_NULL, null=True, blank=True, related_name="stock_movements")
+    visit = models.ForeignKey(Visit, on_delete=models.SET_NULL, null=True, blank=True, related_name="stock_movements")
+    work_order = models.ForeignKey(WorkOrder, on_delete=models.SET_NULL, null=True, blank=True, related_name="stock_movements")
+    garden = models.ForeignKey(Garden, on_delete=models.SET_NULL, null=True, blank=True, related_name="stock_movements")
+    cycle = models.ForeignKey("crops.PlantingCycle", on_delete=models.SET_NULL, null=True, blank=True, related_name="stock_movements")
+    notes = models.TextField(blank=True)
+
+    def __str__(self):
+        return f"{self.get_kind_display()} — {self.item.name} ({self.quantity} {self.unit})"
+
+
+class VisitMaterialUsage(BaseModel):
+    visit = models.ForeignKey(Visit, on_delete=models.CASCADE, related_name="materials_used")
+    item = models.ForeignKey(InventoryItem, on_delete=models.PROTECT, related_name="visit_usages")
+    lot = models.ForeignKey(StockLot, on_delete=models.PROTECT, null=True, blank=True, related_name="visit_usages")
+    quantity = models.DecimalField(max_digits=12, decimal_places=3)
+    unit = models.CharField(max_length=20)
+    reason = models.CharField(max_length=180, blank=True)
+
+    def __str__(self):
+        return f"{self.item.name} — {self.quantity} {self.unit}"

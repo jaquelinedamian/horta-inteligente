@@ -7,10 +7,10 @@ from django.utils import timezone
 
 from accounts.models import Membership, Organization, User
 from crops.models import Crop, CropRequirement, Cultivar, PlantingCycle
-from devices.models import Alert, AlertRule, Channel, Device, DeviceCommand, DeviceCredential, DeviceModel, LightingSchedule, TelemetryReading
+from devices.models import Alert, AlertRule, Channel, Device, DeviceCommand, DeviceCredential, DeviceModel, LightingSchedule, TelemetryMetric, TelemetryReading
 from gardens.models import Garden, GardenModule, ModuleInstallation, ModuleType
-from operations.models import Assignment, InventoryItem, MaintenancePlan, SupportTicket, Visit, WorkOrder, WorkTask
-from subscriptions.models import Payment, Plan, PlanFeature, PlanVersion, Subscription
+from operations.models import Assignment, InventoryCategory, InventoryItem, MaintenancePlan, Supplier, SupportTicket, Visit, WorkOrder, WorkTask
+from subscriptions.models import Payment, Plan, PlanEntitlement, PlanFeature, PlanVersion, Subscription
 
 
 class Command(BaseCommand):
@@ -35,6 +35,8 @@ class Command(BaseCommand):
         features = {"modules": module_limit, "maintenance_interval_days": maintenance_days, "remote_monitoring": None, "periodic_visits": None}
         for key, limit in features.items():
             PlanFeature.objects.update_or_create(plan_version=version, key=key, defaults={"limit": limit, "enabled": True})
+            label, unit = {"modules": ("Módulos simultâneos", "módulos"), "maintenance_interval_days": ("Manutenção preventiva", "dias"), "remote_monitoring": ("Monitoramento remoto", ""), "periodic_visits": ("Visitas periódicas", "visitas")}[key]
+            PlanEntitlement.objects.update_or_create(plan_version=version, benefit_type=key, defaults={"name": label, "quantity": limit, "unit": unit, "unlimited": limit is None, "is_featured": True})
         return version
 
     def active_subscription(self, organization, plan_version, now):
@@ -61,7 +63,8 @@ class Command(BaseCommand):
         ]
         channels = {}
         for key, name, kind, metric, unit, value_type, pin, configuration in specs:
-            channels[key], _ = Channel.objects.update_or_create(device=device, key=key, defaults={"name": name, "kind": kind, "metric": metric, "unit": unit, "value_type": value_type, "pin": pin, "configuration": configuration, "is_enabled": True})
+            metric_definition, _ = TelemetryMetric.objects.update_or_create(code=metric, defaults={"name": name, "default_unit": unit, "data_type": value_type, "is_active": True})
+            channels[key], _ = Channel.objects.update_or_create(device=device, key=key, defaults={"name": name, "kind": kind, "metric": metric, "metric_definition": metric_definition, "unit": unit, "value_type": value_type, "pin": pin, "configuration": configuration, "is_enabled": True})
         return channels
 
     def handle(self, *args, **options):
@@ -153,8 +156,10 @@ class Command(BaseCommand):
         SupportTicket.objects.update_or_create(organization=organization, opened_by=marina, subject="Dúvida sobre iluminação", defaults={"category": "Iluminação", "description": "Como funciona o modo automático da grow light?", "status": SupportTicket.Status.RESOLVED})
         SupportTicket.objects.update_or_create(organization=organization, opened_by=marina, subject="Acompanhar próxima visita", defaults={"category": "Solicitar visita", "description": "Gostaria de confirmar a próxima manutenção.", "status": SupportTicket.Status.OPEN})
 
-        for sku, name, category, quantity in (("PUMP-5V", "Bomba compacta 5V", "pump", 8), ("BME280", "Sensor BME280", "sensor", 12), ("SUB-5L", "Substrato orgânico 5L", "substrate", 20)):
-            InventoryItem.objects.update_or_create(sku=sku, defaults={"name": name, "category": category, "quantity": quantity, "minimum_quantity": 5})
+        supplier, _ = Supplier.objects.update_or_create(name="Fornecedor Verde Demo", defaults={"email": "fornecedor@demo.local", "is_active": True})
+        for sku, name, category, category_name, quantity in (("PUMP-5V", "Bomba compacta 5V", "pump", "Bombas", 8), ("BME280", "Sensor BME280", "sensor", "Sensores", 12), ("SUB-5L", "Substrato orgânico 5L", "substrate", "Substratos", 20)):
+            inventory_category, _ = InventoryCategory.objects.get_or_create(name=category_name)
+            InventoryItem.objects.update_or_create(sku=sku, defaults={"name": name, "category": category, "inventory_category": inventory_category, "primary_supplier": supplier, "quantity": quantity, "minimum_quantity": 5})
         for index in range(1, 5):
             extra_org, _ = Organization.objects.update_or_create(slug=f"cliente-demo-{index}", defaults={"name": f"Cliente Demonstração {index}", "is_active": True})
             self.active_subscription(extra_org, family if index % 2 else complete, now)

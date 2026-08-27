@@ -1,5 +1,7 @@
 from django.contrib import admin
-from .models import Alert, AlertRule, Channel, Device, DeviceCommand, DeviceCredential, DeviceHeartbeat, DeviceModel, LightingSchedule, TelemetryReading
+from .models import (Alert, AlertRule, Channel, Device, DeviceCommand, DeviceCredential,
+                     DeviceHeartbeat, DeviceModel, LightingSchedule, SensorCalibration,
+                     TelemetryMetric, TelemetryReading)
 
 @admin.register(Device)
 class DeviceAdmin(admin.ModelAdmin):
@@ -34,4 +36,5 @@ class AlertAdmin(admin.ModelAdmin):
     list_filter = ("status", "rule__severity")
     search_fields = ("rule__name", "message", "rule__organization__name")
 
-admin.site.register([DeviceModel, DeviceHeartbeat, DeviceCommand, AlertRule, LightingSchedule])
+admin.site.register([DeviceModel, DeviceHeartbeat, DeviceCommand, AlertRule, LightingSchedule,
+                     TelemetryMetric, SensorCalibration])

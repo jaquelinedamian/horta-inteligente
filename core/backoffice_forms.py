@@ -23,6 +23,9 @@ class OperationalModelForm(forms.ModelForm):
         super().__init__(*args, **kwargs)
         for name, field in self.fields.items():
             field.label = LABELS.get(name, field.label)
+            model_field = self._meta.model._meta.get_field(name)
+            if model_field.has_default():
+                field.required = False
             field.widget.attrs.setdefault("class", "form-check-input" if isinstance(field.widget, forms.CheckboxInput) else "form-control")
             if isinstance(field.widget, forms.DateTimeInput):
                 field.widget.input_type = "datetime-local"
