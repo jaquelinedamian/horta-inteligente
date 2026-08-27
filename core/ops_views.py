@@ -21,6 +21,8 @@ from subscriptions.models import Payment, Plan, Subscription
 
 from .backoffice import get_resource
 from .backoffice_forms import ClientOnboardingForm, resource_form_class
+from .guided_flows import PRIMARY_ACTIONS, get_flow
+from .workflow_services import create_customer, run_guided_workflow
 from .permissions import operations_required
 
 
@@ -56,6 +58,22 @@ def _form_context(form, section, title, obj=None):
         spec = (("Identificação", "sku name inventory_category description"), ("Fornecimento", "primary_supplier brand"), ("Controle", "unit tracks_lots tracks_expiration"), ("Estoque", "minimum_quantity reorder_point physical_location"), ("Financeiro", "average_cost_cents reference_price_cents"), ("Status", "is_active"))
         groups = [(label, [form[name] for name in names.split() if name in form.fields]) for label, names in spec]
     return {"title": title, "form": form, "section": section, "object": obj, "related_actions": actions, "field_groups": groups, "area": SECTION_AREA.get(section)}
+
+
+def _guided_context(form, section, resource):
+    flow = get_flow(section)
+    used = set()
+    wizard_steps = []
+    for flow_step in flow.steps:
+        fields = [form[name] for name in flow_step.fields if name in form.fields]
+        used.update(field.name for field in fields)
+        wizard_steps.append({"step": flow_step, "fields": fields})
+    remaining = [field for field in form if field.name not in used]
+    if remaining:
+        from .guided_flows import FlowStep
+        wizard_steps.append({"step": FlowStep("Detalhes finais", "Complete as informações restantes.", "Esses dados concluem o cadastro operacional.", tuple(field.name for field in remaining)), "fields": remaining})
+    base = _form_context(form, section, flow.title)
+    return {**base, "flow": flow, "wizard_steps": wizard_steps, "resource": resource}
 
 
 def _display_fields(obj):
@@ -97,7 +115,7 @@ def dashboard(request):
     ]
     visits = Visit.objects.filter(scheduled_start__date=today).select_related("organization", "technician")[:8]
     alerts = Alert.objects.filter(status=Alert.Status.OPEN).select_related("rule", "rule__channel__device").order_by("-rule__severity")[:8]
-    return render(request, "admin_portal/dashboard.html", {"cards": cards, "visits": visits, "alerts": alerts, "demo_seed_enabled": settings.ENABLE_DEMO_SEED})
+    return render(request, "admin_portal/dashboard.html", {"cards": cards, "visits": visits, "alerts": alerts, "primary_actions": PRIMARY_ACTIONS, "demo_seed_enabled": settings.ENABLE_DEMO_SEED})
 
 
 @operations_required
@@ -152,9 +170,12 @@ def create(request, section):
         raise Http404
     form = resource_form_class(resource)(request.POST or None)
     if request.method == "POST" and form.is_valid():
-        obj = form.save()
+        obj = run_guided_workflow(section, form)
         messages.success(request, "Registro criado com sucesso.")
         return redirect("ops-detail", section=section, pk=obj.pk)
+    flow = get_flow(section)
+    if flow:
+        return render(request, "admin_portal/guided_form.html", _guided_context(form, section, resource))
     return render(request, "admin_portal/form.html", _form_context(form, section, f"Novo — {resource.title}"))
 
 
@@ -176,10 +197,11 @@ def edit(request, section, pk):
 def client_create(request):
     form = ClientOnboardingForm(request.POST or None)
     if request.method == "POST" and form.is_valid():
-        user = form.save()
+        user = create_customer(form)
         messages.success(request, "Cliente, organização e vínculos criados com sucesso.")
         return redirect("ops-client-detail", user_id=user.pk)
-    return render(request, "admin_portal/form.html", {"title": "Novo cliente", "form": form, "section": "clients"})
+    resource = get_resource("clients")
+    return render(request, "admin_portal/guided_form.html", _guided_context(form, "clients", resource))
 
 
 @operations_required

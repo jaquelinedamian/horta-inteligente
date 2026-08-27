@@ -1,0 +1,20 @@
+{% extends 'base.html' %}{% block area_name %}Gestão administrativa{% endblock %}{% block content %}
+<nav aria-label="breadcrumb"><ol class="breadcrumb"><li class="breadcrumb-item"><a href="{% url 'ops-dashboard' %}">Gestão</a></li><li class="breadcrumb-item"><a href="{% url 'ops-collection' section %}">{{ resource.title }}</a></li><li class="breadcrumb-item active">Novo</li></ol></nav>
+<div class="page-header"><div><span class="eyebrow">Fluxo guiado</span><h1>{{ flow.title }}</h1><p class="text-muted">{{ flow.intro }}</p></div><a class="btn btn-light" href="{% url 'ops-collection' section %}">Cancelar</a></div>
+<div class="wizard-shell" data-guided-wizard data-storage-key="hortaviva:flow:{{ section }}">
+  {% include 'components/stepper.html' %}
+  <form method="post" class="admin-form wizard-form" novalidate>{% csrf_token %}
+    {% if form.non_field_errors %}<div class="alert alert-danger">{{ form.non_field_errors }}</div>{% endif %}
+    <div class="row g-4"><div class="col-xl-8">
+      {% for item in wizard_steps %}<section class="content-card wizard-panel{% if not forloop.first %} d-none{% endif %}" data-wizard-panel="{{ forloop.counter0 }}">
+        <div class="wizard-panel-heading"><span>Etapa {{ forloop.counter }} de {{ wizard_steps|length }}</span><h2>{{ item.step.title }}</h2><p>{{ item.step.description }}</p></div>
+        <div class="wizard-why"><i class="bi bi-lightbulb"></i><div><strong>Por que precisamos disso?</strong><p>{{ item.step.why }}</p></div></div>
+        <div class="row g-3">{% for field in item.fields %}<div class="{% if field.name == 'description' or field.name == 'notes' or field.name == 'metadata' or field.name == 'included_items' %}col-12{% else %}col-md-6{% endif %}" data-field-name="{{ field.name }}">
+          <div class="d-flex justify-content-between align-items-center"><label class="form-label" for="{{ field.id_for_label }}">{{ field.label }}</label>{% for name,action in related_actions.items %}{% if name == field.name %}<a class="small fw-semibold" target="_blank" rel="noopener" href="{% url 'ops-create' action.section %}"><i class="bi bi-plus-lg"></i> {{ action.label }}</a>{% endif %}{% endfor %}</div>{{ field }}{% if field.help_text %}<div class="form-text">{{ field.help_text }}</div>{% endif %}{% for error in field.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+        </div>{% endfor %}</div>
+        {% if forloop.last %}<div class="wizard-review mt-4"><i class="bi bi-check2-circle"></i><div><strong>Pronto para revisar</strong><p>Confirme os dados acima. O sistema cuidará dos registros técnicos relacionados.</p></div></div>{% endif %}
+      </section>{% endfor %}
+    </div><aside class="col-xl-4"><div class="content-card wizard-summary"><span class="eyebrow">Resumo</span><h3>{{ flow.title }}</h3><div data-wizard-summary><p class="text-muted">Seu resumo será atualizado enquanto você preenche.</p></div><small><i class="bi bi-shield-check"></i> Nada será publicado antes da confirmação.</small></div></aside></div>
+    <div class="wizard-actions"><button type="button" class="btn btn-light d-none" data-wizard-back><i class="bi bi-arrow-left"></i> Voltar</button><button type="button" class="btn btn-outline-secondary" data-wizard-draft>Salvar rascunho</button><button type="button" class="btn btn-brand ms-auto" data-wizard-next>Continuar <i class="bi bi-arrow-right"></i></button><button class="btn btn-brand ms-auto d-none" data-wizard-submit>Concluir cadastro</button></div>
+  </form>
+</div>{% endblock %}

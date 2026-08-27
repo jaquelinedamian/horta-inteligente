@@ -1,0 +1,10 @@
+<nav class="wizard-stepper" aria-label="Progresso do cadastro" data-wizard-stepper>
+  <ol>
+    {% for step in flow.steps %}
+      <li class="{% if forloop.first %}is-current{% endif %}" data-step-indicator="{{ forloop.counter0 }}">
+        <span class="wizard-step-number"><span class="step-number">{{ forloop.counter }}</span><i class="bi bi-check-lg"></i></span>
+        <span><strong>{{ step.title }}</strong><small>{{ step.description }}</small></span>
+      </li>
+    {% endfor %}
+  </ol>
+</nav>
