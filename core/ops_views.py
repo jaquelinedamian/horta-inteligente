@@ -4,6 +4,7 @@ from io import BytesIO
 
 from django.conf import settings
 from django import forms
+from django.core.exceptions import ValidationError
 from django.contrib import messages
 from django.core.management import call_command
 from django.core.paginator import Paginator
@@ -17,13 +18,14 @@ from django.views.decorators.http import require_POST
 from accounts.models import Membership, Organization, User
 from crops.models import Crop, PlantingCycle
 from devices.models import Alert, Device, DeviceCredential
-from gardens.models import Garden, GardenModule
+from gardens.models import Garden, GardenModule, ModuleInstallation
+from gardens.selectors import get_active_installations
 from operations.models import SupportTicket, Visit, WorkOrder
 from subscriptions.models import Payment, Plan, Subscription
 
 from .backoffice import get_resource
 from .backoffice_forms import ClientOnboardingForm, CustomerModuleForm, CustomerModuleInstallationForm, resource_form_class
-from gardens.services import create_customer_module, install_module
+from gardens.services import install_module
 from .guided_flows import PRIMARY_ACTIONS, get_flow
 from .workflow_services import create_customer, run_guided_workflow
 from .permissions import operations_required
@@ -253,11 +255,15 @@ def client_detail(request, user_id):
     next_visit = visits.filter(scheduled_start__gte=timezone.now(), status=Visit.Status.SCHEDULED).order_by("scheduled_start").first()
     last_payment = payments.filter(status=Payment.Status.PAID).order_by("-paid_at").first()
     address = organization.addresses.first()
-    checklist = (("Dados pessoais", bool(user.full_name and user.email)), ("Endereço", bool(address)), ("Assinatura", bool(active_subscription)), ("Horta", gardens.exists()), ("Módulos instalados", modules.filter(status=GardenModule.Status.INSTALLED).exists()), ("Dispositivo conectado", devices.exists()))
+    active_installations = get_active_installations(organization)
+    incomplete_modules = modules.filter(status=GardenModule.Status.INSTALLED).exclude(pk__in=active_installations.values("module_id"))
+    checklist = (("Dados pessoais", bool(user.full_name and user.email)), ("Endereço", bool(address)), ("Assinatura", bool(active_subscription)), ("Horta", gardens.exists()), ("Módulos instalados", active_installations.exists()), ("Dispositivo conectado", devices.exists()))
     if not active_subscription:
         recommended = ("Criar assinatura", "subscriptions")
     elif not gardens.exists():
         recommended = ("Criar horta e planejar a instalação", "gardens")
+    elif incomplete_modules.exists():
+        recommended = ("Corrigir instalação dos módulos", "modules")
     elif not modules.exists():
         recommended = ("Adicionar módulos", "modules")
     elif not cycles.filter(status=PlantingCycle.Status.ACTIVE).exists():
@@ -307,10 +313,7 @@ def client_related_create(request, user_id, section):
         if name in form.fields:
             form.fields[name].queryset = queryset
     if request.method == "POST" and form.is_valid():
-        if section == "modules":
-            create_customer_module(form, organization)
-        else:
-            run_guided_workflow(section, form)
+        run_guided_workflow(section, form)
         messages.success(request, f"Cadastro criado com sucesso para {user.full_name}.")
         return redirect(f"{reverse('ops-client-detail', args=[user.pk])}?aba={section}")
     context = _guided_context(form, section, resource) if get_flow(section) else _form_context(form, section, CLIENT_SECTIONS[section])
@@ -327,9 +330,13 @@ def client_module_install(request, user_id, module_id):
     module = get_object_or_404(GardenModule, pk=module_id, organization=organization)
     form = CustomerModuleInstallationForm(request.POST or None, organization=organization)
     if request.method == "POST" and form.is_valid():
-        install_module(module, form.cleaned_data["garden"], form.cleaned_data["installed_at"], form.cleaned_data["position_label"])
-        messages.success(request, "Módulo instalado com sucesso. Próxima etapa recomendada: iniciar cultivo ou adicionar dispositivo.")
-        return redirect(f"{reverse('ops-client-detail', args=[user.pk])}?aba=modules")
+        try:
+            install_module(module, form.cleaned_data["garden"], form.cleaned_data["installed_at"], form.cleaned_data["position_label"])
+        except ValidationError as error:
+            form.add_error(None, error)
+        else:
+            messages.success(request, "Módulo instalado com sucesso. Próxima etapa recomendada: iniciar cultivo ou adicionar dispositivo.")
+            return redirect(f"{reverse('ops-client-detail', args=[user.pk])}?aba=modules")
     return render(request, "admin_portal/form.html", _form_context(form, "modules", f"Instalar {module.name}", module))
 
 

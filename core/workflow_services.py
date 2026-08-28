@@ -6,6 +6,7 @@ second set of "wizard" models.
 """
 
 from django.db import transaction
+from gardens.services import create_physical_module as create_physical_module_service
 
 
 @transaction.atomic
@@ -32,7 +33,9 @@ def create_garden_installation(form):
 
 
 def create_physical_module(form):
-    return _save_validated_form(form)
+    if not form.is_valid():
+        raise ValueError("The workflow service requires a validated form.")
+    return create_physical_module_service(form)
 
 
 def create_employee(form):

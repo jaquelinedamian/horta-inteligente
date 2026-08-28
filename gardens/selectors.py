@@ -2,7 +2,19 @@ from django.db.models import Prefetch
 from devices.models import Device
 from crops.models import PlantingCycle
 
-from .models import Garden, GardenModule
+from .models import Garden, GardenModule, ModuleInstallation
+
+
+def get_active_module_installation(module):
+    return module.installations.filter(removed_at__isnull=True).select_related("garden").first()
+
+
+def get_installed_modules(garden):
+    return GardenModule.objects.filter(installations__garden=garden, installations__removed_at__isnull=True).select_related("module_type").distinct()
+
+
+def get_active_installations(organization):
+    return ModuleInstallation.objects.filter(module__organization=organization, garden__organization=organization, removed_at__isnull=True)
 
 
 def get_customer_gardens(organization):

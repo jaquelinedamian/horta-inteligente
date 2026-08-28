@@ -7,7 +7,7 @@ from django.urls import reverse
 from accounts.models import Membership, Organization, User
 from crops.models import Crop, Cultivar, PlantingCycle
 from gardens.models import Garden, GardenModule, ModuleInstallation, ModuleType
-from gardens.services import install_module
+from gardens.services import install_module, move_module
 from django.core.exceptions import ValidationError
 from django.utils import timezone
 from subscriptions.models import Payment, Subscription
@@ -76,7 +76,7 @@ class ClientCenterTests(TestCase):
         self.client.force_login(self.customer)
         response = self.client.get(reverse("customer-section", args=["garden"]))
         self.assertContains(response, module.name)
-        self.assertContains(response, "Ainda não iniciado")
+        self.assertContains(response, "Sem cultivo")
 
     def test_stock_module_is_admin_only_not_installed_for_customer(self):
         organization, garden = self._customer_org_garden()
@@ -89,10 +89,13 @@ class ClientCenterTests(TestCase):
 
     def test_installed_without_installation_is_flagged(self):
         organization, garden = self._customer_org_garden()
+        ModuleInstallation.objects.filter(module__organization=organization, removed_at__isnull=True).update(removed_at=timezone.now())
         module = GardenModule.objects.create(organization=organization, module_type=ModuleType.objects.first(), serial_number="BROKEN-INST-1", name="Módulo inconsistente", status=GardenModule.Status.INSTALLED)
         response = self.client.get(f"{reverse('ops-client-detail', args=[self.customer.pk])}?aba=modules")
         self.assertContains(response, "Instalação incompleta")
         self.assertContains(response, "Nenhuma horta vinculada")
+        self.assertEqual(response.context["recommended"][0], "Corrigir instalação dos módulos")
+        self.assertIn(("Módulos instalados", False), response.context["checklist"])
 
     def test_cross_organization_install_is_blocked(self):
         organization, garden = self._customer_org_garden()
@@ -113,3 +116,16 @@ class ClientCenterTests(TestCase):
         response = self.client.get(reverse("customer-section", args=["garden"]))
         self.assertContains(response, module.name)
         self.assertContains(response, cultivar.crop.common_name)
+
+    def test_install_does_not_silently_replace_active_installation(self):
+        organization, garden = self._customer_org_garden()
+        other_garden = Garden.objects.create(organization=organization, name="Segunda horta", code="segunda")
+        module = GardenModule.objects.create(organization=organization, module_type=ModuleType.objects.first(), serial_number="MOVE-MOD-1", name="Módulo móvel")
+        first = install_module(module, garden)
+        with self.assertRaises(ValidationError):
+            install_module(module, other_garden)
+        second = move_module(module, other_garden)
+        first.refresh_from_db()
+        self.assertIsNotNone(first.removed_at)
+        self.assertIsNone(second.removed_at)
+        self.assertEqual(second.garden, other_garden)
