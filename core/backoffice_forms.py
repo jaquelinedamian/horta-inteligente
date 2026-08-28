@@ -11,6 +11,7 @@ from subscriptions.models import Plan, PlanEntitlement, PlanVersion, Subscriptio
 from subscriptions.selectors import get_available_plan_versions
 from crops.models import Crop, PlantingCycle
 from crops.selectors import get_available_cultivars
+from gardens.models import Garden, GardenModule, ModuleInstallation
 
 
 LABELS = {
@@ -92,6 +93,14 @@ class OperationalModelForm(forms.ModelForm):
         expected_organization_id = getattr(self, "customer_organization_id", None)
         if not organization and subscription and expected_organization_id and subscription.organization_id != expected_organization_id:
             self.add_error("subscription", "A assinatura pertence a outro cliente.")
+        if self._meta.model is GardenModule and cleaned.get("status") == GardenModule.Status.INSTALLED:
+            has_installation = bool(self.instance.pk and self.instance.installations.filter(removed_at__isnull=True).exists())
+            if not has_installation:
+                self.add_error("status", "Um módulo instalado precisa estar vinculado a uma horta. Use o fluxo de instalação do cliente.")
+        if self._meta.model is ModuleInstallation:
+            module, garden = cleaned.get("module"), cleaned.get("garden")
+            if module and garden and module.organization_id != garden.organization_id:
+                self.add_error("garden", "A horta pertence a outro cliente.")
         channel = cleaned.get("channel")
         if organization and channel and channel.device.organization_id != organization.id:
             self.add_error("channel", "O canal pertence a outra organização.")
@@ -99,6 +108,43 @@ class OperationalModelForm(forms.ModelForm):
         if actuator and actuator.kind != Channel.Kind.ACTUATOR:
             self.add_error("actuator", "Selecione um canal do tipo atuador.")
         return cleaned
+
+
+class CustomerModuleForm(OperationalModelForm):
+    placement = forms.ChoiceField(label="Onde este módulo ficará agora?", choices=(("stock", "Em estoque / ainda não instalado"), ("install", "Instalar em uma horta deste cliente")), widget=forms.RadioSelect)
+    garden = forms.ModelChoiceField(label="Horta", queryset=Garden.objects.none(), required=False)
+    installation_position = forms.CharField(label="Posição na horta", max_length=100, required=False)
+    installation_date = forms.DateTimeField(label="Data da instalação", required=False, widget=forms.DateTimeInput(attrs={"type": "datetime-local"}))
+
+    class Meta:
+        model = GardenModule
+        fields = ("module_type", "serial_number", "name", "qr_identifier", "position_label", "pot_volume_liters", "substrate_capacity_liters", "notes")
+
+    def __init__(self, *args, organization, **kwargs):
+        self.organization = organization
+        super().__init__(*args, **kwargs)
+        self.fields["garden"].queryset = Garden.objects.filter(organization=organization, is_active=True).order_by("name")
+        self.fields["installation_date"].initial = timezone.now()
+
+    def clean(self):
+        cleaned = super().clean()
+        garden = cleaned.get("garden")
+        if cleaned.get("placement") == "install" and not garden:
+            self.add_error("garden", "Um módulo instalado precisa estar vinculado a uma horta.")
+        if garden and garden.organization_id != self.organization.id:
+            self.add_error("garden", "Selecione uma horta deste cliente.")
+        return cleaned
+
+
+class CustomerModuleInstallationForm(forms.Form):
+    garden = forms.ModelChoiceField(label="Instalar na horta", queryset=Garden.objects.none())
+    position_label = forms.CharField(label="Posição na horta", max_length=100, required=False)
+    installed_at = forms.DateTimeField(label="Data da instalação", widget=forms.DateTimeInput(attrs={"type": "datetime-local"}))
+
+    def __init__(self, *args, organization, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["garden"].queryset = Garden.objects.filter(organization=organization, is_active=True).order_by("name")
+        self.fields["installed_at"].initial = timezone.now()
 
 
 class AvailabilityChoiceField(forms.TypedChoiceField):

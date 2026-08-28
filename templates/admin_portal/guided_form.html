@@ -1,6 +1,7 @@
 {% extends 'base.html' %}{% block area_name %}Gestão administrativa{% endblock %}{% block content %}
 <nav aria-label="breadcrumb"><ol class="breadcrumb"><li class="breadcrumb-item"><a href="{% url 'ops-dashboard' %}">Gestão</a></li><li class="breadcrumb-item"><a href="{% url 'ops-collection' section %}">{{ resource.title }}</a></li><li class="breadcrumb-item active">Novo</li></ol></nav>
 <div class="page-header"><div><span class="eyebrow">Fluxo guiado</span><h1>{{ flow.title }}</h1><p class="text-muted">{{ flow.intro }}</p></div><a class="btn btn-light" href="{% url 'ops-collection' section %}">Cancelar</a></div>
+{% if client_context and section == 'modules' and not has_customer_gardens %}<div class="alert alert-warning"><strong>Este cliente ainda não possui uma horta ativa.</strong> Crie o módulo em estoque ou <a href="{% url 'ops-client-related-create' client_context.pk 'gardens' %}" class="alert-link">crie uma horta agora</a> antes de instalá-lo.</div>{% endif %}
 <div class="wizard-shell" data-guided-wizard data-storage-key="hortaviva:flow:{{ section }}">
   {% include 'components/stepper.html' %}
   <form method="post" class="admin-form wizard-form" novalidate>{% csrf_token %}

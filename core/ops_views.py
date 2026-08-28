@@ -22,7 +22,8 @@ from operations.models import SupportTicket, Visit, WorkOrder
 from subscriptions.models import Payment, Plan, Subscription
 
 from .backoffice import get_resource
-from .backoffice_forms import ClientOnboardingForm, resource_form_class
+from .backoffice_forms import ClientOnboardingForm, CustomerModuleForm, CustomerModuleInstallationForm, resource_form_class
+from gardens.services import create_customer_module, install_module
 from .guided_flows import PRIMARY_ACTIONS, get_flow
 from .workflow_services import create_customer, run_guided_workflow
 from .permissions import operations_required
@@ -238,6 +239,10 @@ def client_detail(request, user_id):
     subscriptions = organization.subscriptions.select_related("plan_version__plan", "coupon").order_by("-created_at")
     gardens = organization.gardens.select_related("address", "subscription").order_by("name")
     modules = organization.garden_modules.select_related("module_type").prefetch_related("installations__garden", "planting_cycles__crop", "planting_cycles__cultivar").order_by("name")
+    for module in modules:
+        module.active_installation = next((item for item in module.installations.all() if item.removed_at is None), None)
+        module.current_cycle = next((cycle for cycle in module.planting_cycles.all() if cycle.status == PlantingCycle.Status.ACTIVE), None)
+        module.installation_incomplete = module.status == GardenModule.Status.INSTALLED and module.active_installation is None
     cycles = organization.planting_cycles.select_related("crop", "cultivar", "garden", "module", "current_stage").order_by("-created_at")
     devices = organization.devices.select_related("model", "module").order_by("name")
     visits = organization.visits.select_related("garden", "technician").order_by("-scheduled_start")
@@ -289,7 +294,7 @@ def client_related_create(request, user_id, section):
     data = request.POST.copy() if request.method == "POST" else None
     if data is not None and "organization" in resource.fields:
         data["organization"] = str(organization.pk)
-    form = resource_form_class(resource)(data)
+    form = CustomerModuleForm(data, organization=organization) if section == "modules" else resource_form_class(resource)(data)
     form.customer_organization_id = organization.pk
     if "organization" in form.fields:
         form.fields["organization"].initial = organization
@@ -302,12 +307,30 @@ def client_related_create(request, user_id, section):
         if name in form.fields:
             form.fields[name].queryset = queryset
     if request.method == "POST" and form.is_valid():
-        run_guided_workflow(section, form)
+        if section == "modules":
+            create_customer_module(form, organization)
+        else:
+            run_guided_workflow(section, form)
         messages.success(request, f"Cadastro criado com sucesso para {user.full_name}.")
         return redirect(f"{reverse('ops-client-detail', args=[user.pk])}?aba={section}")
     context = _guided_context(form, section, resource) if get_flow(section) else _form_context(form, section, CLIENT_SECTIONS[section])
-    context.update({"client_context": user, "client_organization": organization})
+    context.update({"client_context": user, "client_organization": organization, "has_customer_gardens": organization.gardens.filter(is_active=True).exists()})
     return render(request, "admin_portal/guided_form.html" if get_flow(section) else "admin_portal/form.html", context)
+
+
+@operations_required
+def client_module_install(request, user_id, module_id):
+    user = get_object_or_404(User, pk=user_id)
+    organization = Organization.objects.filter(memberships__user=user, memberships__is_active=True).order_by("-is_active", "name").first()
+    if not organization:
+        raise Http404
+    module = get_object_or_404(GardenModule, pk=module_id, organization=organization)
+    form = CustomerModuleInstallationForm(request.POST or None, organization=organization)
+    if request.method == "POST" and form.is_valid():
+        install_module(module, form.cleaned_data["garden"], form.cleaned_data["installed_at"], form.cleaned_data["position_label"])
+        messages.success(request, "Módulo instalado com sucesso. Próxima etapa recomendada: iniciar cultivo ou adicionar dispositivo.")
+        return redirect(f"{reverse('ops-client-detail', args=[user.pk])}?aba=modules")
+    return render(request, "admin_portal/form.html", _form_context(form, "modules", f"Instalar {module.name}", module))
 
 
 @operations_required

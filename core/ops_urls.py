@@ -15,6 +15,7 @@ urlpatterns = [
     path("clientes/novo/", ops_views.client_create, name="ops-client-create"),
     path("clientes/<int:user_id>/editar/", ops_views.client_edit, name="ops-client-edit"),
     path("clientes/<int:user_id>/<slug:section>/novo/", ops_views.client_related_create, name="ops-client-related-create"),
+    path("clientes/<int:user_id>/modulos/<uuid:module_id>/instalar/", ops_views.client_module_install, name="ops-client-module-install"),
     path("clientes/<int:user_id>/", ops_views.client_detail, name="ops-client-detail"),
     path("dispositivos/<uuid:device_id>/credencial/", ops_views.credential_issue, name="ops-credential-issue"),
     path("credenciais/<uuid:pk>/revogar/", ops_views.credential_revoke, name="ops-credential-revoke"),

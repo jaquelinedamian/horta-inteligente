@@ -57,7 +57,7 @@ FLOWS = {
     "modules": GuidedFlow("modules", "Novo módulo", "Cadastre o módulo físico e deixe a instalação para o momento certo.", "bi-box", (
         step("Tipo", "Que tipo de módulo é este?", "O tipo reúne capacidade e recursos técnicos.", "module_type"),
         step("Identificação", "Como a equipe reconhecerá o módulo?", "Serial e código evitam trocas durante instalação e suporte.", "organization serial_number name qr_identifier"),
-        step("Situação", "Onde ele está agora?", "A situação orienta estoque, preparação ou instalação.", "status position_label pot_volume_liters substrate_capacity_liters notes"),
+        step("Situação", "Onde este módulo ficará agora?", "Um módulo só fica instalado quando está vinculado a uma horta.", "placement garden installation_position installation_date position_label pot_volume_liters substrate_capacity_liters notes"),
     ), (("Ver módulos", "modules"), ("Gerar QR Code", "qrcodes"))),
     "employees": GuidedFlow("employees", "Novo funcionário", "Cadastre a pessoa e defina seu acesso de trabalho.", "bi-person-badge", (
         step("Dados pessoais", "Quem fará parte da equipe?", "Nome e contato identificam a pessoa na agenda e nas ordens.", "full_name email phone"),

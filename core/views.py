@@ -23,6 +23,7 @@ from subscriptions.models import CheckoutRequest, Payment, Plan, PlanVersion, Su
 from subscriptions.selectors import get_available_plan_versions, get_customer_subscription, get_public_plans
 from crops.selectors import get_available_crops, get_customer_cycles, get_public_crops
 from gardens.selectors import get_customer_devices, get_customer_gardens
+from gardens.services import install_module
 from operations.selectors import get_customer_visits, get_technician_orders, get_technician_visits
 from .forms import CheckoutAddressForm, InstallationDateForm, InstallationSurveyForm, LightingScheduleForm, ProfileForm, SignupForm, SupportTicketForm, WorkOrderForm
 from .permissions import customer_required, operations_required, technician_required
@@ -228,9 +229,7 @@ def add_module(request):
             if not garden:
                 messages.error(request, "Nenhuma horta ativa encontrada.")
             else:
-                ModuleInstallation.objects.get_or_create(module=found, removed_at=None, defaults={"garden": garden, "installed_at": timezone.now()})
-                found.status = GardenModule.Status.INSTALLED
-                found.save(update_fields=["status", "updated_at"])
+                install_module(found, garden, timezone.now())
                 messages.success(request, "Módulo adicionado à sua horta.")
                 return redirect("customer-section", section="crops")
         elif not found:
