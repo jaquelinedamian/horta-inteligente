@@ -3,12 +3,14 @@ import base64
 from io import BytesIO
 
 from django.conf import settings
+from django import forms
 from django.contrib import messages
 from django.core.management import call_command
 from django.core.paginator import Paginator
-from django.db.models import Q
+from django.db.models import Count, Q
 from django.http import Http404, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.http import require_POST
 
@@ -135,6 +137,12 @@ def collection(request, section):
         page = Paginator(queryset, 25).get_page(request.GET.get("page"))
         return render(request, "admin_portal/collection.html", {"title": "Clientes", "section": section, "area": "comercial", "page_obj": page, "objects": page.object_list, "query": query, "resource": resource})
     queryset = resource.model.objects.all().order_by(*resource.ordering)
+    if section == "crops":
+        queryset = queryset.annotate(
+            variety_count=Count("cultivars", distinct=True),
+            active_cycle_count=Count("planting_cycles", filter=Q(planting_cycles__status=PlantingCycle.Status.ACTIVE), distinct=True),
+            history_count=Count("planting_cycles", distinct=True),
+        ).order_by("common_name")
     if section == "employees":
         queryset = queryset.filter(Q(is_staff=True) | Q(memberships__role=Membership.Role.TECHNICIAN)).distinct()
     query = request.GET.get("q", "").strip()
@@ -144,8 +152,13 @@ def collection(request, section):
             condition |= Q(**{f"{field}__icontains": query})
         queryset = queryset.filter(condition)
     status = request.GET.get("status", "").strip()
-    if status and any(field.name == "status" for field in resource.model._meta.fields):
+    if section == "crops" and status in {"active", "inactive"}:
+        queryset = queryset.filter(is_available=status == "active")
+    elif status and any(field.name == "status" for field in resource.model._meta.fields):
         queryset = queryset.filter(status=status)
+    variety = request.GET.get("variety", "").strip()
+    if section == "crops" and variety in {"with", "without"}:
+        queryset = queryset.filter(cultivars__isnull=variety == "without").distinct()
     organization = request.GET.get("organization", "").strip()
     field_names = {field.name for field in resource.model._meta.fields}
     if organization and "organization" in field_names:
@@ -160,7 +173,15 @@ def detail(request, section, pk):
     if not resource:
         raise Http404
     obj = get_object_or_404(resource.model, pk=pk)
-    return render(request, "admin_portal/detail.html", {"title": resource.title, "section": section, "object": obj, "display_fields": _display_fields(obj), "resource": resource})
+    context = {"title": resource.title, "section": section, "object": obj, "display_fields": _display_fields(obj), "resource": resource}
+    if section == "crops":
+        context.update({
+            "varieties": obj.cultivars.order_by("name"),
+            "profiles": obj.cultivation_profiles.prefetch_related("stages").order_by("name"),
+            "nutrition_plans": obj.nutrition_plans.select_related("fertilizer"),
+            "cycles": obj.planting_cycles.select_related("cultivar", "module").order_by("-created_at")[:25],
+        })
+    return render(request, "admin_portal/detail.html", context)
 
 
 @operations_required
@@ -188,6 +209,8 @@ def edit(request, section, pk):
     form = resource_form_class(resource)(request.POST or None, instance=obj)
     if request.method == "POST" and form.is_valid():
         form.save()
+        if section == "crops" and getattr(form, "active_cycle_count", 0):
+            messages.warning(request, f"Esta cultura possui {form.active_cycle_count} cultivo(s) ativo(s). Ela deixou de aparecer para novas escolhas, mas os cultivos existentes continuam funcionando.")
         messages.success(request, "Alterações salvas.")
         return redirect("ops-detail", section=section, pk=obj.pk)
     return render(request, "admin_portal/form.html", _form_context(form, section, f"Editar — {resource.title}", obj))
@@ -209,7 +232,35 @@ def client_detail(request, user_id):
     user = get_object_or_404(User, pk=user_id, memberships__role__in=[Membership.Role.OWNER, Membership.Role.MANAGER, Membership.Role.VIEWER])
     memberships = user.memberships.select_related("organization")
     organizations = Organization.objects.filter(memberships__user=user).distinct()
-    return render(request, "admin_portal/client_detail.html", {"client": user, "memberships": memberships, "organizations": organizations})
+    organization = organizations.order_by("-is_active", "name").first()
+    if not organization:
+        raise Http404
+    subscriptions = organization.subscriptions.select_related("plan_version__plan", "coupon").order_by("-created_at")
+    gardens = organization.gardens.select_related("address", "subscription").order_by("name")
+    modules = organization.garden_modules.select_related("module_type").prefetch_related("installations__garden", "planting_cycles__crop", "planting_cycles__cultivar").order_by("name")
+    cycles = organization.planting_cycles.select_related("crop", "cultivar", "garden", "module", "current_stage").order_by("-created_at")
+    devices = organization.devices.select_related("model", "module").order_by("name")
+    visits = organization.visits.select_related("garden", "technician").order_by("-scheduled_start")
+    payments = Payment.objects.filter(subscription__organization=organization).select_related("subscription__plan_version__plan").order_by("-due_at")
+    tickets = organization.support_tickets.select_related("garden", "module", "device").order_by("-created_at")
+    alerts = Alert.objects.filter(rule__organization=organization, status=Alert.Status.OPEN).select_related("rule")[:8]
+    active_subscription = subscriptions.filter(status__in=[Subscription.Status.ACTIVE, Subscription.Status.TRIALING]).first()
+    next_visit = visits.filter(scheduled_start__gte=timezone.now(), status=Visit.Status.SCHEDULED).order_by("scheduled_start").first()
+    last_payment = payments.filter(status=Payment.Status.PAID).order_by("-paid_at").first()
+    address = organization.addresses.first()
+    checklist = (("Dados pessoais", bool(user.full_name and user.email)), ("Endereço", bool(address)), ("Assinatura", bool(active_subscription)), ("Horta", gardens.exists()), ("Módulos instalados", modules.filter(status=GardenModule.Status.INSTALLED).exists()), ("Dispositivo conectado", devices.exists()))
+    if not active_subscription:
+        recommended = ("Criar assinatura", "subscriptions")
+    elif not gardens.exists():
+        recommended = ("Criar horta e planejar a instalação", "gardens")
+    elif not modules.exists():
+        recommended = ("Adicionar módulos", "modules")
+    elif not cycles.filter(status=PlantingCycle.Status.ACTIVE).exists():
+        recommended = ("Iniciar cultivo", "cycles")
+    else:
+        recommended = ("Acompanhar operação", "visits")
+    client = user
+    return render(request, "admin_portal/client_detail.html", {**locals(), "active_tab": request.GET.get("aba", "resumo")})
 
 
 @operations_required
@@ -220,7 +271,43 @@ def client_edit(request, user_id):
         form.save()
         messages.success(request, "Cliente atualizado.")
         return redirect("ops-client-detail", user_id=user.pk)
-    return render(request, "admin_portal/form.html", {"title": "Editar cliente", "form": form, "section": "clients", "object": user})
+    return render(request, "admin_portal/form.html", _form_context(form, "clients", "Editar cliente", user))
+
+
+CLIENT_SECTIONS = {"subscriptions": "Nova assinatura", "gardens": "Nova horta", "modules": "Novo módulo", "cycles": "Novo cultivo", "devices": "Novo dispositivo", "visits": "Nova visita", "payments": "Novo pagamento", "tickets": "Novo chamado"}
+
+
+@operations_required
+def client_related_create(request, user_id, section):
+    if section not in CLIENT_SECTIONS:
+        raise Http404
+    user = get_object_or_404(User, pk=user_id)
+    organization = Organization.objects.filter(memberships__user=user, memberships__is_active=True).order_by("-is_active", "name").first()
+    if not organization:
+        raise Http404
+    resource = get_resource(section)
+    data = request.POST.copy() if request.method == "POST" else None
+    if data is not None and "organization" in resource.fields:
+        data["organization"] = str(organization.pk)
+    form = resource_form_class(resource)(data)
+    form.customer_organization_id = organization.pk
+    if "organization" in form.fields:
+        form.fields["organization"].initial = organization
+        form.fields["organization"].widget = forms.HiddenInput()
+    if "plan_version" in form.fields:
+        form.fields["plan_version"].label = "Plano"
+        form.fields["plan_version"].label_from_instance = lambda version: f"{version.plan.name} — R$ {version.price_cents / 100:.2f}"
+    scoped = {"address": organization.addresses.all(), "subscription": organization.subscriptions.all(), "garden": organization.gardens.all(), "module": organization.garden_modules.all(), "device": organization.devices.all(), "work_order": organization.work_orders.all()}
+    for name, queryset in scoped.items():
+        if name in form.fields:
+            form.fields[name].queryset = queryset
+    if request.method == "POST" and form.is_valid():
+        run_guided_workflow(section, form)
+        messages.success(request, f"Cadastro criado com sucesso para {user.full_name}.")
+        return redirect(f"{reverse('ops-client-detail', args=[user.pk])}?aba={section}")
+    context = _guided_context(form, section, resource) if get_flow(section) else _form_context(form, section, CLIENT_SECTIONS[section])
+    context.update({"client_context": user, "client_organization": organization})
+    return render(request, "admin_portal/guided_form.html" if get_flow(section) else "admin_portal/form.html", context)
 
 
 @operations_required

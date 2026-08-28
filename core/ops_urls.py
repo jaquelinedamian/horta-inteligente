@@ -14,6 +14,7 @@ urlpatterns = [
     path("administracao/", ops_views.area_dashboard, {"area": "administracao"}),
     path("clientes/novo/", ops_views.client_create, name="ops-client-create"),
     path("clientes/<int:user_id>/editar/", ops_views.client_edit, name="ops-client-edit"),
+    path("clientes/<int:user_id>/<slug:section>/novo/", ops_views.client_related_create, name="ops-client-related-create"),
     path("clientes/<int:user_id>/", ops_views.client_detail, name="ops-client-detail"),
     path("dispositivos/<uuid:device_id>/credencial/", ops_views.credential_issue, name="ops-credential-issue"),
     path("credenciais/<uuid:pk>/revogar/", ops_views.credential_revoke, name="ops-credential-revoke"),
