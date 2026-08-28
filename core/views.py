@@ -21,7 +21,7 @@ from gardens.models import Garden, GardenModule, ModuleInstallation
 from operations.models import ChecklistExecution, InventoryItem, SupportTicket, Visit, WorkOrder
 from subscriptions.models import CheckoutRequest, Payment, Plan, PlanVersion, Subscription
 from subscriptions.selectors import get_available_plan_versions, get_customer_subscription, get_public_plans
-from crops.selectors import get_available_cultivars, get_customer_cycles, get_public_crops
+from crops.selectors import get_available_crops, get_customer_cycles, get_public_crops
 from gardens.selectors import get_customer_devices, get_customer_gardens
 from operations.selectors import get_customer_visits, get_technician_orders, get_technician_visits
 from .forms import CheckoutAddressForm, InstallationDateForm, InstallationSurveyForm, LightingScheduleForm, ProfileForm, SignupForm, SupportTicketForm, WorkOrderForm
@@ -122,7 +122,7 @@ def checkout(request, step):
             return redirect("checkout", step=2)
     elif step == 2 and request.method == "POST":
         culture_ids = request.POST.getlist("cultures")
-        valid_ids = list(get_available_cultivars().filter(id__in=culture_ids).values_list("id", flat=True))
+        valid_ids = list(get_available_crops().filter(id__in=culture_ids).values_list("id", flat=True))
         limit = _plan_module_limit(selected_plan)
         if not valid_ids:
             messages.error(request, "Escolha pelo menos uma cultura.")
@@ -147,8 +147,8 @@ def checkout(request, step):
         if next_missing_step is None or next_missing_step > step:
             request.session["checkout"] = state
             return redirect("checkout", step=min(step + 1, 7))
-    selected_cultures = Cultivar.objects.filter(id__in=state.get("cultures", [])).select_related("crop")
-    return render(request, "public/checkout.html", {"step": step, "state": state, "plans": available_plans, "cultivars": get_available_cultivars(), "form": form, "selected_plan": selected_plan, "selected_cultures": selected_cultures, "module_limit": _plan_module_limit(selected_plan) if selected_plan else None})
+    selected_crops = Crop.objects.filter(id__in=state.get("cultures", []))
+    return render(request, "public/checkout.html", {"step": step, "state": state, "plans": available_plans, "crops": get_available_crops(), "form": form, "selected_plan": selected_plan, "selected_crops": selected_crops, "module_limit": _plan_module_limit(selected_plan) if selected_plan else None})
 
 
 @login_required
@@ -162,9 +162,9 @@ def checkout_complete(request):
         messages.error(request, "Seu checkout está incompleto. Revise as etapas antes de confirmar.")
         return redirect("checkout", step=missing_step)
     culture_ids = state.get("cultures", [])
-    valid_cultures = Cultivar.objects.filter(id__in=culture_ids, crop__is_available=True)
+    valid_crops = get_available_crops().filter(id__in=culture_ids)
     limit = _plan_module_limit(plan)
-    if valid_cultures.count() != len(set(culture_ids)) or (limit is not None and valid_cultures.count() > limit):
+    if valid_crops.count() != len(set(culture_ids)) or (limit is not None and valid_crops.count() > limit):
         messages.error(request, "Revise as culturas selecionadas.")
         return redirect("checkout", step=2)
     membership = request.user.memberships.filter(is_active=True, role__in=[Membership.Role.OWNER, Membership.Role.MANAGER]).select_related("organization").order_by("created_at").first()
@@ -182,7 +182,7 @@ def checkout_complete(request):
     subscription = Subscription.objects.create(organization=org, plan_version=plan, status=Subscription.Status.ACTIVE, current_period_start=timezone.now(), current_period_end=timezone.now() + timedelta(days=30))
     Payment.objects.create(subscription=subscription, amount_cents=plan.price_cents, status=Payment.Status.PAID, due_at=timezone.now(), paid_at=timezone.now(), provider_reference=f"SIM-{uuid4().hex[:10]}")
     checkout_request = CheckoutRequest.objects.create(user=request.user, plan_version=plan, installation_data={"address": address_data, "survey": state.get("survey", {})}, scheduled_for=state.get("scheduled_for") or None, status=CheckoutRequest.Status.CONFIRMED)
-    checkout_request.selected_cultures.set(valid_cultures); request.session.pop("checkout", None)
+    checkout_request.selected_crops.set(valid_crops); request.session.pop("checkout", None)
     return render(request, "public/checkout_success.html", {"subscription": subscription})
 
 

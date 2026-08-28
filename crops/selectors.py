@@ -1,8 +1,14 @@
 from .models import Crop, Cultivar, PlantingCycle
 
 
+def get_available_crops():
+    """Single source of truth for crops offered in new customer journeys."""
+    return Crop.objects.filter(is_available=True).order_by("common_name")
+
+
 def get_public_crops():
-    return Crop.objects.filter(is_available=True).prefetch_related("cultivars")
+    """Compatibility alias for public pages."""
+    return get_available_crops().prefetch_related("cultivars")
 
 
 def get_available_cultivars(crop=None):

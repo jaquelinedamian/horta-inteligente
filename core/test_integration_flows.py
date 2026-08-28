@@ -39,7 +39,9 @@ class IntegratedProductFlowsTests(TestCase):
         session = self.client.session
         session["checkout"] = {"plan": str(plan.versions.get().pk)}
         session.save()
-        self.assertContains(self.client.get(reverse("checkout", args=[2])), "Genovese")
+        checkout = self.client.get(reverse("checkout", args=[2]))
+        self.assertContains(checkout, "Manjericão Integrado")
+        self.assertNotContains(checkout, "Genovese")
 
     def test_admin_subscription_is_visible_to_linked_customer(self):
         user = User.objects.create_user(email="customer-flow@example.test", password="Strong-pass-2026!", full_name="Cliente Fluxo")

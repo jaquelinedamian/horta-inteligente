@@ -208,6 +208,7 @@ class CheckoutRequest(BaseModel):
     user = models.ForeignKey("accounts.User", on_delete=models.CASCADE, related_name="checkout_requests")
     plan_version = models.ForeignKey(PlanVersion, on_delete=models.PROTECT, related_name="checkout_requests")
     selected_cultures = models.ManyToManyField("crops.Cultivar", blank=True, related_name="checkout_requests")
+    selected_crops = models.ManyToManyField("crops.Crop", blank=True, related_name="checkout_crop_requests")
     installation_data = models.JSONField(default=dict, blank=True)
     scheduled_for = models.DateTimeField(null=True, blank=True)
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.DRAFT)

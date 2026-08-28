@@ -7,7 +7,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from accounts.models import Membership, Organization, User
-from crops.models import Cultivar
+from crops.models import Crop, Cultivar
 from gardens.models import GardenModule, ModuleType
 from operations.models import Visit
 from subscriptions.models import CheckoutRequest, Payment, Plan, PlanVersion, Subscription
@@ -52,6 +52,7 @@ class CheckoutTests(DemoDataTestCase):
         self.client.force_login(self.user)
         self.plan = PlanVersion.objects.get(plan__code="essencial")
         self.cultivars = list(Cultivar.objects.filter(crop__is_available=True)[:4])
+        self.crops = list(Crop.objects.filter(is_available=True)[:4])
 
     def post_step(self, step, data):
         return self.client.post(reverse("checkout", args=[step]), data)
@@ -59,13 +60,13 @@ class CheckoutTests(DemoDataTestCase):
     def test_checkout_rejects_skipped_steps_and_plan_limit(self):
         self.assertRedirects(self.client.get(reverse("checkout", args=[7])), reverse("checkout", args=[1]))
         self.post_step(1, {"plan": self.plan.id})
-        response = self.post_step(2, {"cultures": [item.id for item in self.cultivars]})
+        response = self.post_step(2, {"cultures": [item.id for item in self.crops]})
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "permite até 3 culturas")
 
     def test_complete_checkout_is_consistent_and_idempotent(self):
         self.assertRedirects(self.post_step(1, {"plan": self.plan.id}), reverse("checkout", args=[2]))
-        self.assertRedirects(self.post_step(2, {"cultures": [self.cultivars[0].id]}), reverse("checkout", args=[3]))
+        self.assertRedirects(self.post_step(2, {"cultures": [self.crops[0].id]}), reverse("checkout", args=[3]))
         address = {"street": "Rua Teste", "number": "10", "city": "São Paulo", "state": "SP", "postal_code": "01001-000"}
         self.assertRedirects(self.post_step(3, address), reverse("checkout", args=[4]))
         self.assertRedirects(self.post_step(4, {"sunlight": "medium", "wifi_available": "on"}), reverse("checkout", args=[5]))
@@ -77,6 +78,7 @@ class CheckoutTests(DemoDataTestCase):
         self.assertEqual(Subscription.objects.filter(organization__memberships__user=self.user).count(), 1)
         self.assertEqual(Payment.objects.filter(subscription__organization__memberships__user=self.user).count(), 1)
         self.assertEqual(CheckoutRequest.objects.filter(user=self.user).count(), 1)
+        self.assertEqual(CheckoutRequest.objects.get(user=self.user).selected_crops.count(), 1)
         self.client.post(reverse("checkout-complete"))
         self.assertEqual(Subscription.objects.filter(organization__memberships__user=self.user).count(), 1)
         self.assertEqual(Payment.objects.filter(subscription__organization__memberships__user=self.user).count(), 1)

@@ -46,7 +46,7 @@ FLOWS = {
         step("Identificação", "Qual planta será cultivada?", "Estas informações identificam a cultura no catálogo.", "common_name scientific_name code category description image_url uses"),
         step("Necessidades", "Do que esta planta precisa?", "As faixas orientam cultivo, automação e alertas.", "minimum_temperature ideal_temperature_min ideal_temperature_max maximum_temperature minimum_humidity maximum_humidity light_hours minimum_pot_liters"),
         step("Ciclo", "Como é o ciclo desta planta?", "A estimativa ajuda a planejar trocas e colheitas.", "life_cycle allows_regrowth estimated_harvests cut_interval_days difficulty light_requirement"),
-        step("Publicação", "Disponibilizar para novos cultivos?", "Somente culturas disponíveis aparecem nas escolhas operacionais.", "is_available is_featured page_title short_description flavor aroma botanical_family origin edible_part"),
+        step("Publicação", "Disponibilizar esta cultura?", "Quando ativa, ela aparece no catálogo e pode ser escolhida pelos clientes; variedades continuam opcionais.", "is_available is_featured page_title short_description flavor aroma botanical_family origin edible_part"),
     ), (("Ver culturas", "crops"), ("Adicionar variedade", "cultivars"))),
     "gardens": GuidedFlow("gardens", "Nova horta", "Associe cliente, local e configuração do equipamento.", "bi-house-heart", (
         step("Cliente", "Para quem é esta horta?", "A horta precisa pertencer ao cliente correto.", "organization subscription name code"),

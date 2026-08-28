@@ -22,3 +22,5 @@ document.querySelectorAll('[data-guided-wizard]').forEach(wizard=>{
   try{const saved=JSON.parse(localStorage.getItem(wizard.dataset.storageKey)||'null');if(saved&&confirm('Existe um rascunho deste cadastro. Deseja continuar de onde parou?')){usefulFields().forEach(el=>{if(saved[el.name]!==undefined){if(el.type==='checkbox')el.checked=saved[el.name];else el.value=saved[el.name]}})}}catch(error){localStorage.removeItem(wizard.dataset.storageKey)}
   form.addEventListener('submit',()=>localStorage.removeItem(wizard.dataset.storageKey));show(current);
 });
+
+document.querySelectorAll('[data-crop-choice]').forEach(choice=>{const form=choice.form;const counter=form?.querySelector('[data-crop-count]');const update=()=>{if(counter)counter.textContent=form.querySelectorAll('[data-crop-choice]:checked').length};choice.addEventListener('change',update);update()});
