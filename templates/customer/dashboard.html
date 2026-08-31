@@ -1,4 +1,4 @@
-{% extends 'base.html' %}
+{% extends 'base.html' %}{% load static %}
 {% block title %}Minha Horta{% endblock %}{% block area_name %}Área do cliente{% endblock %}
 {% block content %}
 <div class="page-header"><div><span class="eyebrow">{{ organization.name }}</span><h1 class="mt-2 mb-1">Minha Horta</h1><p class="text-muted mb-0">{% if device %}<span class="status-dot me-2"></span>Sistema {{ device.get_status_display|lower }}{% else %}Aguardando ativação{% endif %}</p></div><span class="badge-soft"><i class="bi bi-shield-check me-2"></i> Cuidado ativo</span></div>
@@ -6,8 +6,21 @@
 {% elif not has_garden %}<div class="content-card mb-4"><span class="eyebrow">Instalação</span><h2 class="h4 mt-2">Sua horta ainda está sendo preparada.</h2><p class="text-muted mb-0">Avisaremos assim que a instalação estiver agendada.</p></div>
 {% elif not device %}<div class="content-card mb-4"><span class="eyebrow">Conectividade</span><h2 class="h4 mt-2">Dispositivo ainda não conectado.</h2><p class="text-muted mb-0">A telemetria aparecerá depois que nossa equipe concluir a ativação.</p></div>
 {% elif not has_telemetry %}<div class="content-card mb-4"><span class="eyebrow">Primeira leitura</span><h2 class="h4 mt-2">Aguardando telemetria do dispositivo.</h2><p class="text-muted mb-0">O painel será preenchido automaticamente assim que os sensores enviarem dados.</p></div>{% endif %}
+<section class="content-card mb-4" data-esp8266-painel>
+  <div class="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-3">
+    <div><span class="eyebrow">Leitura local</span><h2 class="h4 mt-1 mb-0">ESP8266 + BMP280</h2></div>
+    <small class="text-muted">Última atualização: <span data-esp8266-atualizacao>--:--:--</span></small>
+  </div>
+  <div class="row g-3">
+    <div class="col-6 col-xl-3"><div class="metric-card h-100 shadow-none"><small class="text-muted">Temperatura</small><div class="metric-value"><span data-esp8266-temperatura>--</span><small class="fs-6"> °C</small></div></div></div>
+    <div class="col-6 col-xl-3"><div class="metric-card h-100 shadow-none"><small class="text-muted">Pressão</small><div class="metric-value"><span data-esp8266-pressao>--</span><small class="fs-6"> hPa</small></div></div></div>
+    <div class="col-6 col-xl-3"><div class="metric-card h-100 shadow-none"><small class="text-muted">Sensor</small><div class="metric-value fs-4 mt-2 text-danger" data-esp8266-sensor>Sem comunicação</div></div></div>
+    <div class="col-6 col-xl-3"><div class="metric-card h-100 shadow-none"><small class="text-muted">ESP8266</small><div class="metric-value fs-4 mt-2 text-danger" data-esp8266-status>Offline</div></div></div>
+  </div>
+  <p class="small text-warning mt-3 mb-0" data-esp8266-aviso>Sem resposta do dispositivo. Os últimos valores válidos, quando existentes, permanecem exibidos.</p>
+</section>
 <div class="row g-3 mb-4">
-  <div class="col-6 col-xl-3"><div class="metric-card"><small class="text-muted">Temperatura</small><div class="metric-value">{{ metrics.air_temperature.value|default:'--' }}<small class="fs-6">{{ metrics.air_temperature.unit }}</small></div><span class="badge-soft">Ambiente</span></div></div>
+  <div class="col-6 col-xl-3"><div class="metric-card"><small class="text-muted">Temperatura</small><div class="metric-value">{{ metrics.air_temperature.value|default:'--' }}<small class="fs-6">{{ metrics.air_temperature.unit }}</small></div><span class="badge-soft">Ambiente</span>{% if metrics.air_pressure.value != None %}<small class="d-block text-muted mt-2">Pressão: {{ metrics.air_pressure.value }} {{ metrics.air_pressure.unit }}</small>{% endif %}</div></div>
   <div class="col-6 col-xl-3"><div class="metric-card"><small class="text-muted">Umidade</small><div class="metric-value">{{ metrics.air_humidity.value|default:'--' }}<small class="fs-6">{{ metrics.air_humidity.unit }}</small></div><span class="badge-soft">Ambiente</span></div></div>
   <div class="col-6 col-xl-3"><div class="metric-card"><small class="text-muted">Reservatório</small><div class="metric-value">{{ metrics.water_level.value|default:'--' }}<small class="fs-6">{{ metrics.water_level.unit }}</small></div><div class="water-bar mt-2"><span style="width:{{ metrics.water_level.value|default:0 }}%"></span></div></div></div>
   <div class="col-6 col-xl-3"><div class="metric-card"><small class="text-muted">Controlador</small><div class="metric-value fs-3 mt-2">{{ device.get_status_display|default:'Pendente' }}</div><small class="text-muted">{% if device.last_seen_at %}Há {{ device.last_seen_at|timesince }}{% else %}Sem contato{% endif %}</small></div></div>
@@ -18,3 +31,4 @@
 </div><div class="content-card mt-4"><div class="d-flex justify-content-between"><h3>Culturas ativas</h3><a href="{% url 'customer-section' 'crops' %}" class="text-success fw-bold">Ver todas</a></div><div class="row g-3 mt-1">{% for cycle in cycles %}<div class="col-md-6"><a href="{% url 'module-detail' cycle.module.id %}" class="soft-card d-flex align-items-center gap-3 shadow-none"><span class="fs-1">🌿</span><div><strong>{{ cycle.cultivar.crop.common_name }}</strong><small class="d-block text-muted">{{ cycle.module.serial_number }} · {{ cycle.get_status_display }}</small></div></a></div>{% empty %}<div class="empty-state py-4"><p>Nenhuma cultura ativa.</p></div>{% endfor %}</div></div></div>
 <div class="col-xl-5"><div class="content-card mb-4"><span class="eyebrow">Próxima visita</span>{% if next_visit %}<h3 class="mt-2">{{ next_visit.scheduled_start|date:'d M, H:i' }}</h3><p class="text-muted">{{ next_visit.visit_type }}</p><strong>{{ next_visit.technician.full_name|default:'Técnico a definir' }}</strong>{% else %}<div class="empty-state py-4"><i class="bi bi-calendar-check"></i><p class="mt-2">Nenhuma visita agendada.</p></div>{% endif %}</div><div class="content-card"><div class="d-flex justify-content-between"><h3>Alertas recentes</h3><a href="{% url 'customer-section' 'alerts' %}" class="text-success fw-bold">Ver todos</a></div>{% for alert in alerts %}<div class="d-flex gap-3 py-3 border-bottom"><div class="icon-box"><i class="bi bi-info-circle"></i></div><div><strong>{{ alert.rule.name }}</strong><p class="small text-muted mb-0">{{ alert.message }}</p></div></div>{% empty %}<div class="empty-state py-4"><i class="bi bi-check-circle"></i><p class="mt-2">Tudo tranquilo por aqui.</p></div>{% endfor %}</div></div></div>
 {% endblock %}
+{% block scripts %}<script src="{% static 'js/esp8266-local.js' %}"></script>{% endblock %}
