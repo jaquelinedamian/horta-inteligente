@@ -1,6 +1,7 @@
 // Endereco local exibido no Monitor Serial do ESP8266.
 // Altere somente esta constante quando o IP do dispositivo mudar.
-const ESP8266_URL = "http://192.168.0.100";
+const ESP8266_URL = "http://192.168.15.16";
+
 const INTERVALO_ATUALIZACAO_MS = 3000;
 const TEMPO_LIMITE_MS = 2500;
 
@@ -44,6 +45,10 @@ if (painelESP8266) {
       definirStatus(elementos.sensor, "Offline", false);
       elementos.aviso.textContent = "O ESP8266 respondeu, mas o BMP280 está offline. Os últimos valores válidos foram mantidos.";
       elementos.aviso.classList.remove("d-none");
+      if (estado.ultimaAtualizacao) {
+        elementos.atualizacao.textContent =
+          `${estado.ultimaAtualizacao.toLocaleTimeString("pt-BR")} (desatualizado)`;
+      }
     }
   }
 
@@ -61,7 +66,8 @@ if (painelESP8266) {
   }
 
   function validarDados(dados) {
-    if (!dados || dados.wifi !== "online" || !["online", "offline"].includes(dados.sensor))
+    if (!dados || typeof dados !== "object" || Array.isArray(dados) ||
+        dados.wifi !== "online" || !["online", "offline"].includes(dados.sensor))
       throw new Error("Resposta do ESP8266 incompleta");
     if (dados.sensor === "offline") return;
     const temperaturaValida = typeof dados.temperatura === "number" && Number.isFinite(dados.temperatura);

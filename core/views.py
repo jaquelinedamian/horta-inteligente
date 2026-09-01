@@ -255,7 +255,7 @@ def module_detail(request, module_id):
 @customer_required
 def history(request):
     org = request.membership.organization; raw_days = request.GET.get("days", "7"); days = int(raw_days) if raw_days.isdigit() and int(raw_days) in (1, 7, 30) else 7
-    rows = TelemetryReading.objects.filter(channel__device__organization=org, recorded_at__gte=timezone.now() - timedelta(days=days), channel__metric__in=["air_temperature", "air_humidity", "water_level"]).annotate(bucket=TruncHour("recorded_at")).values("bucket", "channel__metric").annotate(value=Avg("decimal_value")).order_by("bucket")[:1000]
+    rows = TelemetryReading.objects.filter(channel__device__organization=org, recorded_at__gte=timezone.now() - timedelta(days=days), channel__metric__in=["air_temperature", "air_humidity", "air_pressure", "water_level"]).annotate(bucket=TruncHour("recorded_at")).values("bucket", "channel__metric").annotate(value=Avg("decimal_value")).order_by("bucket")[:1000]
     series = {}
     for row in rows: series.setdefault(row["channel__metric"], []).append({"x": row["bucket"].isoformat(), "y": float(row["value"])})
     return render(request, "customer/history.html", {"series": series, "days": days})

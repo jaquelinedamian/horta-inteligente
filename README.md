@@ -201,6 +201,16 @@ segredo é persistido. Nunca grave o token emitido em código, documentação ou
 
 O ESP8266/Wemos poderá acessar essas rotas usando o endereço HTTPS do Web Service.
 
+### Firmware do controlador fotografado
+
+O firmware para **Wemos D1 mini (ESP8266) + BMP280 + relé de um canal** está em
+[`firmware/esp8266-bmp280-relay`](firmware/esp8266-bmp280-relay/README.md). Ele
+envia temperatura e pressão, heartbeat e executa comandos do canal `pump`.
+Credenciais de Wi-Fi e o token ficam em um arquivo local ignorado pelo Git.
+
+O BMP280 não mede umidade. Para preencher `air-humidity`, use um BME280 ou outro
+sensor compatível; o sistema não deve inferir esse valor.
+
 ## Checklist antes do push
 
 ```powershell

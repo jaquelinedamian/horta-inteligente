@@ -12,3 +12,4 @@ media/
 htmlcov/
 .vscode/
 .idea/
+firmware/**/include/device_config.h
