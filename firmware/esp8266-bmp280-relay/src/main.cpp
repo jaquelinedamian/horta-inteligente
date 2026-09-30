@@ -467,10 +467,30 @@ void sendTelemetry() {
   if (status >= 0) {
 
     Serial.printf(
-        "telemetry: HTTP %d %s\n",
-        status,
-        response.c_str()
+        "telemetry: HTTP %d\n",
+        status
     );
+
+    if (status == HTTP_CODE_BAD_REQUEST) {
+
+      JsonDocument errorDocument;
+      DeserializationError error =
+          deserializeJson(errorDocument, response);
+
+      if (!error && errorDocument["detail"].is<const char*>()) {
+
+        Serial.print(F("telemetry: detail: "));
+        Serial.println(
+            errorDocument["detail"].as<const char*>()
+        );
+      }
+
+      else {
+
+        Serial.print(F("telemetry: resposta: "));
+        Serial.println(response);
+      }
+    }
   }
 }
 

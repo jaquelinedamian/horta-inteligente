@@ -60,7 +60,7 @@ class BackofficeTests(TestCase):
         device_model = DeviceModel.objects.first()
         self.assert_created("devices", {"organization": organization.pk, "model": device_model.pk, "module": module.pk, "serial_number": "CRUD-DEV-001", "name": "Dispositivo CRUD", "status": "provisioning", "firmware_version": "1.0", "metadata": "{}"})
         device = Device.objects.get(serial_number="CRUD-DEV-001")
-        self.assert_created("channels", {"device": device.pk, "key": "temperature", "name": "Temperatura", "kind": "sensor", "metric": "air_temperature", "unit": "°C", "value_type": "decimal", "pin": "I2C", "configuration": "{}", "is_enabled": "on"})
+        self.assert_created("channels", {"device": device.pk, "key": "air-temperature", "name": "Temperatura", "kind": "sensor", "metric": "air_temperature", "unit": "°C", "value_type": "decimal", "pin": "I2C", "configuration": "{}", "is_enabled": "on"})
         self.assert_created("orders", {"organization": organization.pk, "garden": garden.pk, "module": module.pk, "device": device.pk, "maintenance_plan": "", "kind": "installation", "status": "open", "title": "Instalar horta CRUD", "description": "", "priority": 2, "scheduled_for": (now + timedelta(days=2)).strftime("%Y-%m-%dT%H:%M"), "completed_at": ""})
         order = WorkOrder.objects.get(title="Instalar horta CRUD")
         technician = User.objects.get(email="tecnico@hortaviva.local")

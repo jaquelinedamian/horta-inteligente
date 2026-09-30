@@ -17,7 +17,8 @@ class DeviceApiTests(TestCase):
         self.garden = Garden.objects.create(organization=self.organization, name="Horta", code="horta")
         model = DeviceModel.objects.create(name="Wemos D1 Mini", code="wemos", hardware_platform="ESP8266")
         self.device = Device.objects.create(organization=self.organization, garden=self.garden, model=model, serial_number="ESP-1", name="Controlador")
-        self.channel = Channel.objects.create(device=self.device, key="temperature", name="Temperatura", kind="sensor", metric="air_temperature", unit="°C")
+        self.temperature_channel = Channel.objects.create(device=self.device, key="air-temperature", name="Temperatura", kind="sensor", metric="air_temperature", unit="°C")
+        self.pressure_channel = Channel.objects.create(device=self.device, key="air-pressure", name="Pressão", kind="sensor", metric="air_pressure", unit="hPa")
         self.actuator = Channel.objects.create(device=self.device, key="pump", name="Bomba", kind="actuator", metric="pump_state", value_type="boolean")
         _, self.token = DeviceCredential.issue(self.device)
         self.headers = {"HTTP_AUTHORIZATION": f"Device {self.token}"}
@@ -27,16 +28,38 @@ class DeviceApiTests(TestCase):
         self.assertEqual(response.status_code, 401)
 
     def test_telemetry_ingestion_is_idempotent(self):
-        payload = {"readings": [{
-            "channel": "temperature", "value": 24.5,
-            "recorded_at": timezone.now().isoformat(), "idempotency_key": "sample-1",
-        }]}
+        payload = {"readings": [
+            {
+                "channel": "air-temperature", "value": 24.5,
+                "recorded_at": timezone.now().isoformat(), "idempotency_key": "sample-temperature-1",
+            },
+            {
+                "channel": "air-pressure", "value": 1008.4,
+                "recorded_at": timezone.now().isoformat(), "idempotency_key": "sample-pressure-1",
+            },
+        ]}
         first = self.client.post(reverse("devices:telemetry"), json.dumps(payload), content_type="application/json", **self.headers)
         second = self.client.post(reverse("devices:telemetry"), json.dumps(payload), content_type="application/json", **self.headers)
         self.assertEqual(first.status_code, 202)
         self.assertEqual(second.status_code, 202)
-        self.assertEqual(TelemetryReading.objects.count(), 1)
+        self.assertEqual(TelemetryReading.objects.count(), 2)
         self.assertFalse(second.json()["readings"][0]["created"])
+        self.assertFalse(second.json()["readings"][1]["created"])
+
+    def test_telemetry_rejects_a_channel_key_not_registered_for_device(self):
+        payload = {"readings": [{
+            "channel": "temperature", "value": 24.5,
+            "recorded_at": timezone.now().isoformat(), "idempotency_key": "legacy-temperature-1",
+        }]}
+        response = self.client.post(
+            reverse("devices:telemetry"), json.dumps(payload),
+            content_type="application/json", **self.headers,
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            response.json()["detail"],
+            "canal desconhecido ou desabilitado: temperature",
+        )
 
     def test_device_can_poll_and_acknowledge_its_command(self):
         command = DeviceCommand.objects.create(
