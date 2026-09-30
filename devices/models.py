@@ -7,6 +7,7 @@ from django.db.models import Q
 from accounts.models import Organization
 from core.models import BaseModel
 from gardens.models import GardenModule
+from gardens.models import Garden
 
 
 class DeviceModel(BaseModel):
@@ -21,6 +22,10 @@ class DeviceModel(BaseModel):
 
 
 class Device(BaseModel):
+    class Kind(models.TextChoices):
+        CONTROLLER = "esp8266", "Controlador ESP8266"
+        CAMERA = "esp32_cam", "Câmera ESP32-CAM"
+
     class Status(models.TextChoices):
         PROVISIONING = "provisioning", "Em provisionamento"
         ONLINE = "online", "Online"
@@ -29,14 +34,17 @@ class Device(BaseModel):
         RETIRED = "retired", "Desativado"
 
     organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name="devices")
+    garden = models.ForeignKey(Garden, on_delete=models.SET_NULL, null=True, blank=True, related_name="devices")
     model = models.ForeignKey(DeviceModel, on_delete=models.PROTECT, related_name="devices")
     module = models.ForeignKey(GardenModule, on_delete=models.SET_NULL, null=True, blank=True, related_name="devices")
     serial_number = models.CharField(max_length=100)
     name = models.CharField(max_length=120)
+    kind = models.CharField(max_length=20, choices=Kind.choices, default=Kind.CONTROLLER)
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.PROVISIONING)
     firmware_version = models.CharField(max_length=50, blank=True)
     last_seen_at = models.DateTimeField(null=True, blank=True)
     metadata = models.JSONField(default=dict, blank=True)
+    local_ip = models.GenericIPAddressField(null=True, blank=True)
 
     class Meta:
         constraints = [models.UniqueConstraint(fields=["organization", "serial_number"], name="uniq_org_device_serial")]
@@ -44,6 +52,29 @@ class Device(BaseModel):
 
     def __str__(self):
         return self.name
+
+    def clean(self):
+        from django.core.exceptions import ValidationError
+        if self.garden_id and self.garden.organization_id != self.organization_id:
+            raise ValidationError({"garden": "A horta deve pertencer à organização do dispositivo."})
+
+    def assigned_garden(self):
+        if self.garden_id:
+            return self.garden
+        if self.module_id:
+            installation = self.module.installations.filter(removed_at__isnull=True).select_related("garden").first()
+            return installation.garden if installation else None
+        return None
+
+    @property
+    def is_online(self):
+        from datetime import timedelta
+        from django.conf import settings
+        from django.utils import timezone
+        return bool(
+            self.last_seen_at
+            and self.last_seen_at >= timezone.now() - timedelta(seconds=settings.DEVICE_ONLINE_THRESHOLD_SECONDS)
+        )
 
 
 class TelemetryMetric(BaseModel):
@@ -142,6 +173,20 @@ class DeviceHeartbeat(BaseModel):
 
     class Meta:
         indexes = [models.Index(fields=["device", "recorded_at"])]
+
+
+class GardenPhoto(BaseModel):
+    garden = models.ForeignKey(Garden, on_delete=models.CASCADE, related_name="photos")
+    device = models.ForeignKey(Device, on_delete=models.PROTECT, related_name="photos")
+    captured_at = models.DateTimeField()
+    received_at = models.DateTimeField(auto_now_add=True)
+    image_data = models.BinaryField()
+    content_type = models.CharField(max_length=40, default="image/jpeg")
+    byte_size = models.PositiveIntegerField()
+
+    class Meta:
+        ordering = ("-captured_at",)
+        indexes = [models.Index(fields=["garden", "captured_at"])]
 
 
 class SensorCalibration(BaseModel):

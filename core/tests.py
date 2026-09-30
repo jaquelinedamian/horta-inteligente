@@ -9,7 +9,7 @@ from django.utils import timezone
 from accounts.models import Membership, Organization, User
 from crops.models import Crop, Cultivar
 from gardens.models import GardenModule, ModuleType
-from operations.models import Visit
+from operations.models import ChecklistExecution, Visit
 from subscriptions.models import CheckoutRequest, Payment, Plan, PlanVersion, Subscription
 
 
@@ -134,3 +134,18 @@ class CustomerPortalTests(DemoDataTestCase):
         self.assertEqual(self.client.get(reverse("ops-dashboard")).status_code, 200)
         for section in ("clients", "subscriptions", "plans", "crops", "gardens", "modules", "qrcodes", "devices", "telemetry", "alerts", "employees", "agenda", "orders", "inventory", "finance", "reports", "settings"):
             self.assertEqual(self.client.get(reverse("ops-collection", args=[section])).status_code, 200, section)
+
+    def test_technician_records_installation_test_status(self):
+        technician = User.objects.get(email="tecnico@hortaviva.local")
+        visit = Visit.objects.filter(technician=technician).first()
+        self.client.force_login(technician)
+        response = self.client.post(reverse("visit-update", args=[visit.id]), {
+            "action": "checklist",
+            "all_item": ["Testar sensores", "Testar câmera"],
+            "item_status_0": "ok",
+            "item_status_1": "failed",
+        })
+        self.assertEqual(response.status_code, 302)
+        checklist = ChecklistExecution.objects.get(visit=visit)
+        self.assertEqual(checklist.items[0]["status"], "ok")
+        self.assertEqual(checklist.items[1]["status"], "failed")

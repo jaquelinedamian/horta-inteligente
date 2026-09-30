@@ -44,6 +44,10 @@ class Garden(BaseModel):
     last_visit_at = models.DateTimeField(null=True, blank=True)
     next_visit_at = models.DateTimeField(null=True, blank=True)
     operational_notes = models.TextField(blank=True)
+    automation_overrides = models.JSONField(
+        default=dict, blank=True,
+        help_text="Exceções locais sobre a configuração padrão da cultura.",
+    )
 
     class Meta:
         constraints = [models.UniqueConstraint(fields=["organization", "code"], name="uniq_org_garden_code")]

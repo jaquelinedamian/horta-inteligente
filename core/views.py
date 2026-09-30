@@ -2,12 +2,13 @@ from datetime import timedelta
 from uuid import uuid4
 
 from django.contrib import messages
+from django.conf import settings
 from django.contrib.auth import login
 from django.contrib.auth.decorators import login_required
 from django.db import transaction
 from django.db.models import Avg, Count, Q
 from django.db.models.functions import TruncHour
-from django.http import Http404, JsonResponse
+from django.http import Http404, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils.http import url_has_allowed_host_and_scheme
@@ -16,7 +17,9 @@ from django.views.decorators.http import require_POST
 
 from accounts.models import Address, Membership, Organization, User
 from crops.models import Crop, Cultivar, PlantingCycle
-from devices.models import Alert, Channel, Device, DeviceCommand, LightingSchedule, TelemetryReading
+from devices.models import Alert, Channel, Device, DeviceCommand, GardenPhoto, LightingSchedule, TelemetryReading
+from devices.selectors import garden_snapshot
+from gardens.access import gardens_for_user
 from gardens.models import Garden, GardenModule, ModuleInstallation
 from operations.models import ChecklistExecution, InventoryItem, SupportTicket, Visit, WorkOrder
 from subscriptions.models import CheckoutRequest, Payment, Plan, PlanVersion, Subscription
@@ -194,13 +197,16 @@ def _customer_context(request):
 
 @customer_required
 def customer_dashboard(request):
-    org, gardens, devices = _customer_context(request); device = devices.order_by("name").first(); metrics = {}; schedule = None
+    org, gardens, devices = _customer_context(request); garden = gardens.order_by("name").first()
+    snapshot = garden_snapshot(garden) if garden else None
+    device = next((item for item in (snapshot["devices"] if snapshot else []) if item.kind == Device.Kind.CONTROLLER), None)
+    metrics = snapshot["metrics"] if snapshot else {}; schedule = None
     active_subscription = get_customer_subscription(org)
     if device:
         for channel in device.channels.filter(kind=Channel.Kind.SENSOR):
             reading = channel.readings.order_by("-recorded_at").first(); metrics[channel.metric] = {"value": reading.decimal_value if reading else None, "unit": channel.unit}
         schedule = LightingSchedule.objects.filter(actuator__device=device, enabled=True).first()
-    return render(request, "customer/dashboard.html", {"organization": org, "gardens": gardens, "has_garden": gardens.exists(), "active_subscription": active_subscription, "device": device, "has_telemetry": any(item["value"] is not None for item in metrics.values()), "metrics": metrics, "schedule": schedule, "cycles": get_customer_cycles(org).filter(status=PlantingCycle.Status.ACTIVE)[:6], "alerts": Alert.objects.filter(rule__organization=org).select_related("rule")[:5], "next_visit": get_customer_visits(org).filter(scheduled_start__gte=timezone.now()).order_by("scheduled_start").first()})
+    return render(request, "customer/dashboard.html", {"organization": org, "gardens": gardens, "garden": garden, "snapshot": snapshot, "has_garden": bool(garden), "active_subscription": active_subscription, "device": device, "has_telemetry": bool(metrics), "metrics": metrics, "schedule": schedule, "cycles": get_customer_cycles(org).filter(status=PlantingCycle.Status.ACTIVE)[:6], "alerts": snapshot["alerts"] if snapshot else [], "next_visit": get_customer_visits(org).filter(scheduled_start__gte=timezone.now()).order_by("scheduled_start").first()})
 
 
 @customer_required
@@ -272,7 +278,7 @@ def device_action(request):
     messages.success(request, "Comando enviado ao controlador."); return redirect("customer-dashboard")
 
 
-@customer_required
+@operations_required
 def lighting_schedule(request, schedule_id):
     schedule = get_object_or_404(LightingSchedule, id=schedule_id, actuator__device__organization=request.membership.organization); form = LightingScheduleForm(request.POST or None, instance=schedule)
     if request.method == "POST" and form.is_valid(): form.save(); messages.success(request, "Programação atualizada."); return redirect("customer-dashboard")
@@ -297,7 +303,7 @@ def profile(request):
 @technician_required
 def tech_dashboard(request):
     visits = get_technician_visits(request.user).filter(scheduled_start__date=timezone.localdate())
-    return render(request, "operations/dashboard.html", {"visits": visits, "today_count": visits.count(), "work_orders": get_technician_orders(request.user).exclude(status__in=[WorkOrder.Status.COMPLETED, WorkOrder.Status.CANCELED])})
+    return render(request, "operations/dashboard_v2.html", {"visits": visits, "today_count": visits.count(), "work_orders": get_technician_orders(request.user).exclude(status__in=[WorkOrder.Status.COMPLETED, WorkOrder.Status.CANCELED]), "gardens": gardens_for_user(request.user).select_related("organization")})
 
 
 @technician_required
@@ -305,30 +311,61 @@ def tech_visits(request):
     return render(request, "operations/visits.html", {"visits": get_technician_visits(request.user)})
 
 
+@login_required
+def garden_detail(request, garden_id):
+    garden = get_object_or_404(gardens_for_user(request.user).select_related("organization", "address", "primary_technician"), id=garden_id)
+    return render(request, "shared/garden_detail.html", {"snapshot": garden_snapshot(garden), "technical": request.user.is_staff or request.user.memberships.filter(role=Membership.Role.TECHNICIAN, is_active=True).exists()})
+
+
+@login_required
+def garden_photo(request, photo_id):
+    photo = get_object_or_404(GardenPhoto.objects.select_related("garden"), id=photo_id, garden__in=gardens_for_user(request.user))
+    response = HttpResponse(bytes(photo.image_data), content_type=photo.content_type)
+    response["Cache-Control"] = "private, max-age=60"
+    response["X-Content-Type-Options"] = "nosniff"
+    return response
+
+
 @technician_required
 def visit_detail(request, visit_id):
     visit = get_object_or_404(Visit.objects.select_related("organization", "garden", "work_order"), id=visit_id, technician=request.user)
-    checklist, _ = ChecklistExecution.objects.get_or_create(visit=visit, defaults={"items": [{"label": label, "done": False} for label in ("Verificar estrutura", "Verificar bomba", "Iluminação", "Reservatório", "Sensores", "Limpeza", "Substrato", "Culturas", "Teste final")]})
-    return render(request, "operations/visit_detail.html", {"visit": visit, "checklist": checklist})
+    checklist, _ = ChecklistExecution.objects.get_or_create(visit=visit, defaults={"items": [{"label": label, "done": False, "status": "not_tested"} for label in ("Identificar horta", "Vincular ESP8266", "Vincular ESP32-CAM", "Configurar Wi-Fi local", "Testar sensores", "Testar câmera", "Testar bomba", "Testar iluminação", "Confirmar cultura e configuração", "Teste final")]})
+    snapshot = garden_snapshot(visit.garden)
+    controller = next((device for device in snapshot["devices"] if device.kind == Device.Kind.CONTROLLER), None)
+    camera = next((device for device in snapshot["devices"] if device.kind == Device.Kind.CAMERA), None)
+    return render(request, "operations/visit_detail_v2.html", {"visit": visit, "checklist": checklist, "snapshot": snapshot, "controller": controller, "camera": camera})
 
 
 @technician_required
 @require_POST
 def visit_update(request, visit_id):
     visit = get_object_or_404(Visit, id=visit_id, technician=request.user); checklist, _ = ChecklistExecution.objects.get_or_create(visit=visit, defaults={"items": []})
+    labels = request.POST.getlist("all_item")
+    if labels:
+        items = []
+        checked = set(request.POST.getlist("check_item"))
+        for index, label in enumerate(labels):
+            status = request.POST.get(f"item_status_{index}")
+            if status not in {"not_tested", "ok", "failed"}:
+                status = "ok" if label in checked else "not_tested"
+            items.append({"label": label, "status": status, "done": status == "ok"})
+        checklist.items = items
+        checklist.save(update_fields=["items", "updated_at"])
     if request.POST.get("action") == "complete":
         visit.status = Visit.Status.COMPLETED; visit.notes = request.POST.get("notes", ""); visit.save(update_fields=["status", "notes", "updated_at"])
         if visit.work_order: visit.work_order.status = WorkOrder.Status.COMPLETED; visit.work_order.completed_at = timezone.now(); visit.work_order.save(update_fields=["status", "completed_at", "updated_at"])
         messages.success(request, "Visita concluída.")
     else:
-        checklist.items = [{"label": label, "done": label in request.POST.getlist("check_item")} for label in request.POST.getlist("all_item")]; checklist.save(); messages.success(request, "Checklist salvo.")
+        messages.success(request, "Checklist salvo.")
     return redirect("visit-detail", visit_id=visit.id)
 
 
 @operations_required
 def ops_dashboard(request):
     today = timezone.localdate()
-    metrics = {"Clientes ativos": Organization.objects.filter(is_active=True).count(), "Assinaturas": Subscription.objects.filter(status=Subscription.Status.ACTIVE).count(), "Hortas instaladas": Garden.objects.filter(is_active=True).count(), "Módulos ativos": GardenModule.objects.filter(status=GardenModule.Status.INSTALLED).count(), "Dispositivos online": Device.objects.filter(status=Device.Status.ONLINE).count(), "Dispositivos offline": Device.objects.filter(status=Device.Status.OFFLINE).count(), "Visitas hoje": Visit.objects.filter(scheduled_start__date=today).count(), "Ordens abertas": WorkOrder.objects.exclude(status__in=[WorkOrder.Status.COMPLETED, WorkOrder.Status.CANCELED]).count(), "Alertas críticos": Alert.objects.filter(status=Alert.Status.OPEN, rule__severity__gte=3).count()}
+    online_cutoff = timezone.now() - timedelta(seconds=settings.DEVICE_ONLINE_THRESHOLD_SECONDS)
+    active_devices = Device.objects.exclude(status=Device.Status.RETIRED)
+    metrics = {"Clientes ativos": Organization.objects.filter(is_active=True).count(), "Assinaturas": Subscription.objects.filter(status=Subscription.Status.ACTIVE).count(), "Hortas instaladas": Garden.objects.filter(is_active=True).count(), "Módulos ativos": GardenModule.objects.filter(status=GardenModule.Status.INSTALLED).count(), "Dispositivos online": active_devices.filter(last_seen_at__gte=online_cutoff).count(), "Dispositivos offline": active_devices.filter(Q(last_seen_at__lt=online_cutoff) | Q(last_seen_at__isnull=True)).count(), "Visitas hoje": Visit.objects.filter(scheduled_start__date=today).count(), "Ordens abertas": WorkOrder.objects.exclude(status__in=[WorkOrder.Status.COMPLETED, WorkOrder.Status.CANCELED]).count(), "Alertas críticos": Alert.objects.filter(status=Alert.Status.OPEN, rule__severity__gte=3).count()}
     return render(request, "admin_portal/dashboard.html", {"metrics": metrics, "visits": Visit.objects.filter(scheduled_start__date=today).select_related("organization", "technician")[:8], "alerts": Alert.objects.filter(status=Alert.Status.OPEN).select_related("rule", "rule__channel__device").order_by("-rule__severity")[:8]})
 
 

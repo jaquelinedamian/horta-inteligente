@@ -213,16 +213,17 @@ sensor compatível; o sistema não deve inferir esse valor.
 
 ## Arquitetura IoT
 
-Os dois microcontroladores sao independentes e compartilham apenas a rede Wi-Fi.
-O ESP8266 continua responsavel por sensores, automacao, bomba e reles; a
-ESP32-CAM e dedicada a imagem. O Django apresenta os dois na tela existente
-**Minha Horta**.
+Os dois microcontroladores operam de forma independente, autenticam-se com
+`device_id` e token e enviam dados ao Django. O ESP8266 continua responsável
+por sensores e automação local; a ESP32-CAM envia fotografias. O Django é a
+fonte normal das telas de cliente, técnico e admin.
 
 ```text
-ESP8266 / Wemos -- HTTP JSON /dados --+
-                                      +--> Dashboard Django (Minha Horta)
-ESP32-CAM ------- HTTP /capture ------+
-                  HTTP /stream (MJPEG)
+ESP8266 ---------- telemetria/configuração ---+
+                                              +--> Django/PostgreSQL
+ESP32-CAM -------- fotografias ---------------+          |
+                                                   +------+------+
+                                                Cliente Técnico Admin
 ```
 
 ### ESP8266 local
@@ -256,23 +257,22 @@ O driver oficial atual da Espressif suporta OV2640 e OV5640. A marcacao
 a placa AI Thinker; consulte a secao OV5640 do README do firmware antes de
 trocar a camera.
 
-### Configurar IPs no dashboard
+### IPs locais para diagnóstico
 
-Depois de obter os dois IPs no Monitor Serial, edite somente
+O funcionamento normal não usa IP privado no frontend. O arquivo
 [`static/js/device-config.js`](static/js/device-config.js):
 
 ```javascript
 window.HORTA_DEVICE_CONFIG = Object.freeze({
-  ESP8266_BASE_URL: "http://192.168.0.50",
-  ESP32_CAM_BASE_URL: "http://192.168.0.51",
+  ESP8266_BASE_URL: "", // preencha apenas para diagnóstico local
+  ESP32_CAM_BASE_URL: "",
   CAMERA_AUTO_REFRESH_MS: 0,
 });
 ```
 
-O valor `0` desativa polling da camera; a imagem e carregada ao abrir a pagina
-e pelo botao **Atualizar imagem**. Se habilitar atualizacao automatica, o script
-aceita apenas intervalos de pelo menos 10 segundos. Reserve os IPs no DHCP do
-roteador para evitar mudancas frequentes.
+e os scripts locais permanecem somente para bancada, instalação e diagnóstico;
+eles não são carregados pela tela do cliente. `/dados`, `/capture` e `/stream`
+continuam úteis na mesma rede durante suporte.
 
 ### Limite de acesso local
 
@@ -287,6 +287,110 @@ Os firmwares locais enviam CORS para leituras sem credenciais. Como os endpoints
 nao possuem autenticacao, use uma rede Wi-Fi confiavel/isolada; o curinga CORS
 nao transforma os dispositivos em publicos, mas qualquer pagina acessada por um
 cliente dentro dessa rede pode tentar consulta-los.
+
+## Perfis e permissões
+
+- **Cliente:** vê somente hortas das organizações em que possui papel de
+  proprietário, gestor ou leitura. Não recebe IP, token ou configuração
+  técnica e não edita regras críticas.
+- **Técnico:** vê somente hortas em que é técnico principal, possui visita,
+  ordem atribuída ou permissão explícita. Usa o checklist de instalação e a
+  visão de diagnóstico em campo.
+- **Admin:** usuário `is_staff`/superusuário com acesso global ao backoffice,
+  culturas, planos, clientes, técnicos, hortas, dispositivos e operações.
+
+O selector `gardens_for_user()` aplica esse escopo no backend. A mesma visão de
+status/telemetria/fotografia é reutilizada pelos três perfis e revalida o objeto
+por ID; esconder links no HTML não é usado como controle de segurança.
+
+```text
+Admin
+  +--> Cliente
+  +--> Técnico
+  +--> Horta
+         +--> ESP8266
+         +--> ESP32-CAM
+```
+
+## Fluxo de instalação
+
+```text
+Admin cria instalação e atribui técnico
+        ↓
+Técnico instala e abre o AP Horta-XXXX
+        ↓
+Configura Wi-Fi localmente (senha não passa pelo Django)
+        ↓
+Vincula ESP8266 e ESP32-CAM por device_id/credencial
+        ↓
+Testa sensores, câmera, bomba e iluminação
+        ↓
+Confirma cultura/configuração e finaliza checklist
+        ↓
+Cliente passa a acompanhar a horta
+```
+
+Na instalação física, o técnico configura o Wi-Fi **uma única vez**:
+
+```text
+Admin cria horta
+        ↓
+Atribui técnico
+        ↓
+Técnico liga o equipamento e conecta em Horta-XXXX
+        ↓
+Seleciona a rede e informa a senha no portal local
+        ↓
+ESP8266 salva e envia JSON por UART à ESP32-CAM
+        ↓
+ESP32-CAM persiste no NVS e confirma por ACK
+        ↓
+Ambos ficam online; técnico testa e finaliza a instalação
+        ↓
+Cliente passa a acompanhar
+```
+
+O ACK da câmera tem timeout: uma câmera ausente nunca bloqueia sensores ou
+automação. A identidade `HRT-XXXX-CTRL`/`HRT-XXXX-CAM`, tokens e CA são gravados
+na preparação do kit; o técnico apenas vincula o kit no sistema.
+
+Para mudar de residência, mantenha o botão entre D0 e GND pressionado por 5
+segundos. O controlador envia `wifi_reset` à câmera, ambos apagam apenas suas
+credenciais Wi-Fi e o ESP8266 volta ao AP. A senha nunca passa pelo Django.
+
+O protocolo usa JSON por linha a 9600 baud, com ArduinoJson e mensagens de até
+384 bytes. A UART usa D7→GPIO13, GPIO14→D6 e GND comum. Na AI Thinker,
+GPIO13/GPIO14 compartilham o barramento do microSD; esta ligação pressupõe que o
+slot microSD não será usado.
+
+## APIs atuais dos dispositivos
+
+Autenticação: `Authorization: Device <prefixo.segredo>` e, nas APIs novas,
+`X-Device-ID: <serial_number>`. O servidor compara o identificador ao dispositivo
+do token. Tokens permanentes nunca devem ser incluídos em QR público.
+
+- `POST /api/device/telemetry/`: payload simplificado do controlador;
+- `POST /api/device/photo/`: JPEG da câmera, limitado a 5 MiB por padrão;
+- `GET /api/device/config/`: configuração efetiva da cultura mais exceções da horta;
+- `/api/v1/device/*`: API anterior de telemetria, heartbeat e comandos, mantida
+  para compatibilidade.
+
+Fotografias do MVP são guardadas no banco para não depender do filesystem
+efêmero do Render. Para escala maior, migre os binários para object storage.
+
+## Culturas, automação e serviços
+
+`CropCultivationProfile.automation_config` guarda padrões de irrigação,
+fertilização e iluminação. `Garden.automation_overrides` contém somente as
+exceções daquela horta; a API faz merge recursivo sem alterar o padrão global.
+O ESP8266 guarda a última configuração válida no LittleFS e mantém a irrigação
+por horário sem internet. No MVP, o fuso embarcado está fixado em UTC-3 para
+`America/Sao_Paulo`.
+
+Planos, assinaturas e benefícios existentes formam o catálogo de serviços.
+Pedidos avulsos continuam pelo fluxo de chamados/ordens, sem gateway de
+pagamento novo. Organização, horta, responsável e atribuições preservam o
+isolamento entre clientes e técnicos.
 
 ## Checklist antes do push
 

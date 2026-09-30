@@ -1,0 +1,11 @@
+{% extends 'base.html' %}{% block content %}
+<div class="page-header"><div><span class="eyebrow">{{ snapshot.garden.organization.name }}</span><h1>{{ snapshot.garden.name }}</h1><p class="text-muted">{% if snapshot.online %}Online{% else %}Offline{% endif %}{% if snapshot.last_seen %} · contato há {{ snapshot.last_seen|timesince }}{% endif %}</p></div></div>
+<div class="row g-3 mb-4">
+  <div class="col-6 col-xl-3"><div class="metric-card"><small>Temperatura</small><div class="metric-value">{{ snapshot.metrics.air_temperature.value|default:'--' }} {{ snapshot.metrics.air_temperature.unit }}</div></div></div>
+  <div class="col-6 col-xl-3"><div class="metric-card"><small>Umidade</small><div class="metric-value">{{ snapshot.metrics.air_humidity.value|default:'--' }} {{ snapshot.metrics.air_humidity.unit }}</div></div></div>
+  <div class="col-6 col-xl-3"><div class="metric-card"><small>Nível de água</small><div class="metric-value">{{ snapshot.metrics.water_level.value|default:'--' }} {{ snapshot.metrics.water_level.unit }}</div></div></div>
+  <div class="col-6 col-xl-3"><div class="metric-card"><small>Cultura</small><div class="metric-value fs-4">{% if snapshot.cycle %}{{ snapshot.cycle.crop.common_name|default:snapshot.cycle.cultivar.crop.common_name }}{% else %}--{% endif %}</div></div></div>
+</div>
+<div class="row g-4"><div class="col-lg-7"><div class="content-card"><h2 class="h4">Última fotografia</h2>{% if snapshot.latest_photo %}<div class="horta-camera-frame"><img src="{% url 'garden-photo' snapshot.latest_photo.id %}" alt="Última fotografia da horta"></div><small class="text-muted">{{ snapshot.latest_photo.captured_at|date:'d/m/Y H:i' }}</small>{% else %}<div class="empty-state">Nenhuma foto recebida.</div>{% endif %}</div></div>
+{% if technical %}<div class="col-lg-5"><div class="content-card"><h2 class="h4">Diagnóstico</h2>{% for device in snapshot.devices %}<div class="border-bottom py-3"><strong>{{ device.name }}</strong><span class="badge-soft ms-2">{{ device.get_kind_display }}</span><small class="d-block text-muted">Firmware {{ device.firmware_version|default:'não informado' }} · {% if device.last_seen_at %}{{ device.last_seen_at|timesince }}{% else %}sem contato{% endif %}</small></div>{% empty %}<p>Nenhum dispositivo vinculado.</p>{% endfor %}</div></div>{% endif %}</div>
+{% endblock %}

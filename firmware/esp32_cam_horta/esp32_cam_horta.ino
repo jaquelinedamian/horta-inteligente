@@ -1,5 +1,9 @@
 #include <Arduino.h>
 #include <WiFi.h>
+#include <HTTPClient.h>
+#include <WiFiClientSecure.h>
+#include <Preferences.h>
+#include <ArduinoJson.h>
 #include "esp_camera.h"
 #include "esp_http_server.h"
 #include "img_converters.h"
@@ -9,6 +13,94 @@
 namespace {
 httpd_handle_t cameraServer = nullptr;
 constexpr char STREAM_BOUNDARY[] = "horta-camera-boundary";
+unsigned long lastPhotoUploadAt = 0;
+HardwareSerial provisionSerial(2);
+Preferences wifiPreferences;
+String provisionLine;
+unsigned long lastWifiAttemptAt = 0;
+bool servicesStarted = false;
+
+bool loadWifiCredentials(String& ssid, String& password) {
+  wifiPreferences.begin("horta-wifi", true);
+  ssid = wifiPreferences.getString("ssid", "");
+  password = wifiPreferences.getString("password", "");
+  wifiPreferences.end();
+  return !ssid.isEmpty();
+}
+
+void saveWifiCredentials(const String& ssid, const String& password) {
+  wifiPreferences.begin("horta-wifi", false);
+  wifiPreferences.putString("ssid", ssid);
+  wifiPreferences.putString("password", password);
+  wifiPreferences.end();
+}
+
+void sendProvisionAck(const char* type) {
+  JsonDocument response;
+  response["type"] = type;
+  response["status"] = "ok";
+  serializeJson(response, provisionSerial);
+  provisionSerial.write('\n');
+  provisionSerial.flush();
+}
+
+void connectStoredWifi() {
+  String ssid, password;
+  if (!loadWifiCredentials(ssid, password)) {
+    Serial.println("Wi-Fi nao configurado; aguardando ESP8266 pela UART");
+    return;
+  }
+  WiFi.mode(WIFI_STA);
+  WiFi.setSleep(false);
+  WiFi.begin(ssid.c_str(), password.c_str());
+  lastWifiAttemptAt = millis();
+  Serial.printf("Conectando ao SSID salvo: %s\n", ssid.c_str());
+}
+
+void handleProvisionMessage(const String& line) {
+  JsonDocument message;
+  if (deserializeJson(message, line)) {
+    Serial.println("Provisionamento ignorado: JSON invalido");
+    return;
+  }
+  const char* type = message["type"] | "";
+  if (!strcmp(type, "wifi_config")) {
+    String ssid = message["ssid"] | "";
+    String password = message["password"] | "";
+    if (ssid.isEmpty() || ssid.length() > 32 || password.length() > 63) {
+      Serial.println("Provisionamento ignorado: credenciais fora dos limites");
+      return;
+    }
+    saveWifiCredentials(ssid, password);
+    sendProvisionAck("wifi_ack");
+    Serial.printf("Nova configuracao Wi-Fi salva para SSID: %s\n", ssid.c_str());
+    delay(200);
+    ESP.restart();
+  }
+  if (!strcmp(type, "wifi_reset")) {
+    wifiPreferences.begin("horta-wifi", false);
+    wifiPreferences.clear();
+    wifiPreferences.end();
+    sendProvisionAck("wifi_reset_ack");
+    Serial.println("Credenciais Wi-Fi apagadas");
+    delay(200);
+    WiFi.disconnect(true, true);
+    ESP.restart();
+  }
+}
+
+void processProvisionSerial() {
+  while (provisionSerial.available()) {
+    char value = static_cast<char>(provisionSerial.read());
+    if (value == '\n') {
+      if (!provisionLine.isEmpty()) handleProvisionMessage(provisionLine);
+      provisionLine = "";
+    } else if (value != '\r') {
+      if (provisionLine.length() < 384) provisionLine += value;
+      else provisionLine = "";
+    }
+  }
+}
 
 void addCommonHeaders(httpd_req_t* request) {
   // Leitura local sem credenciais. Restrinja a rede Wi-Fi a dispositivos confiaveis.
@@ -144,30 +236,79 @@ bool startHttpServer() {
          httpd_register_uri_handler(cameraServer, &capture) == ESP_OK &&
          httpd_register_uri_handler(cameraServer, &stream) == ESP_OK;
 }
+
+void uploadPhoto() {
+  if (WiFi.status() != WL_CONNECTED) return;
+  camera_fb_t* frame = esp_camera_fb_get();
+  if (!frame) {
+    Serial.println("Upload: falha ao capturar imagem");
+    return;
+  }
+  if (frame->format != PIXFORMAT_JPEG) {
+    Serial.println("Upload: frame nao e JPEG");
+    esp_camera_fb_return(frame);
+    return;
+  }
+
+  HTTPClient http;
+  WiFiClient plain;
+  WiFiClientSecure secure;
+  String url = String(API_BASE_URL) + "/api/device/photo/";
+  bool started = false;
+  if (url.startsWith("https://")) {
+    if (strlen(HTTPS_ROOT_CA) < 40) {
+      Serial.println("Upload HTTPS recusado: configure HTTPS_ROOT_CA");
+      esp_camera_fb_return(frame);
+      return;
+    }
+    secure.setCACert(HTTPS_ROOT_CA);
+    started = http.begin(secure, url);
+  } else {
+    started = http.begin(plain, url);
+  }
+  if (!started) {
+    esp_camera_fb_return(frame);
+    return;
+  }
+  http.setTimeout(15000);
+  http.addHeader("Authorization", String("Device ") + DEVICE_TOKEN);
+  http.addHeader("X-Device-ID", DEVICE_ID);
+  http.addHeader("Content-Type", "image/jpeg");
+  int status = http.POST(frame->buf, frame->len);
+  Serial.printf("Upload da foto: HTTP %d\n", status);
+  http.end();
+  esp_camera_fb_return(frame);
+}
 }  // namespace
 
 void setup() {
   Serial.begin(115200);
+  provisionSerial.begin(9600, SERIAL_8N1, 13, 14);
   Serial.setDebugOutput(true);
   Serial.println("\nIniciando ESP32-CAM da Horta (AI Thinker)...");
 
   if (!startCamera()) return;
 
-  WiFi.mode(WIFI_STA);
-  WiFi.setSleep(false);
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-  Serial.print("Conectando ao Wi-Fi");
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    Serial.print('.');
-  }
-
-  Serial.println("\nWi-Fi conectado.");
-  Serial.print("IP da camera: http://");
-  Serial.println(WiFi.localIP());
-  Serial.println(startHttpServer() ? "HTTP ativo: /, /capture e /stream" : "Falha ao iniciar HTTP");
+  connectStoredWifi();
 }
 
 void loop() {
-  delay(10000);
+  processProvisionSerial();
+  if (WiFi.status() == WL_CONNECTED && !servicesStarted) {
+    Serial.print("Wi-Fi conectado. IP da camera: http://");
+    Serial.println(WiFi.localIP());
+    servicesStarted = startHttpServer();
+    Serial.println(servicesStarted ? "HTTP ativo: /, /capture e /stream" : "Falha ao iniciar HTTP");
+    uploadPhoto();
+    lastPhotoUploadAt = millis();
+  }
+  if (WiFi.status() != WL_CONNECTED && millis() - lastWifiAttemptAt >= 15000UL) {
+    lastWifiAttemptAt = millis();
+    connectStoredWifi();
+  }
+  if (millis() - lastPhotoUploadAt >= PHOTO_INTERVAL_MS) {
+    lastPhotoUploadAt = millis();
+    uploadPhoto();
+  }
+  delay(20);
 }

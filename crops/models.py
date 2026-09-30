@@ -149,6 +149,10 @@ class CropCultivationProfile(BaseModel):
     ec_min = models.DecimalField(max_digits=6, decimal_places=3, null=True, blank=True)
     ec_target = models.DecimalField(max_digits=6, decimal_places=3, null=True, blank=True)
     ec_max = models.DecimalField(max_digits=6, decimal_places=3, null=True, blank=True)
+    automation_config = models.JSONField(
+        default=dict, blank=True,
+        help_text="Regras padrão de irrigação, fertilização e iluminação.",
+    )
     def __str__(self): return f"{self.crop.common_name} — {self.name}"
 
 
