@@ -17,9 +17,9 @@ class DeviceApiTests(TestCase):
         self.garden = Garden.objects.create(organization=self.organization, name="Horta", code="horta")
         model = DeviceModel.objects.create(name="Wemos D1 Mini", code="wemos", hardware_platform="ESP8266")
         self.device = Device.objects.create(organization=self.organization, garden=self.garden, model=model, serial_number="ESP-1", name="Controlador")
-        self.temperature_channel = Channel.objects.create(device=self.device, key="air-temperature", name="Temperatura", kind="sensor", metric="air_temperature", unit="°C")
-        self.pressure_channel = Channel.objects.create(device=self.device, key="air-pressure", name="Pressão", kind="sensor", metric="air_pressure", unit="hPa")
-        self.actuator = Channel.objects.create(device=self.device, key="pump", name="Bomba", kind="actuator", metric="pump_state", value_type="boolean")
+        self.temperature_channel = self.device.channels.get(key="air-temperature")
+        self.pressure_channel = self.device.channels.get(key="air-pressure")
+        self.actuator = self.device.channels.get(key="pump")
         _, self.token = DeviceCredential.issue(self.device)
         self.headers = {"HTTP_AUTHORIZATION": f"Device {self.token}"}
 
@@ -87,7 +87,7 @@ class DeviceApiTests(TestCase):
         self.assertEqual(response.status_code, 403)
         response = self.client.post(
             reverse("device_api:telemetry"),
-            json.dumps({"device_id": self.device.serial_number, "temperature": 24.5}),
+            json.dumps({"device_id": str(self.device.id), "temperature": 24.5}),
             content_type="application/json", **self.headers,
         )
         self.assertEqual(response.status_code, 202)
@@ -98,7 +98,7 @@ class DeviceApiTests(TestCase):
         _, token = DeviceCredential.issue(camera)
         response = self.client.post(
             reverse("device_api:photo"), b"\xff\xd8jpeg-test\xff\xd9", content_type="image/jpeg",
-            HTTP_AUTHORIZATION=f"Device {token}", HTTP_X_DEVICE_ID="CAM-1",
+            HTTP_AUTHORIZATION=f"Device {token}", HTTP_X_DEVICE_ID=str(camera.id),
         )
         self.assertEqual(response.status_code, 201)
         self.assertEqual(GardenPhoto.objects.filter(garden=self.garden, device=camera).count(), 1)
@@ -129,6 +129,55 @@ class DeviceApiTests(TestCase):
         PlantingCycle.objects.create(organization=self.organization, garden=self.garden, module=module, crop=crop, cultivar=cultivar, cultivation_profile=profile, status=PlantingCycle.Status.ACTIVE)
         self.garden.automation_overrides = {"irrigation": {"duration_seconds": 45}}
         self.garden.save(update_fields=["automation_overrides"])
-        response = self.client.get(reverse("device_api:configuration"), HTTP_X_DEVICE_ID="ESP-1", **self.headers)
+        response = self.client.get(reverse("device_api:configuration"), HTTP_X_DEVICE_ID=str(self.device.id), **self.headers)
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["irrigation"], {"enabled": True, "times": ["08:00"], "duration_seconds": 45})
+
+
+class ControllerChannelProvisioningTests(TestCase):
+    def setUp(self):
+        self.organization = Organization.objects.create(name="Cliente", slug="provisioning")
+        self.model = DeviceModel.objects.create(name="Wemos D1 Mini", code="provisioning-wemos", hardware_platform="ESP8266")
+
+    def test_new_controller_receives_standard_channels(self):
+        device = Device.objects.create(
+            organization=self.organization, model=self.model,
+            serial_number="ESP-DEFAULTS", name="Controlador",
+        )
+        self.assertEqual(
+            set(device.channels.values_list("key", flat=True)),
+            {"air-temperature", "air-pressure", "pump"},
+        )
+        self.assertEqual(device.channels.get(key="air-temperature").metric, "air_temperature")
+        self.assertEqual(device.channels.get(key="air-pressure").kind, Channel.Kind.SENSOR)
+        self.assertEqual(device.channels.get(key="pump").kind, Channel.Kind.ACTUATOR)
+
+    def test_ensure_defaults_is_idempotent_and_preserves_custom_channels(self):
+        from devices.services import ensure_controller_default_channels
+
+        device = Device.objects.create(
+            organization=self.organization, model=self.model,
+            serial_number="ESP-CUSTOM", name="Controlador",
+        )
+        custom = Channel.objects.create(
+            device=device, key="soil-moisture", name="Solo",
+            kind=Channel.Kind.SENSOR, metric="soil_moisture",
+        )
+        temperature = device.channels.get(key="air-temperature")
+        temperature.name = "Sensor personalizado"
+        temperature.is_enabled = False
+        temperature.save(update_fields=["name", "is_enabled", "updated_at"])
+
+        self.assertEqual(ensure_controller_default_channels(device), [])
+        self.assertEqual(device.channels.count(), 4)
+        temperature.refresh_from_db()
+        self.assertEqual(temperature.name, "Sensor personalizado")
+        self.assertFalse(temperature.is_enabled)
+        self.assertTrue(Channel.objects.filter(pk=custom.pk).exists())
+
+    def test_camera_does_not_receive_controller_channels(self):
+        camera = Device.objects.create(
+            organization=self.organization, model=self.model,
+            serial_number="CAM-NO-DEFAULTS", name="Câmera", kind=Device.Kind.CAMERA,
+        )
+        self.assertFalse(camera.channels.exists())

@@ -22,14 +22,14 @@ apos o tempo definido por `SAFE_PUMP_DURATION_MS` (10 segundos no exemplo).
 
 1. Instale PlatformIO.
 2. Copie `include/device_config.example.h` para `include/device_config.h`.
-3. Preencha URL, `DEVICE_ID`, token e a CA raiz HTTPS. SSID e senha não fazem
+3. Preencha URL, `DEVICE_ID` com o UUID imutável do Device, token e a CA raiz HTTPS. SSID e senha não fazem
    parte desse arquivo: o provisionamento usa o portal local.
 4. Execute `pio run --target upload` e depois `pio device monitor`.
 
 Emita o token em **Gestao > Dispositivos > dispositivo > Gerar e rotacionar
-credencial**. Cadastre os canais `air-temperature` (sensor, `air_temperature`,
-I2C), `air-pressure` (sensor, `air_pressure`, I2C) e `pump` (atuador,
-`pump_state`, D5). O firmware envia telemetria/heartbeat e busca comandos nas
+credencial**. A plataforma cria automaticamente os canais `air-temperature`
+(sensor, `air_temperature`, I2C), `air-pressure` (sensor, `air_pressure`, I2C)
+e `pump` (atuador, `pump_state`, D5). O firmware envia telemetria/heartbeat e busca comandos nas
 rotas existentes em `/api/v1/device/`.
 
 O BMP280 nao mede umidade. `air-humidity` exige BME280, SHT3x ou equivalente.

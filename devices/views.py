@@ -30,7 +30,7 @@ def validate_device_id(request, payload=None):
         supplied = str(payload.get("device_id", "")).strip()
     if not supplied:
         raise ValueError("device_id é obrigatório")
-    if supplied != request.device.serial_number:
+    if supplied != str(request.device.id):
         raise PermissionError("device_id não corresponde ao token")
 
 
@@ -145,7 +145,7 @@ def telemetry_v2(request):
                 })
         if not readings:
             raise ValueError("nenhuma métrica conhecida corresponde aos canais do dispositivo")
-        return JsonResponse({"device_id": request.device.serial_number, "readings": ingest_readings(request.device, readings)}, status=202)
+        return JsonResponse({"device_id": str(request.device.id), "readings": ingest_readings(request.device, readings)}, status=202)
     except PermissionError as exc:
         return JsonResponse({"error": "device_mismatch", "detail": str(exc)}, status=403)
     except ValueError as exc:

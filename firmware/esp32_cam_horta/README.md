@@ -9,7 +9,7 @@ imagem. Ele oferece `GET /`, `GET /capture` (JPEG atual) e `GET /stream`
 1. Instale no Arduino IDE o pacote **esp32 by Espressif Systems** atualizado e
    a biblioteca **WiFiManager 2.0.17 ou compatível**.
 2. Copie `wifi_config.example.h` para `wifi_config.h` nesta pasta.
-3. Preencha somente a identidade pre-provisionada do kit, a URL HTTPS, token e
+3. Preencha somente o UUID imutável do Device pre-provisionado, a URL HTTPS, token e
    CA raiz em `wifi_config.h`; o arquivo e ignorado pelo Git. SSID e senha não
    ficam nesse arquivo.
 4. Abra `esp32_cam_horta.ino` e selecione **AI Thinker ESP32-CAM**.

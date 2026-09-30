@@ -3,7 +3,7 @@
 // Copie para device_config.h e preencha localmente. Esse arquivo nao e versionado.
 #define API_BASE_URL "https://seu-servico.onrender.com"
 #define DEVICE_API_TOKEN "EXEMPLO_TOKEN_GERADO_NA_PLATAFORMA"
-#define DEVICE_ID "HORTA-001-CTRL"
+#define DEVICE_ID "00000000-0000-0000-0000-000000000000" // UUID do Device na plataforma
 
 // GlobalSign Root CA que ancora a cadeia atualmente servida pelo dominio Render.
 // Valida ate 2028-01-28; confirme a cadeia TLS antes de substituir ou renovar.

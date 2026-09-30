@@ -7,7 +7,46 @@ from django.db.models import Q
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
-from .models import Alert, AlertRule, Channel, DeviceCommand, TelemetryReading
+from .models import Alert, AlertRule, Channel, Device, DeviceCommand, TelemetryReading
+
+
+CONTROLLER_DEFAULT_CHANNELS = (
+    {
+        "key": "air-temperature", "name": "Temperatura do ar",
+        "kind": Channel.Kind.SENSOR, "metric": "air_temperature", "unit": "°C",
+        "value_type": Channel.ValueType.DECIMAL, "pin": "I2C",
+        "configuration": {"component": "BMP280"},
+    },
+    {
+        "key": "air-pressure", "name": "Pressão atmosférica",
+        "kind": Channel.Kind.SENSOR, "metric": "air_pressure", "unit": "hPa",
+        "value_type": Channel.ValueType.DECIMAL, "pin": "I2C",
+        "configuration": {"component": "BMP280"},
+    },
+    {
+        "key": "pump", "name": "Bomba",
+        "kind": Channel.Kind.ACTUATOR, "metric": "pump_state", "unit": "",
+        "value_type": Channel.ValueType.BOOLEAN, "pin": "D5",
+        "configuration": {"component": "relay_1ch", "active_low": True},
+    },
+)
+
+
+@transaction.atomic
+def ensure_controller_default_channels(device):
+    """Create only missing standard channels for an ESP8266 controller."""
+    if device.kind != Device.Kind.CONTROLLER:
+        return []
+    created = []
+    for definition in CONTROLLER_DEFAULT_CHANNELS:
+        channel, was_created = Channel.objects.get_or_create(
+            device=device,
+            key=definition["key"],
+            defaults=definition,
+        )
+        if was_created:
+            created.append(channel)
+    return created
 
 
 def parsed_datetime(value, field_name="recorded_at"):

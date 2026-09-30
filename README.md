@@ -366,7 +366,7 @@ conforme o README do firmware. Cada reset afeta somente o próprio dispositivo.
 ## APIs atuais dos dispositivos
 
 Autenticação: `Authorization: Device <prefixo.segredo>` e, nas APIs novas,
-`X-Device-ID: <serial_number>`. O servidor compara o identificador ao dispositivo
+`X-Device-ID: <UUID do Device>`. O servidor compara o UUID técnico e imutável ao dispositivo
 do token. Tokens permanentes nunca devem ser incluídos em QR público.
 
 - `POST /api/device/telemetry/`: payload simplificado do controlador;
