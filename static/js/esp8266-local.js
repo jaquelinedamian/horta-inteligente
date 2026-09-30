@@ -1,6 +1,5 @@
-// Endereco local exibido no Monitor Serial do ESP8266.
-// Altere somente esta constante quando o IP do dispositivo mudar.
-const ESP8266_URL = "http://192.168.15.16";
+// Configuracao compartilhada com a camera, definida em device-config.js.
+const ESP8266_BASE_URL = window.HORTA_DEVICE_CONFIG?.ESP8266_BASE_URL;
 
 const INTERVALO_ATUALIZACAO_MS = 3000;
 const TEMPO_LIMITE_MS = 2500;
@@ -76,11 +75,16 @@ if (painelESP8266) {
   }
 
   async function buscarDadosESP8266() {
+    if (!ESP8266_BASE_URL) {
+      mostrarFalha();
+      console.warn("ESP8266_BASE_URL nao foi configurada.");
+      return;
+    }
     const controlador = new AbortController();
     const timeout = setTimeout(() => controlador.abort(), TEMPO_LIMITE_MS);
 
     try {
-      const resposta = await fetch(`${ESP8266_URL}/dados`, {
+      const resposta = await fetch(`${ESP8266_BASE_URL}/dados`, {
         cache: "no-store",
         signal: controlador.signal,
       });

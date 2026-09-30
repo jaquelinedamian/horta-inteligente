@@ -211,6 +211,83 @@ Credenciais de Wi-Fi e o token ficam em um arquivo local ignorado pelo Git.
 O BMP280 não mede umidade. Para preencher `air-humidity`, use um BME280 ou outro
 sensor compatível; o sistema não deve inferir esse valor.
 
+## Arquitetura IoT
+
+Os dois microcontroladores sao independentes e compartilham apenas a rede Wi-Fi.
+O ESP8266 continua responsavel por sensores, automacao, bomba e reles; a
+ESP32-CAM e dedicada a imagem. O Django apresenta os dois na tela existente
+**Minha Horta**.
+
+```text
+ESP8266 / Wemos -- HTTP JSON /dados --+
+                                      +--> Dashboard Django (Minha Horta)
+ESP32-CAM ------- HTTP /capture ------+
+                  HTTP /stream (MJPEG)
+```
+
+### ESP8266 local
+
+O sketch local esta em
+[`firmware/horta_inteligente_local/horta_inteligente_local.ino`](firmware/horta_inteligente_local/horta_inteligente_local.ino).
+No Arduino IDE, instale o pacote ESP8266, selecione a placa Wemos/LOLIN D1 mini,
+configure os placeholders `WIFI_SSID` e `WIFI_SENHA`, grave e abra o Monitor
+Serial em **115200 baud**. O IP sera exibido apos a conexao. Seu endpoint e:
+
+- `GET http://IP_DO_ESP8266/dados` — temperatura, pressao e estados em JSON.
+
+O firmware PlatformIO mais completo, que envia telemetria para a API Django e
+controla o rele, permanece documentado em
+[`firmware/esp8266-bmp280-relay`](firmware/esp8266-bmp280-relay/README.md).
+Nao grave credenciais reais no sketch versionado.
+
+### ESP32-CAM
+
+O firmware e as instrucoes de gravacao estao em
+[`firmware/esp32_cam_horta`](firmware/esp32_cam_horta/README.md). No Arduino IDE,
+use **AI Thinker ESP32-CAM**, crie `wifi_config.h` a partir do exemplo, grave e
+abra o Monitor Serial em **115200 baud**. Endpoints:
+
+- `GET http://IP_DA_CAMERA/` — pagina simples de diagnostico;
+- `GET http://IP_DA_CAMERA/capture` — captura JPEG atual;
+- `GET http://IP_DA_CAMERA/stream` — stream MJPEG.
+
+O driver oficial atual da Espressif suporta OV2640 e OV5640. A marcacao
+`5640-B`, sozinha, nao comprova compatibilidade eletrica/mecanica do modulo com
+a placa AI Thinker; consulte a secao OV5640 do README do firmware antes de
+trocar a camera.
+
+### Configurar IPs no dashboard
+
+Depois de obter os dois IPs no Monitor Serial, edite somente
+[`static/js/device-config.js`](static/js/device-config.js):
+
+```javascript
+window.HORTA_DEVICE_CONFIG = Object.freeze({
+  ESP8266_BASE_URL: "http://192.168.0.50",
+  ESP32_CAM_BASE_URL: "http://192.168.0.51",
+  CAMERA_AUTO_REFRESH_MS: 0,
+});
+```
+
+O valor `0` desativa polling da camera; a imagem e carregada ao abrir a pagina
+e pelo botao **Atualizar imagem**. Se habilitar atualizacao automatica, o script
+aceita apenas intervalos de pelo menos 10 segundos. Reserve os IPs no DHCP do
+roteador para evitar mudancas frequentes.
+
+### Limite de acesso local
+
+Essa integracao direta e uma funcionalidade **local**: o navegador precisa
+estar na mesma rede e abrir o Django por HTTP local (por exemplo,
+`http://localhost:8000`). Uma pagina hospedada em HTTPS, como a do Render,
+normalmente nao pode carregar dispositivos `http://192.168.x.x` por bloqueio de
+mixed content e politicas de acesso a rede privada. Nao publique os IPs privados
+nem abra portas do roteador para contornar isso.
+
+Os firmwares locais enviam CORS para leituras sem credenciais. Como os endpoints
+nao possuem autenticacao, use uma rede Wi-Fi confiavel/isolada; o curinga CORS
+nao transforma os dispositivos em publicos, mas qualquer pagina acessada por um
+cliente dentro dessa rede pode tentar consulta-los.
+
 ## Checklist antes do push
 
 ```powershell

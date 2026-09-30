@@ -19,6 +19,24 @@
   </div>
   <p class="small text-warning mt-3 mb-0" data-esp8266-aviso>Sem resposta do dispositivo. Os últimos valores válidos, quando existentes, permanecem exibidos.</p>
 </section>
+<section class="content-card mb-4" data-horta-camera-painel>
+  <div class="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-3">
+    <div><span class="eyebrow">Visao local</span><h2 class="h4 mt-1 mb-0">Camera da Horta</h2></div>
+    <div class="text-md-end">
+      <strong class="d-block text-warning" data-horta-camera-status>Conectando</strong>
+      <small class="text-muted">Ultima captura: <span data-horta-camera-horario>--:--:--</span></small>
+    </div>
+  </div>
+  <div class="horta-camera-frame">
+    <img data-horta-camera-imagem alt="Imagem atual da camera da horta">
+  </div>
+  <div class="d-flex flex-wrap align-items-center gap-3 mt-3">
+    <button class="btn btn-outline-brand" type="button" data-horta-camera-atualizar>
+      <i class="bi bi-arrow-clockwise me-1"></i> Atualizar imagem
+    </button>
+    <p class="small text-warning mb-0" data-horta-camera-aviso>Conectando a camera local...</p>
+  </div>
+</section>
 <div class="row g-3 mb-4">
   <div class="col-6 col-xl-3"><div class="metric-card"><small class="text-muted">Temperatura</small><div class="metric-value">{{ metrics.air_temperature.value|default:'--' }}<small class="fs-6">{{ metrics.air_temperature.unit }}</small></div><span class="badge-soft">Ambiente</span>{% if metrics.air_pressure.value != None %}<small class="d-block text-muted mt-2">Pressão: {{ metrics.air_pressure.value }} {{ metrics.air_pressure.unit }}</small>{% endif %}</div></div>
   <div class="col-6 col-xl-3"><div class="metric-card"><small class="text-muted">Umidade</small><div class="metric-value">{{ metrics.air_humidity.value|default:'--' }}<small class="fs-6">{{ metrics.air_humidity.unit }}</small></div><span class="badge-soft">Ambiente</span></div></div>
@@ -31,4 +49,4 @@
 </div><div class="content-card mt-4"><div class="d-flex justify-content-between"><h3>Culturas ativas</h3><a href="{% url 'customer-section' 'crops' %}" class="text-success fw-bold">Ver todas</a></div><div class="row g-3 mt-1">{% for cycle in cycles %}<div class="col-md-6"><a href="{% url 'module-detail' cycle.module.id %}" class="soft-card d-flex align-items-center gap-3 shadow-none"><span class="fs-1">🌿</span><div><strong>{{ cycle.cultivar.crop.common_name }}</strong><small class="d-block text-muted">{{ cycle.module.serial_number }} · {{ cycle.get_status_display }}</small></div></a></div>{% empty %}<div class="empty-state py-4"><p>Nenhuma cultura ativa.</p></div>{% endfor %}</div></div></div>
 <div class="col-xl-5"><div class="content-card mb-4"><span class="eyebrow">Próxima visita</span>{% if next_visit %}<h3 class="mt-2">{{ next_visit.scheduled_start|date:'d M, H:i' }}</h3><p class="text-muted">{{ next_visit.visit_type }}</p><strong>{{ next_visit.technician.full_name|default:'Técnico a definir' }}</strong>{% else %}<div class="empty-state py-4"><i class="bi bi-calendar-check"></i><p class="mt-2">Nenhuma visita agendada.</p></div>{% endif %}</div><div class="content-card"><div class="d-flex justify-content-between"><h3>Alertas recentes</h3><a href="{% url 'customer-section' 'alerts' %}" class="text-success fw-bold">Ver todos</a></div>{% for alert in alerts %}<div class="d-flex gap-3 py-3 border-bottom"><div class="icon-box"><i class="bi bi-info-circle"></i></div><div><strong>{{ alert.rule.name }}</strong><p class="small text-muted mb-0">{{ alert.message }}</p></div></div>{% empty %}<div class="empty-state py-4"><i class="bi bi-check-circle"></i><p class="mt-2">Tudo tranquilo por aqui.</p></div>{% endfor %}</div></div></div>
 {% endblock %}
-{% block scripts %}<script src="{% static 'js/esp8266-local.js' %}"></script>{% endblock %}
+{% block scripts %}<script src="{% static 'js/device-config.js' %}"></script><script src="{% static 'js/esp8266-local.js' %}"></script><script src="{% static 'js/esp32-camera.js' %}"></script>{% endblock %}

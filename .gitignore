@@ -13,3 +13,4 @@ htmlcov/
 .vscode/
 .idea/
 firmware/**/include/device_config.h
+firmware/**/wifi_config.h
