@@ -63,8 +63,12 @@ Instale um botão momentâneo entre **D0/GPIO16 e GND**. Mantenha-o pressionado 
 ## HTTPS_ROOT_CA
 
 HTTPS é recusado quando `HTTPS_ROOT_CA` está vazio; o firmware não usa
-`setInsecure()`. Exporte a cadeia apresentada pelo domínio real do Render com
-uma ferramenta TLS confiável (por exemplo, navegador ou OpenSSL), identifique a
-CA raiz que valida essa cadeia e copie o PEM completo para a constante. Confira
-o emissor e a validade antes de gravar. A cadeia pode mudar, portanto não há CA
-aleatória ou específica do Render versionada neste repositório.
+`setInsecure()`. Em 30/09/2026, a cadeia apresentada por
+`horta-inteligente.onrender.com` era `onrender.com` -> `WE1` -> `GTS Root R4`
+(cross-signed) -> `GlobalSign Root CA`. O exemplo versiona o PEM da
+`GlobalSign Root CA` (SHA-1 `B1BC968BD4F49D622AA89A81F2150152A41D829C`),
+válida até 28/01/2028, como trust anchor do BearSSL.
+
+A cadeia do serviço pode mudar. Antes da expiração ou ao receber um erro de
+validação TLS, consulte novamente o domínio real com SNI, valide issuer,
+thumbprint e datas usando uma fonte TLS confiável, e atualize o PEM da raiz.
