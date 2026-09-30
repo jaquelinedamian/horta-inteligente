@@ -20,17 +20,10 @@ namespace {
 
 constexpr uint8_t RELAY_PIN = D5;
 
-// Botao entre D0 e GND.
-// Segurar por 5 segundos para apagar o Wi-Fi salvo.
-constexpr uint8_t WIFI_RESET_PIN = D0;
-
 constexpr bool RELAY_ACTIVE_LOW = true;
 
 constexpr char FIRMWARE_VERSION[] =
     "horta-esp8266-1.1.0";
-
-constexpr uint32_t WIFI_RESET_HOLD_MS = 5000;
-
 
 // ============================================================
 // SENSOR / ESTADO
@@ -53,10 +46,6 @@ uint32_t pumpStopAt = 0;
 
 String cachedConfiguration = "{}";
 String lastIrrigationBucket;
-
-uint32_t wifiResetPressedAt = 0;
-bool wifiResetTriggered = false;
-
 
 // ============================================================
 // RESET DE WIFI
@@ -89,35 +78,6 @@ void resetAllWifi() {
 }
 
 
-void checkWifiResetButton() {
-
-  if (digitalRead(WIFI_RESET_PIN) == LOW) {
-
-    if (!wifiResetPressedAt) {
-
-      wifiResetPressedAt = millis();
-    }
-
-    if (
-        !wifiResetTriggered &&
-        millis() - wifiResetPressedAt >= WIFI_RESET_HOLD_MS
-    ) {
-
-      wifiResetTriggered = true;
-
-      resetAllWifi();
-    }
-
-  }
-
-  else {
-
-    wifiResetPressedAt = 0;
-    wifiResetTriggered = false;
-  }
-}
-
-
 // ============================================================
 // RELE / BOMBA
 // ============================================================
@@ -137,11 +97,53 @@ void setRelay(bool on) {
 // DATA/HORA
 // ============================================================
 
+constexpr time_t MIN_VALID_EPOCH = 1700000000;
+
+String utcNow();
+
+bool isTimeSynchronized() {
+
+  return time(nullptr) >= MIN_VALID_EPOCH;
+}
+
+
+bool waitForTimeSynchronization(
+    uint32_t timeoutMs = 15000UL
+) {
+
+  Serial.println(F("Sincronizando horario..."));
+
+  const uint32_t startedAt = millis();
+
+  while (
+      !isTimeSynchronized() &&
+      millis() - startedAt < timeoutMs
+  ) {
+
+    delay(250);
+    yield();
+  }
+
+  if (!isTimeSynchronized()) {
+
+    Serial.println(
+        F("Falha ao sincronizar horario dentro do timeout.")
+    );
+
+    return false;
+  }
+
+  Serial.print(F("Horario sincronizado: "));
+  Serial.println(utcNow());
+
+  return true;
+}
+
 String utcNow() {
 
   time_t now = time(nullptr);
 
-  if (now < 1700000000) {
+  if (now < MIN_VALID_EPOCH) {
 
     return "";
   }
@@ -187,6 +189,48 @@ String nextKey(const char* channel) {
 // HTTP / HTTPS
 // ============================================================
 
+void printHttpsDiagnostics() {
+
+  Serial.println(F("API host: horta-inteligente.onrender.com"));
+  Serial.printf("Wi-Fi status: %d (%s)\n",
+      WiFi.status(),
+      WiFi.status() == WL_CONNECTED ? "conectado" : "desconectado");
+  Serial.print(F("IP local: "));
+  Serial.println(WiFi.localIP());
+  Serial.printf("RSSI: %d dBm\n", WiFi.RSSI());
+  Serial.printf("Hora atual do ESP8266: %ld\n",
+      static_cast<long>(time(nullptr)));
+}
+
+
+void printRequestError(
+    const char* channel,
+    HTTPClient& http,
+    BearSSL::WiFiClientSecure& secure,
+    int status
+) {
+
+  Serial.printf(
+      "%s: HTTP %d - %s\n",
+      channel,
+      status,
+      http.errorToString(status).c_str()
+  );
+
+  char sslMessage[160] = {0};
+  const int sslError = secure.getLastSSLError(
+      sslMessage,
+      sizeof(sslMessage)
+  );
+
+  Serial.printf(
+      "%s: TLS %d - %s\n",
+      channel,
+      sslError,
+      sslMessage[0] ? sslMessage : "sem erro SSL registrado"
+  );
+}
+
 bool beginHttp(
     HTTPClient& http,
     WiFiClient& plain,
@@ -201,6 +245,17 @@ bool beginHttp(
 
 
   if (url.startsWith("https://")) {
+
+    if (!isTimeSynchronized()) {
+
+      Serial.println(
+          F("HTTPS adiado: horario do ESP8266 ainda nao e valido")
+      );
+
+      return false;
+    }
+
+    printHttpsDiagnostics();
 
     if (strlen(HTTPS_ROOT_CA) < 40) {
 
@@ -252,6 +307,7 @@ bool beginHttp(
 
 int apiRequest(
     const char* method,
+    const char* channel,
     const String& path,
     const String& body,
     String& response
@@ -273,6 +329,13 @@ int apiRequest(
           path
       )) {
 
+    printRequestError(
+        channel,
+        http,
+        secure,
+        HTTPC_ERROR_SEND_HEADER_FAILED
+    );
+
     return -2;
   }
 
@@ -293,6 +356,16 @@ int apiRequest(
   if (status > 0) {
 
     response = http.getString();
+  }
+
+  else {
+
+    printRequestError(
+        channel,
+        http,
+        secure,
+        status
+    );
   }
 
   http.end();
@@ -384,17 +457,21 @@ void sendTelemetry() {
   int status =
       apiRequest(
           "POST",
+          "telemetry",
           "telemetry/",
           body,
           response
       );
 
 
-  Serial.printf(
-      "telemetry: HTTP %d %s\n",
-      status,
-      response.c_str()
-  );
+  if (status >= 0) {
+
+    Serial.printf(
+        "telemetry: HTTP %d %s\n",
+        status,
+        response.c_str()
+    );
+  }
 }
 
 
@@ -448,16 +525,20 @@ void sendHeartbeat() {
   int status =
       apiRequest(
           "POST",
+          "heartbeat",
           "heartbeat/",
           body,
           response
       );
 
 
-  Serial.printf(
-      "heartbeat: HTTP %d\n",
-      status
-  );
+  if (status >= 0) {
+
+    Serial.printf(
+        "heartbeat: HTTP %d\n",
+        status
+    );
+  }
 }
 
 
@@ -497,6 +578,7 @@ void acknowledge(
   int status =
       apiRequest(
           "POST",
+          "commands",
           "commands/"
               + id
               + "/ack/",
@@ -523,6 +605,7 @@ void pollCommands() {
   int status =
       apiRequest(
           "GET",
+          "commands",
           "commands/",
           "",
           response
@@ -531,10 +614,13 @@ void pollCommands() {
 
   if (status != HTTP_CODE_OK) {
 
-    Serial.printf(
-        "commands: HTTP %d\n",
-        status
-    );
+    if (status >= 0) {
+
+      Serial.printf(
+          "commands: HTTP %d\n",
+          status
+      );
+    }
 
     return;
   }
@@ -735,6 +821,17 @@ void fetchConfiguration() {
 
   if (url.startsWith("https://")) {
 
+    if (!isTimeSynchronized()) {
+
+      Serial.println(
+          F("config: HTTPS adiado; horario ainda nao e valido")
+      );
+
+      return;
+    }
+
+    printHttpsDiagnostics();
+
     if (
         strlen(HTTPS_ROOT_CA) < 40
     ) {
@@ -775,8 +872,11 @@ void fetchConfiguration() {
 
   if (!started) {
 
-    Serial.println(
-        F("config: falha ao iniciar HTTP")
+    printRequestError(
+        "config",
+        http,
+        secure,
+        HTTPC_ERROR_SEND_HEADER_FAILED
     );
 
     return;
@@ -802,6 +902,16 @@ void fetchConfiguration() {
   int status =
       http.GET();
 
+  if (status < 0) {
+
+    printRequestError(
+        "config",
+        http,
+        secure,
+        status
+    );
+  }
+
 
   if (
       status == HTTP_CODE_OK
@@ -813,10 +923,13 @@ void fetchConfiguration() {
   }
 
 
-  Serial.printf(
-      "config: HTTP %d\n",
-      status
-  );
+  if (status >= 0) {
+
+    Serial.printf(
+        "config: HTTP %d\n",
+        status
+    );
+  }
 
 
   http.end();
@@ -842,7 +955,7 @@ void runOfflineAutomation() {
       time(nullptr);
 
 
-  if (now < 1700000000) {
+  if (now < MIN_VALID_EPOCH) {
 
     return;
   }
@@ -987,12 +1100,6 @@ void setup() {
 
 
   pinMode(
-      WIFI_RESET_PIN,
-      INPUT_PULLUP
-  );
-
-
-  pinMode(
       RELAY_PIN,
       OUTPUT
   );
@@ -1102,6 +1209,8 @@ void setup() {
       "pool.ntp.org",
       "time.google.com"
   );
+
+  waitForTimeSynchronization();
 }
 
 
@@ -1110,9 +1219,6 @@ void setup() {
 // ============================================================
 
 void loop() {
-
-  checkWifiResetButton();
-
 
   connectWifi();
 
@@ -1148,6 +1254,14 @@ void loop() {
   if (
       WiFi.status() != WL_CONNECTED
   ) {
+
+    delay(50);
+
+    return;
+  }
+
+  // Certificados TLS so podem ser validados com um relogio valido.
+  if (!isTimeSynchronized()) {
 
     delay(50);
 
