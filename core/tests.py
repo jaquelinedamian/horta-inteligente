@@ -186,9 +186,28 @@ class VisitOperationalAccessTests(DemoDataTestCase):
         self.assertContains(response, "Câmera ESP32-CAM")
         self.assertContains(response, "Horta-Camera-XXXX")
         self.assertContains(response, "Configurar Wi-Fi do ESP8266")
-        self.assertContains(response, "Configurar Wi-Fi da câmera")
+        self.assertContains(response, "Configurar Wi-Fi da ESP32-CAM")
+        self.assertNotContains(response, "Configurar Wi-Fi local")
         self.assertNotContains(response, "repassa as credenciais")
         self.assertNotContains(response, "UART")
+
+        checklist = ChecklistExecution.objects.get(visit=self.visit)
+        wifi_items = [item["label"] for item in checklist.items if item["label"].startswith("Configurar Wi-Fi")]
+        self.assertEqual(wifi_items, ["Configurar Wi-Fi do ESP8266", "Configurar Wi-Fi da ESP32-CAM"])
+
+    def test_existing_legacy_checklist_is_rendered_without_changes(self):
+        legacy_items = [
+            {"label": "Identificar horta", "done": True, "status": "ok"},
+            {"label": "Configurar Wi-Fi local", "done": False, "status": "failed"},
+        ]
+        ChecklistExecution.objects.update_or_create(visit=self.visit, defaults={"items": legacy_items})
+        self.client.force_login(self.admin)
+
+        response = self.client.get(reverse("visit-detail", args=[self.visit.id]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Configurar Wi-Fi local")
+        self.assertEqual(ChecklistExecution.objects.get(visit=self.visit).items, legacy_items)
 
     def test_admin_sees_warning_for_legacy_non_technician_assignee(self):
         self.visit.technician = self.customer

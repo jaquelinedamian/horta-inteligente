@@ -333,7 +333,7 @@ def visit_detail(request, visit_id):
     if not request.user.is_staff:
         visits = visits.filter(technician=request.user)
     visit = get_object_or_404(visits, id=visit_id)
-    checklist, _ = ChecklistExecution.objects.get_or_create(visit=visit, defaults={"items": [{"label": label, "done": False, "status": "not_tested"} for label in ("Identificar horta", "Vincular ESP8266", "Configurar Wi-Fi do ESP8266", "Testar sensores", "Testar bomba", "Testar iluminação", "Vincular ESP32-CAM", "Configurar Wi-Fi da câmera", "Testar câmera", "Confirmar cultura e configuração", "Teste final")]})
+    checklist, _ = ChecklistExecution.objects.get_or_create(visit=visit, defaults={"items": [{"label": label, "done": False, "status": "not_tested"} for label in ("Identificar horta", "Vincular ESP8266", "Configurar Wi-Fi do ESP8266", "Testar sensores", "Testar bomba", "Testar iluminação", "Vincular ESP32-CAM", "Configurar Wi-Fi da ESP32-CAM", "Testar câmera", "Confirmar cultura e configuração", "Teste final")]})
     snapshot = garden_snapshot(visit.garden)
     controller = next((device for device in snapshot["devices"] if device.kind == Device.Kind.CONTROLLER), None)
     camera = next((device for device in snapshot["devices"] if device.kind == Device.Kind.CAMERA), None)
