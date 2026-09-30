@@ -62,6 +62,11 @@ def _form_context(form, section, title, obj=None):
     if section == "inventory":
         spec = (("Identificação", "sku name inventory_category description"), ("Fornecimento", "primary_supplier brand"), ("Controle", "unit tracks_lots tracks_expiration"), ("Estoque", "minimum_quantity reorder_point physical_location"), ("Financeiro", "average_cost_cents reference_price_cents"), ("Status", "is_active"))
         groups = [(label, [form[name] for name in names.split() if name in form.fields]) for label, names in spec]
+    elif section == "visits":
+        spec = [("Contexto", "organization garden work_order"), ("Responsável", "technician"), ("Agendamento", "visit_type scheduled_start scheduled_end status")]
+        if obj:
+            spec.append(("Execução", "actual_start actual_end reason notes conclusion"))
+        groups = [(label, [form[name] for name in names.split() if name in form.fields]) for label, names in spec]
     return {"title": title, "form": form, "section": section, "object": obj, "related_actions": actions, "field_groups": groups, "area": SECTION_AREA.get(section)}
 
 
@@ -198,7 +203,7 @@ def create(request, section):
         messages.success(request, "Registro criado com sucesso.")
         return redirect("ops-detail", section=section, pk=obj.pk)
     flow = get_flow(section)
-    if flow:
+    if flow and section != "visits":
         return render(request, "admin_portal/guided_form.html", _guided_context(form, section, resource))
     return render(request, "admin_portal/form.html", _form_context(form, section, f"Novo — {resource.title}"))
 

@@ -328,7 +328,10 @@ def garden_photo(request, photo_id):
 
 @technician_required
 def visit_detail(request, visit_id):
-    visit = get_object_or_404(Visit.objects.select_related("organization", "garden", "work_order"), id=visit_id, technician=request.user)
+    visits = Visit.objects.select_related("organization", "garden", "work_order", "technician")
+    if not request.user.is_staff:
+        visits = visits.filter(technician=request.user)
+    visit = get_object_or_404(visits, id=visit_id)
     checklist, _ = ChecklistExecution.objects.get_or_create(visit=visit, defaults={"items": [{"label": label, "done": False, "status": "not_tested"} for label in ("Identificar horta", "Vincular ESP8266", "Vincular ESP32-CAM", "Configurar Wi-Fi local", "Testar sensores", "Testar câmera", "Testar bomba", "Testar iluminação", "Confirmar cultura e configuração", "Teste final")]})
     snapshot = garden_snapshot(visit.garden)
     controller = next((device for device in snapshot["devices"] if device.kind == Device.Kind.CONTROLLER), None)
@@ -339,7 +342,10 @@ def visit_detail(request, visit_id):
 @technician_required
 @require_POST
 def visit_update(request, visit_id):
-    visit = get_object_or_404(Visit, id=visit_id, technician=request.user); checklist, _ = ChecklistExecution.objects.get_or_create(visit=visit, defaults={"items": []})
+    visits = Visit.objects.all()
+    if not request.user.is_staff:
+        visits = visits.filter(technician=request.user)
+    visit = get_object_or_404(visits, id=visit_id); checklist, _ = ChecklistExecution.objects.get_or_create(visit=visit, defaults={"items": []})
     labels = request.POST.getlist("all_item")
     if labels:
         items = []

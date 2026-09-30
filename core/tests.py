@@ -8,9 +8,10 @@ from django.utils import timezone
 
 from accounts.models import Membership, Organization, User
 from crops.models import Crop, Cultivar
-from gardens.models import GardenModule, ModuleType
+from gardens.models import Garden, GardenModule, ModuleType
 from operations.models import ChecklistExecution, Visit
 from subscriptions.models import CheckoutRequest, Payment, Plan, PlanVersion, Subscription
+from .backoffice_forms import VisitForm
 
 
 class DemoDataTestCase(TestCase):
@@ -149,3 +150,63 @@ class CustomerPortalTests(DemoDataTestCase):
         checklist = ChecklistExecution.objects.get(visit=visit)
         self.assertEqual(checklist.items[0]["status"], "ok")
         self.assertEqual(checklist.items[1]["status"], "failed")
+
+
+class VisitOperationalAccessTests(DemoDataTestCase):
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.admin = User.objects.get(email="admin@hortaviva.local")
+        cls.technician = User.objects.get(email="tecnico@hortaviva.local")
+        cls.customer = User.objects.get(email="cliente@hortaviva.local")
+        cls.visit = Visit.objects.filter(technician=cls.technician).first()
+        cls.other_technician = User.objects.create_user(email="outro.tecnico@example.test", full_name="Outro Técnico")
+        Membership.objects.create(
+            organization=cls.visit.organization,
+            user=cls.other_technician,
+            role=Membership.Role.TECHNICIAN,
+        )
+
+    def test_admin_can_access_any_visit(self):
+        self.client.force_login(self.admin)
+        response = self.client.get(reverse("visit-detail", args=[self.visit.id]))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Visualização administrativa")
+
+        collection = self.client.get(reverse("ops-collection", args=["visits"]))
+        self.assertContains(collection, reverse("visit-detail", args=[self.visit.id]))
+        detail = self.client.get(reverse("ops-detail", args=["visits", self.visit.id]))
+        self.assertContains(detail, "Acompanhar operação")
+
+    def test_only_assigned_technician_can_access_visit(self):
+        self.client.force_login(self.technician)
+        self.assertEqual(self.client.get(reverse("visit-detail", args=[self.visit.id])).status_code, 200)
+        self.client.force_login(self.other_technician)
+        self.assertEqual(self.client.get(reverse("visit-detail", args=[self.visit.id])).status_code, 404)
+
+    def test_customer_cannot_access_operational_visit(self):
+        self.client.force_login(self.customer)
+        self.assertEqual(self.client.get(reverse("visit-detail", args=[self.visit.id])).status_code, 403)
+
+    def test_visit_form_lists_only_technicians(self):
+        form = VisitForm()
+        technicians = form.fields["technician"].queryset
+        self.assertIn(self.technician, technicians)
+        self.assertIn(self.other_technician, technicians)
+        self.assertNotIn(self.customer, technicians)
+
+    def test_visit_form_rejects_garden_from_another_organization(self):
+        other_organization = Organization.objects.create(name="Outra organização", slug="outra-organizacao-visita")
+        other_garden = Garden.objects.create(organization=other_organization, name="Outra horta", code="outra-horta-visita")
+        form = VisitForm(data={
+            "organization": self.visit.organization_id,
+            "garden": other_garden.id,
+            "work_order": "",
+            "technician": self.technician.id,
+            "visit_type": "Vistoria",
+            "scheduled_start": (timezone.now() + timedelta(days=1)).strftime("%Y-%m-%dT%H:%M"),
+            "scheduled_end": (timezone.now() + timedelta(days=1, hours=1)).strftime("%Y-%m-%dT%H:%M"),
+            "status": Visit.Status.SCHEDULED,
+        })
+        self.assertFalse(form.is_valid())
+        self.assertIn("garden", form.errors)

@@ -12,6 +12,7 @@ from subscriptions.selectors import get_available_plan_versions
 from crops.models import Crop, PlantingCycle
 from crops.selectors import get_available_cultivars
 from gardens.models import Garden, GardenModule, ModuleInstallation
+from operations.models import Visit
 
 
 LABELS = {
@@ -161,7 +162,40 @@ def resource_form_class(resource):
         return CommercialPlanForm
     if resource.model is Crop:
         return CropForm
+    if resource.model is Visit:
+        return VisitForm
     return modelform_factory(resource.model, form=OperationalModelForm, fields=resource.fields)
+
+
+class VisitForm(OperationalModelForm):
+    class Meta:
+        model = Visit
+        fields = ("organization", "garden", "work_order", "technician", "visit_type", "scheduled_start", "scheduled_end", "status", "actual_start", "actual_end", "reason", "notes", "conclusion")
+        labels = {
+            "organization": "Organização", "garden": "Horta", "work_order": "Ordem de serviço",
+            "technician": "Técnico responsável", "visit_type": "Tipo de visita",
+            "scheduled_start": "Início agendado", "scheduled_end": "Fim agendado",
+            "status": "Status", "actual_start": "Início real", "actual_end": "Fim real",
+            "reason": "Motivo", "notes": "Observações", "conclusion": "Conclusão",
+        }
+        widgets = {
+            "scheduled_start": forms.DateTimeInput(attrs={"type": "datetime-local"}, format="%Y-%m-%dT%H:%M"),
+            "scheduled_end": forms.DateTimeInput(attrs={"type": "datetime-local"}, format="%Y-%m-%dT%H:%M"),
+            "actual_start": forms.DateTimeInput(attrs={"type": "datetime-local"}, format="%Y-%m-%dT%H:%M"),
+            "actual_end": forms.DateTimeInput(attrs={"type": "datetime-local"}, format="%Y-%m-%dT%H:%M"),
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["technician"].queryset = User.objects.filter(
+            is_active=True,
+            memberships__is_active=True,
+            memberships__role=Membership.Role.TECHNICIAN,
+        ).distinct().order_by("full_name", "email")
+        organization_id = self.data.get(self.add_prefix("organization")) if self.is_bound else self.instance.organization_id
+        if organization_id:
+            self.fields["garden"].queryset = Garden.objects.filter(organization_id=organization_id).order_by("name")
+            self.fields["work_order"].queryset = self.fields["work_order"].queryset.filter(organization_id=organization_id)
 
 
 class CropForm(OperationalModelForm):
