@@ -1,9 +1,8 @@
 #include <Arduino.h>
 #include <WiFi.h>
+#include <WiFiManager.h>
 #include <HTTPClient.h>
 #include <WiFiClientSecure.h>
-#include <Preferences.h>
-#include <ArduinoJson.h>
 #include "esp_camera.h"
 #include "esp_http_server.h"
 #include "img_converters.h"
@@ -14,90 +13,49 @@ namespace {
 httpd_handle_t cameraServer = nullptr;
 constexpr char STREAM_BOUNDARY[] = "horta-camera-boundary";
 unsigned long lastPhotoUploadAt = 0;
-HardwareSerial provisionSerial(2);
-Preferences wifiPreferences;
-String provisionLine;
 unsigned long lastWifiAttemptAt = 0;
 bool servicesStarted = false;
+String serialCommand;
 
-bool loadWifiCredentials(String& ssid, String& password) {
-  wifiPreferences.begin("horta-wifi", true);
-  ssid = wifiPreferences.getString("ssid", "");
-  password = wifiPreferences.getString("password", "");
-  wifiPreferences.end();
-  return !ssid.isEmpty();
+String wifiAccessPointName() {
+  uint64_t chipId = ESP.getEfuseMac();
+  char suffix[9];
+  snprintf(suffix, sizeof(suffix), "%08X", static_cast<uint32_t>(chipId));
+  return String("Horta-Camera-") + suffix;
 }
 
-void saveWifiCredentials(const String& ssid, const String& password) {
-  wifiPreferences.begin("horta-wifi", false);
-  wifiPreferences.putString("ssid", ssid);
-  wifiPreferences.putString("password", password);
-  wifiPreferences.end();
-}
-
-void sendProvisionAck(const char* type) {
-  JsonDocument response;
-  response["type"] = type;
-  response["status"] = "ok";
-  serializeJson(response, provisionSerial);
-  provisionSerial.write('\n');
-  provisionSerial.flush();
-}
-
-void connectStoredWifi() {
-  String ssid, password;
-  if (!loadWifiCredentials(ssid, password)) {
-    Serial.println("Wi-Fi nao configurado; aguardando ESP8266 pela UART");
-    return;
-  }
+bool configureWifi() {
   WiFi.mode(WIFI_STA);
   WiFi.setSleep(false);
-  WiFi.begin(ssid.c_str(), password.c_str());
-  lastWifiAttemptAt = millis();
-  Serial.printf("Conectando ao SSID salvo: %s\n", ssid.c_str());
+  WiFiManager manager;
+  manager.setDebugOutput(true);
+  String accessPoint = wifiAccessPointName();
+  Serial.printf("Conectando ao Wi-Fi salvo; portal alternativo: %s em 192.168.4.1\n",
+                accessPoint.c_str());
+  bool connected = manager.autoConnect(accessPoint.c_str());
+  if (!connected) Serial.println("Falha no provisionamento Wi-Fi");
+  return connected;
 }
 
-void handleProvisionMessage(const String& line) {
-  JsonDocument message;
-  if (deserializeJson(message, line)) {
-    Serial.println("Provisionamento ignorado: JSON invalido");
-    return;
-  }
-  const char* type = message["type"] | "";
-  if (!strcmp(type, "wifi_config")) {
-    String ssid = message["ssid"] | "";
-    String password = message["password"] | "";
-    if (ssid.isEmpty() || ssid.length() > 32 || password.length() > 63) {
-      Serial.println("Provisionamento ignorado: credenciais fora dos limites");
-      return;
-    }
-    saveWifiCredentials(ssid, password);
-    sendProvisionAck("wifi_ack");
-    Serial.printf("Nova configuracao Wi-Fi salva para SSID: %s\n", ssid.c_str());
-    delay(200);
-    ESP.restart();
-  }
-  if (!strcmp(type, "wifi_reset")) {
-    wifiPreferences.begin("horta-wifi", false);
-    wifiPreferences.clear();
-    wifiPreferences.end();
-    sendProvisionAck("wifi_reset_ack");
-    Serial.println("Credenciais Wi-Fi apagadas");
-    delay(200);
-    WiFi.disconnect(true, true);
-    ESP.restart();
-  }
+void resetOwnWifi() {
+  WiFiManager manager;
+  manager.resetSettings();
+  WiFi.disconnect(true, true);
+  Serial.println("Wi-Fi da camera apagado; reiniciando no portal proprio");
+  delay(500);
+  ESP.restart();
 }
 
-void processProvisionSerial() {
-  while (provisionSerial.available()) {
-    char value = static_cast<char>(provisionSerial.read());
+void processSerialCommand() {
+  while (Serial.available()) {
+    char value = static_cast<char>(Serial.read());
     if (value == '\n') {
-      if (!provisionLine.isEmpty()) handleProvisionMessage(provisionLine);
-      provisionLine = "";
+      serialCommand.trim();
+      if (serialCommand == "RESET_WIFI") resetOwnWifi();
+      serialCommand = "";
     } else if (value != '\r') {
-      if (provisionLine.length() < 384) provisionLine += value;
-      else provisionLine = "";
+      if (serialCommand.length() < 32) serialCommand += value;
+      else serialCommand = "";
     }
   }
 }
@@ -283,17 +241,19 @@ void uploadPhoto() {
 
 void setup() {
   Serial.begin(115200);
-  provisionSerial.begin(9600, SERIAL_8N1, 13, 14);
   Serial.setDebugOutput(true);
   Serial.println("\nIniciando ESP32-CAM da Horta (AI Thinker)...");
 
   if (!startCamera()) return;
 
-  connectStoredWifi();
+  if (!configureWifi()) {
+    delay(1000);
+    ESP.restart();
+  }
 }
 
 void loop() {
-  processProvisionSerial();
+  processSerialCommand();
   if (WiFi.status() == WL_CONNECTED && !servicesStarted) {
     Serial.print("Wi-Fi conectado. IP da camera: http://");
     Serial.println(WiFi.localIP());
@@ -304,7 +264,7 @@ void loop() {
   }
   if (WiFi.status() != WL_CONNECTED && millis() - lastWifiAttemptAt >= 15000UL) {
     lastWifiAttemptAt = millis();
-    connectStoredWifi();
+    WiFi.reconnect();
   }
   if (millis() - lastPhotoUploadAt >= PHOTO_INTERVAL_MS) {
     lastPhotoUploadAt = millis();

@@ -206,7 +206,8 @@ def customer_dashboard(request):
         for channel in device.channels.filter(kind=Channel.Kind.SENSOR):
             reading = channel.readings.order_by("-recorded_at").first(); metrics[channel.metric] = {"value": reading.decimal_value if reading else None, "unit": channel.unit}
         schedule = LightingSchedule.objects.filter(actuator__device=device, enabled=True).first()
-    return render(request, "customer/dashboard.html", {"organization": org, "gardens": gardens, "garden": garden, "snapshot": snapshot, "has_garden": bool(garden), "active_subscription": active_subscription, "device": device, "has_telemetry": bool(metrics), "metrics": metrics, "schedule": schedule, "cycles": get_customer_cycles(org).filter(status=PlantingCycle.Status.ACTIVE)[:6], "alerts": snapshot["alerts"] if snapshot else [], "next_visit": get_customer_visits(org).filter(scheduled_start__gte=timezone.now()).order_by("scheduled_start").first()})
+    has_telemetry = any(item.get("value") is not None for item in metrics.values())
+    return render(request, "customer/dashboard.html", {"organization": org, "gardens": gardens, "garden": garden, "snapshot": snapshot, "has_garden": bool(garden), "active_subscription": active_subscription, "device": device, "has_telemetry": has_telemetry, "metrics": metrics, "schedule": schedule, "cycles": get_customer_cycles(org).filter(status=PlantingCycle.Status.ACTIVE)[:6], "alerts": snapshot["alerts"] if snapshot else [], "next_visit": get_customer_visits(org).filter(scheduled_start__gte=timezone.now()).order_by("scheduled_start").first()})
 
 
 @customer_required
@@ -332,11 +333,14 @@ def visit_detail(request, visit_id):
     if not request.user.is_staff:
         visits = visits.filter(technician=request.user)
     visit = get_object_or_404(visits, id=visit_id)
-    checklist, _ = ChecklistExecution.objects.get_or_create(visit=visit, defaults={"items": [{"label": label, "done": False, "status": "not_tested"} for label in ("Identificar horta", "Vincular ESP8266", "Vincular ESP32-CAM", "Configurar Wi-Fi local", "Testar sensores", "Testar câmera", "Testar bomba", "Testar iluminação", "Confirmar cultura e configuração", "Teste final")]})
+    checklist, _ = ChecklistExecution.objects.get_or_create(visit=visit, defaults={"items": [{"label": label, "done": False, "status": "not_tested"} for label in ("Identificar horta", "Vincular ESP8266", "Configurar Wi-Fi do ESP8266", "Testar sensores", "Testar bomba", "Testar iluminação", "Vincular ESP32-CAM", "Configurar Wi-Fi da câmera", "Testar câmera", "Confirmar cultura e configuração", "Teste final")]})
     snapshot = garden_snapshot(visit.garden)
     controller = next((device for device in snapshot["devices"] if device.kind == Device.Kind.CONTROLLER), None)
     camera = next((device for device in snapshot["devices"] if device.kind == Device.Kind.CAMERA), None)
-    return render(request, "operations/visit_detail_v2.html", {"visit": visit, "checklist": checklist, "snapshot": snapshot, "controller": controller, "camera": camera})
+    technician_is_valid = not visit.technician_id or visit.technician.memberships.filter(
+        is_active=True, role=Membership.Role.TECHNICIAN
+    ).exists()
+    return render(request, "operations/visit_detail_v2.html", {"visit": visit, "checklist": checklist, "snapshot": snapshot, "controller": controller, "camera": camera, "technician_is_valid": technician_is_valid})
 
 
 @technician_required

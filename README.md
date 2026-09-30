@@ -330,38 +330,38 @@ Confirma cultura/configuração e finaliza checklist
 Cliente passa a acompanhar a horta
 ```
 
-Na instalação física, o técnico configura o Wi-Fi **uma única vez**:
+Na instalação física, cada dispositivo configura e guarda o próprio Wi-Fi:
 
 ```text
 Admin cria horta
         ↓
 Atribui técnico
         ↓
-Técnico liga o equipamento e conecta em Horta-XXXX
+Técnico liga o ESP8266 e conecta em Horta-XXXX
         ↓
-Seleciona a rede e informa a senha no portal local
+Abre 192.168.4.1, seleciona a rede e informa a senha
         ↓
-ESP8266 salva e envia JSON por UART à ESP32-CAM
+Confirma heartbeat do controlador no servidor
         ↓
-ESP32-CAM persiste no NVS e confirma por ACK
+Liga a ESP32-CAM e conecta em Horta-Camera-XXXX
         ↓
-Ambos ficam online; técnico testa e finaliza a instalação
+Abre 192.168.4.1 e configura o Wi-Fi da câmera
+        ↓
+Confirma upload de foto; testa e finaliza a instalação
         ↓
 Cliente passa a acompanhar
 ```
 
-O ACK da câmera tem timeout: uma câmera ausente nunca bloqueia sensores ou
-automação. A identidade `HRT-XXXX-CTRL`/`HRT-XXXX-CAM`, tokens e CA são gravados
-na preparação do kit; o técnico apenas vincula o kit no sistema.
+Os dispositivos são independentes: ambos se conectam diretamente ao
+Django/Render e podem funcionar com o outro desligado. Cada um possui seu
+`Device`, credencial, `last_seen_at` e conectividade. A identidade
+`HRT-XXXX-CTRL`/`HRT-XXXX-CAM`, tokens e CA são gravados na preparação do kit.
+A senha da residência permanece somente em cada placa e nunca passa pelo
+Django.
 
-Para mudar de residência, mantenha o botão entre D0 e GND pressionado por 5
-segundos. O controlador envia `wifi_reset` à câmera, ambos apagam apenas suas
-credenciais Wi-Fi e o ESP8266 volta ao AP. A senha nunca passa pelo Django.
-
-O protocolo usa JSON por linha a 9600 baud, com ArduinoJson e mensagens de até
-384 bytes. A UART usa D7→GPIO13, GPIO14→D6 e GND comum. Na AI Thinker,
-GPIO13/GPIO14 compartilham o barramento do microSD; esta ligação pressupõe que o
-slot microSD não será usado.
+Para mudar o Wi-Fi do ESP8266, mantenha seu botão D0 pressionado por 5 segundos.
+Para a ESP32-CAM, envie `RESET_WIFI` pelo Monitor Serial ou apague sua flash,
+conforme o README do firmware. Cada reset afeta somente o próprio dispositivo.
 
 ## APIs atuais dos dispositivos
 

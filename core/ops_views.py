@@ -1,5 +1,6 @@
 import os
 import base64
+from datetime import timedelta
 from io import BytesIO
 
 from django.conf import settings
@@ -93,7 +94,14 @@ def _display_fields(obj):
         if field.name in hidden:
             continue
         value = getattr(obj, f"get_{field.name}_display", lambda: getattr(obj, field.name))()
-        values.append((field.verbose_name.capitalize(), value if value not in (None, "") else "—"))
+        label = field.verbose_name.capitalize()
+        if isinstance(obj, Device) and field.name == "status":
+            label = "Estado cadastral"
+        elif isinstance(obj, Device) and field.name == "last_seen_at":
+            label = "Último contato"
+        values.append((label, value if value not in (None, "") else "—"))
+        if isinstance(obj, Device) and field.name == "status":
+            values.append(("Conectividade", "Online" if obj.is_online else "Offline"))
     return values
 
 
@@ -112,8 +120,8 @@ def dashboard(request):
         ("Hortas", Garden.objects.filter(is_active=True).count(), "gardens"),
         ("Módulos instalados", GardenModule.objects.filter(status=GardenModule.Status.INSTALLED).count(), "modules"),
         ("Módulos disponíveis", GardenModule.objects.filter(status=GardenModule.Status.STOCK).count(), "modules"),
-        ("Dispositivos online", Device.objects.filter(status=Device.Status.ONLINE).count(), "devices"),
-        ("Dispositivos offline", Device.objects.filter(status=Device.Status.OFFLINE).count(), "devices"),
+        ("Dispositivos online", Device.objects.exclude(status=Device.Status.RETIRED).filter(last_seen_at__gte=now - timedelta(seconds=settings.DEVICE_ONLINE_THRESHOLD_SECONDS)).count(), "devices"),
+        ("Dispositivos offline", Device.objects.exclude(status=Device.Status.RETIRED).filter(Q(last_seen_at__lt=now - timedelta(seconds=settings.DEVICE_ONLINE_THRESHOLD_SECONDS)) | Q(last_seen_at__isnull=True)).count(), "devices"),
         ("Culturas ativas", PlantingCycle.objects.filter(status=PlantingCycle.Status.ACTIVE).count(), "cycles"),
         ("Visitas hoje", Visit.objects.filter(scheduled_start__date=today).count(), "visits"),
         ("Próximas visitas", Visit.objects.filter(scheduled_start__gt=now, status=Visit.Status.SCHEDULED).count(), "visits"),
@@ -203,7 +211,7 @@ def create(request, section):
         messages.success(request, "Registro criado com sucesso.")
         return redirect("ops-detail", section=section, pk=obj.pk)
     flow = get_flow(section)
-    if flow and section != "visits":
+    if flow:
         return render(request, "admin_portal/guided_form.html", _guided_context(form, section, resource))
     return render(request, "admin_portal/form.html", _form_context(form, section, f"Novo — {resource.title}"))
 

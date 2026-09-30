@@ -22,8 +22,8 @@ apos o tempo definido por `SAFE_PUMP_DURATION_MS` (10 segundos no exemplo).
 
 1. Instale PlatformIO.
 2. Copie `include/device_config.example.h` para `include/device_config.h`.
-3. Preencha URL, `DEVICE_ID`, token e a CA raiz HTTPS. As constantes Wi-Fi são
-   apenas fallback legado; o provisionamento normal usa o portal local.
+3. Preencha URL, `DEVICE_ID`, token e a CA raiz HTTPS. SSID e senha não fazem
+   parte desse arquivo: o provisionamento usa o portal local.
 4. Execute `pio run --target upload` e depois `pio device monitor`.
 
 Emita o token em **Gestao > Dispositivos > dispositivo > Gerar e rotacionar
@@ -47,30 +47,24 @@ tempo é limitado a 300 segundos por execução. Iluminação e fertilização s
 podem ser automatizadas após definir e documentar o hardware/pinos desses
 atuadores; nenhuma pinagem foi inventada neste firmware.
 
-## Provisionamento conjunto da câmera
+## Dispositivo independente
 
-Depois que o WiFiManager conecta a residência, o ESP8266 lê as credenciais que
-acabou de salvar e envia uma única linha JSON à ESP32-CAM. O SSID pode aparecer
-no log; a senha nunca é impressa. O controlador espera `wifi_ack` por no máximo
-5 segundos. Se a câmera estiver ausente, registra timeout e segue normalmente
-com sensores, irrigação e API.
-
-UART a 9600 baud, quando o microSD da AI Thinker não for usado:
-
-| D1 mini | ESP32-CAM | Observação |
-|---|---|---|
-| D7 / GPIO13 (TX) | GPIO13 (RX2) | Dados para a câmera |
-| D6 / GPIO12 (RX) | GPIO14 (TX2) | ACK da câmera |
-| GND | GND | Terra comum obrigatório |
-
-D1/D2 continuam no BMP280 e D5 no relé. D6/D7 estavam livres e não são pinos
-de boot do ESP8266. GPIO13/GPIO14 não pertencem à câmera AI Thinker, mas são do
-microSD; por isso UART e cartão SD não podem ser usados juntos nesta montagem.
+O controlador não se comunica com a ESP32-CAM. Ele possui Wi-Fi, identidade e
+credencial próprios e continua com sensores e automação local mesmo quando a
+câmera está desligada. D6 e D7 permanecem livres, sem função definida.
 
 ## Reset de Wi-Fi
 
 Instale um botão momentâneo entre **D0/GPIO16 e GND**. Mantenha-o pressionado por
-5 segundos. O ESP8266 envia `wifi_reset`, aguarda o ACK por até 2 segundos,
-apaga as próprias credenciais e reinicia no AP `Horta-<chip-id>`. Se a câmera
-não responder, o reset do controlador continua. D0 estava livre, aceita
-`INPUT_PULLUP` e não é pino de boot.
+5 segundos. O ESP8266 apaga somente as próprias credenciais e reinicia no AP
+`Horta-<chip-id>`. Esse reset não afeta a câmera. D0 aceita `INPUT_PULLUP` e não
+é pino de boot.
+
+## HTTPS_ROOT_CA
+
+HTTPS é recusado quando `HTTPS_ROOT_CA` está vazio; o firmware não usa
+`setInsecure()`. Exporte a cadeia apresentada pelo domínio real do Render com
+uma ferramenta TLS confiável (por exemplo, navegador ou OpenSSL), identifique a
+CA raiz que valida essa cadeia e copie o PEM completo para a constante. Confira
+o emissor e a validade antes de gravar. A cadeia pode mudar, portanto não há CA
+aleatória ou específica do Render versionada neste repositório.

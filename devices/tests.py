@@ -80,6 +80,19 @@ class DeviceApiTests(TestCase):
         self.assertEqual(response.status_code, 201)
         self.assertEqual(GardenPhoto.objects.filter(garden=self.garden, device=camera).count(), 1)
 
+    def test_controller_and_camera_share_garden_with_independent_credentials(self):
+        camera_model = DeviceModel.objects.create(name="ESP32-CAM", code="camera-independent", hardware_platform="ESP32")
+        camera = Device.objects.create(
+            organization=self.organization, garden=self.garden, model=camera_model,
+            serial_number="CAM-INDEPENDENT", name="Câmera", kind=Device.Kind.CAMERA,
+        )
+        _, camera_token = DeviceCredential.issue(camera)
+        self.assertEqual(self.device.assigned_garden(), self.garden)
+        self.assertEqual(camera.assigned_garden(), self.garden)
+        self.assertNotEqual(self.token, camera_token)
+        self.assertEqual(self.device.credentials.count(), 1)
+        self.assertEqual(camera.credentials.count(), 1)
+
     def test_configuration_merges_crop_defaults_and_garden_override(self):
         crop = Crop.objects.create(common_name="Cebolinha", code="cebolinha")
         cultivar = Cultivar.objects.create(crop=crop, name="Comum")

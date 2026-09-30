@@ -178,6 +178,25 @@ class VisitOperationalAccessTests(DemoDataTestCase):
         detail = self.client.get(reverse("ops-detail", args=["visits", self.visit.id]))
         self.assertContains(detail, "Acompanhar operação")
 
+    def test_operational_screen_uses_independent_connectivity_and_new_checklist(self):
+        ChecklistExecution.objects.filter(visit=self.visit).delete()
+        self.client.force_login(self.admin)
+        response = self.client.get(reverse("visit-detail", args=[self.visit.id]))
+        self.assertContains(response, "Controlador ESP8266")
+        self.assertContains(response, "Câmera ESP32-CAM")
+        self.assertContains(response, "Horta-Camera-XXXX")
+        self.assertContains(response, "Configurar Wi-Fi do ESP8266")
+        self.assertContains(response, "Configurar Wi-Fi da câmera")
+        self.assertNotContains(response, "repassa as credenciais")
+        self.assertNotContains(response, "UART")
+
+    def test_admin_sees_warning_for_legacy_non_technician_assignee(self):
+        self.visit.technician = self.customer
+        self.visit.save(update_fields=["technician"])
+        self.client.force_login(self.admin)
+        response = self.client.get(reverse("visit-detail", args=[self.visit.id]))
+        self.assertContains(response, "Responsável legado inválido")
+
     def test_only_assigned_technician_can_access_visit(self):
         self.client.force_login(self.technician)
         self.assertEqual(self.client.get(reverse("visit-detail", args=[self.visit.id])).status_code, 200)

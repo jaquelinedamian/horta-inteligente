@@ -2,7 +2,7 @@
 
 // Copie para device_config.h e preencha localmente. Esse arquivo nao e versionado.
 #define API_BASE_URL "https://seu-servico.onrender.com"
-#define DEVICE_API_TOKEN "prefixo.segredo"
+#define DEVICE_API_TOKEN "EXEMPLO_TOKEN_GERADO_NA_PLATAFORMA"
 #define DEVICE_ID "HORTA-001-CTRL"
 
 // CA raiz em PEM. HTTPS e recusado se este valor estiver vazio.

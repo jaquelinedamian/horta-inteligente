@@ -7,7 +7,7 @@ imagem. Ele oferece `GET /`, `GET /capture` (JPEG atual) e `GET /stream`
 ## Configurar e gravar
 
 1. Instale no Arduino IDE o pacote **esp32 by Espressif Systems** atualizado e
-   a biblioteca **ArduinoJson 7**.
+   a biblioteca **WiFiManager 2.0.17 ou compatível**.
 2. Copie `wifi_config.example.h` para `wifi_config.h` nesta pasta.
 3. Preencha somente a identidade pre-provisionada do kit, a URL HTTPS, token e
    CA raiz em `wifi_config.h`; o arquivo e ignorado pelo Git. SSID e senha não
@@ -17,6 +17,10 @@ imagem. Ele oferece `GET /`, `GET /capture` (JPEG atual) e `GET /stream`
    TX/RX, una GPIO 0 ao GND durante o upload e reinicie a placa. Remova a uniao
    GPIO 0/GND e reinicie depois da gravacao.
 6. Abra o Monitor Serial em **115200 baud** e copie o IP exibido.
+
+Como alternativa reproduzível, instale PlatformIO e execute `pio run` nesta
+pasta. O ambiente `esp32cam` e a dependência do WiFiManager estão declarados em
+`platformio.ini`.
 
 O sketch usa a pinagem `CAMERA_MODEL_AI_THINKER` publicada no exemplo oficial
 CameraWebServer da Espressif, isolada em `camera_pins.h`. Nao altere essa
@@ -47,34 +51,30 @@ No fluxo normal, a câmera envia um JPEG periodicamente para
 para diagnóstico local. O token identifica a câmera e nunca deve aparecer em QR
 público, HTML ou logs.
 
-## Provisionamento único pela UART
+## Provisionamento Wi-Fi independente
 
-A câmera abre o NVS com `Preferences`. Se houver SSID salvo, tenta conectar. Se
-não houver, continua operacional localmente e aguarda uma linha JSON enviada
-pelo ESP8266 a 9600 baud:
+Depois de iniciar a câmera, o WiFiManager tenta as credenciais salvas pela
+própria ESP32-CAM. Sem conexão, abre o AP `Horta-Camera-<chip-id>` e o portal em
+`192.168.4.1`. O técnico seleciona a rede da residência e informa a senha no
+próprio dispositivo; a senha fica na NVS da ESP32 e nunca é enviada ao Django
+ou ao ESP8266. Nos próximos boots, a câmera reconecta automaticamente.
 
-```json
-{"type":"wifi_config","ssid":"MinhaRede","password":"MinhaSenha"}
-```
+A câmera não possui UART de provisionamento e não depende do controlador. Sua
+identidade, token e CA ficam no `wifi_config.h` local ignorado pelo Git; esse
+arquivo não contém SSID nem senha.
 
-ArduinoJson faz o escaping de caracteres especiais. A mensagem tem limite de
-384 bytes e termina em newline. Depois de validar os limites do Wi-Fi, a câmera
-salva as credenciais no namespace `horta-wifi`, responde
-`{"type":"wifi_ack","status":"ok"}` e reinicia. A senha nunca é impressa.
+## Reset do Wi-Fi
 
-O reset chega como `{"type":"wifi_reset"}`. A câmera apaga o namespace,
-responde `wifi_reset_ack` e reinicia aguardando novo provisionamento.
+Nenhum botão físico foi atribuído: a pinagem da câmera AI Thinker foi preservada
+e GPIO4 pode ser usado pelo flash/slot SD. Com um adaptador serial conectado,
+abra o monitor em 115200 baud, envie `RESET_WIFI` seguido de Enter e aguarde o
+AP próprio. Como alternativa de manutenção, apague a flash e grave novamente.
+Ambos os procedimentos afetam somente a câmera.
 
-### Ligação UART
+## HTTPS_ROOT_CA
 
-Esta ligação é válida para AI Thinker **sem uso do slot microSD**:
-
-| Wemos D1 mini | ESP32-CAM AI Thinker | Função |
-|---|---|---|
-| D7 / GPIO13 (TX) | GPIO13 (RX2) | ESP8266 → câmera |
-| D6 / GPIO12 (RX) | GPIO14 (TX2) | câmera → ESP8266 |
-| GND | GND | referência comum |
-
-GPIO13 e GPIO14 da AI Thinker não são usados pela câmera nem são pinos de boot,
-mas pertencem ao barramento do microSD. Não instale cartão microSD com essa
-UART. Ambos os lados trabalham em 3,3 V; não aplique 5 V nos sinais.
+O upload HTTPS é recusado quando a CA está vazia. Obtenha a cadeia TLS do
+domínio Render real por navegador ou OpenSSL, valide emissor e validade e copie
+o PEM da CA raiz para `HTTPS_ROOT_CA`. O firmware usa `setCACert()` e nunca
+desativa a validação TLS. Não há uma CA aleatória hardcodada porque a cadeia do
+serviço pode mudar.
