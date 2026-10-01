@@ -168,7 +168,7 @@ class DeviceApiTests(TestCase):
         self.assertEqual(camera.credentials.count(), 1)
 
     def test_configuration_merges_crop_defaults_and_garden_override(self):
-        crop = Crop.objects.create(common_name="Cebolinha", code="cebolinha")
+        crop, _ = Crop.objects.update_or_create(code="cebolinha", defaults={"common_name": "Cebolinha"})
         cultivar = Cultivar.objects.create(crop=crop, name="Comum")
         profile = CropCultivationProfile.objects.create(
             crop=crop, cultivation_system="substrate", name="Padrão",

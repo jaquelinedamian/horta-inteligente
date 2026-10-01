@@ -19,7 +19,7 @@ class BackofficeUXTests(TestCase):
         self.client.force_login(self.admin)
 
     def test_area_pages_are_available_in_portuguese(self):
-        for area, title in (("comercial", "Comercial"), ("cultivo", "Cultivo"), ("hortas", "Hortas"), ("iot", "IoT"), ("operacao", "Operação"), ("estoque", "Estoque"), ("administracao", "Administração")):
+        for area, title in (("comercial", "Clientes"), ("configuracoes", "Planos e assinaturas"), ("cultivo", "Cultivo"), ("hortas", "Hortas"), ("iot", "IoT"), ("operacao", "Operação"), ("estoque", "Estoque"), ("administracao", "Administração")):
             response = self.client.get(reverse("ops-area", args=[area]))
             self.assertEqual(response.status_code, 200, area)
             self.assertContains(response, title)
@@ -46,15 +46,20 @@ class BackofficeUXTests(TestCase):
             self.assertEqual(self.client.get(reverse("ops-area", args=["estoque"])).status_code, 403)
 
     def test_sidebar_detects_area_from_direct_resource_url(self):
-        cases = (("devices", "iot", "Dispositivos", "Planos"), ("plans", "comercial", "Planos", "Telemetria"), ("inventory", "estoque", "Itens", "Culturas"))
-        for section, area, visible, hidden in cases:
+        cases = (("devices", "iot"), ("plans", "configuracoes"), ("inventory", "estoque"))
+        for section, area in cases:
             response = self.client.get(reverse("ops-collection", args=[section]))
             self.assertEqual(response.status_code, 200)
             self.assertEqual(response.context["backoffice_current_area"], area)
-            self.assertContains(response, visible)
-            self.assertNotContains(response, f'>{hidden}</a>')
+            self.assertContains(response, "Configurações")
+            self.assertNotContains(response, "Organizações</a>")
+            self.assertNotContains(response, "Cupons</a>")
+            self.assertNotContains(response, "Pagamentos</a>")
 
     def test_current_sidebar_item_is_accessible_and_active(self):
         response = self.client.get(reverse("ops-collection", args=["devices"]))
-        self.assertContains(response, 'data-section="devices" class="active" aria-current="page"', html=False)
-        self.assertContains(response, 'id="backoffice-area-selector"')
+        self.assertContains(response, "Modelos de horta")
+        self.assertContains(response, "Planos/Assinaturas")
+        self.assertContains(response, "Dispositivos")
+        self.assertContains(response, "Configurações técnicas")
+        self.assertNotContains(response, 'id="backoffice-area-selector"')

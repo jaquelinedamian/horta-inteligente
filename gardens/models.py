@@ -6,6 +6,19 @@ from accounts.models import Address, Organization
 from core.models import BaseModel
 
 
+class GardenModel(BaseModel):
+    name = models.CharField(max_length=120)
+    code = models.SlugField(max_length=80, unique=True)
+    description = models.TextField(blank=True)
+    capacity = models.PositiveSmallIntegerField(default=4)
+    reservoir_liters = models.DecimalField(max_digits=8, decimal_places=2, null=True, blank=True)
+    photos_per_day = models.PositiveSmallIntegerField(default=4)
+    is_active = models.BooleanField(default=True)
+
+    def __str__(self):
+        return self.name
+
+
 class Garden(BaseModel):
     class Status(models.TextChoices):
         PLANNED = "planned", "Planejada"
@@ -14,6 +27,7 @@ class Garden(BaseModel):
         MAINTENANCE = "maintenance", "Em manutenção"
         INACTIVE = "inactive", "Inativa"
     organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name="gardens")
+    garden_model = models.ForeignKey(GardenModel, on_delete=models.PROTECT, null=True, blank=True, related_name="gardens")
     name = models.CharField(max_length=120)
     code = models.SlugField(max_length=80)
     address = models.ForeignKey(Address, on_delete=models.SET_NULL, null=True, blank=True, related_name="gardens")

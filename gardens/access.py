@@ -11,13 +11,13 @@ def gardens_for_user(user):
     """Escopo único: cliente próprio, técnico atribuído, admin global."""
     if not user.is_authenticated:
         return Garden.objects.none()
-    if user.is_staff or user.is_superuser:
+    if user.is_hortaviva_admin:
         return Garden.objects.all()
 
     customer_orgs = user.memberships.filter(
         is_active=True, role__in=CUSTOMER_ROLES
     ).values("organization_id")
-    is_technician = user.memberships.filter(
+    is_technician = user.employee_role == user.EmployeeRole.TECHNICIAN or user.memberships.filter(
         is_active=True, role=Membership.Role.TECHNICIAN
     ).exists()
     scope = Q(organization_id__in=customer_orgs) | Q(members__user=user)

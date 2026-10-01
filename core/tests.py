@@ -8,7 +8,7 @@ from django.utils import timezone
 
 from accounts.models import Membership, Organization, User
 from crops.models import Crop, Cultivar
-from gardens.models import Garden, GardenModule, ModuleType
+from gardens.models import Garden, GardenModel, GardenModule, ModuleType
 from operations.models import ChecklistExecution, Visit
 from subscriptions.models import CheckoutRequest, Payment, Plan, PlanVersion, Subscription
 from .backoffice_forms import VisitForm
@@ -52,6 +52,9 @@ class CheckoutTests(DemoDataTestCase):
         self.user = User.objects.create_user(email="checkout@example.test", full_name="Cliente Checkout", password="safe-test-password")
         self.client.force_login(self.user)
         self.plan = PlanVersion.objects.get(plan__code="essencial")
+        self.garden_model = GardenModel.objects.create(name="HortaViva Checkout", code="hv-checkout", capacity=3, photos_per_day=4)
+        self.plan.plan.garden_model = self.garden_model
+        self.plan.plan.save(update_fields=["garden_model", "updated_at"])
         self.cultivars = list(Cultivar.objects.filter(crop__is_available=True)[:4])
         self.crops = list(Crop.objects.filter(is_available=True)[:4])
 
@@ -59,7 +62,7 @@ class CheckoutTests(DemoDataTestCase):
         return self.client.post(reverse("checkout", args=[step]), data)
 
     def test_checkout_rejects_skipped_steps_and_plan_limit(self):
-        self.assertRedirects(self.client.get(reverse("checkout", args=[7])), reverse("checkout", args=[1]))
+        self.assertEqual(self.client.get(reverse("checkout", args=[7])).status_code, 404)
         self.post_step(1, {"plan": self.plan.id})
         response = self.post_step(2, {"cultures": [item.id for item in self.crops]})
         self.assertEqual(response.status_code, 200)
@@ -70,19 +73,24 @@ class CheckoutTests(DemoDataTestCase):
         self.assertRedirects(self.post_step(2, {"cultures": [self.crops[0].id]}), reverse("checkout", args=[3]))
         address = {"street": "Rua Teste", "number": "10", "city": "São Paulo", "state": "SP", "postal_code": "01001-000"}
         self.assertRedirects(self.post_step(3, address), reverse("checkout", args=[4]))
-        self.assertRedirects(self.post_step(4, {"sunlight": "medium", "wifi_available": "on"}), reverse("checkout", args=[5]))
-        future = (timezone.now() + timedelta(days=7)).strftime("%Y-%m-%dT%H:%M")
-        self.assertRedirects(self.post_step(5, {"scheduled_for": future}), reverse("checkout", args=[6]))
-        self.assertRedirects(self.post_step(6, {}), reverse("checkout", args=[7]))
         self.assertEqual(self.client.post(reverse("checkout-complete")).status_code, 200)
         self.assertEqual(Membership.objects.filter(user=self.user).count(), 1)
         self.assertEqual(Subscription.objects.filter(organization__memberships__user=self.user).count(), 1)
-        self.assertEqual(Payment.objects.filter(subscription__organization__memberships__user=self.user).count(), 1)
+        self.assertEqual(Payment.objects.filter(subscription__organization__memberships__user=self.user).count(), 0)
         self.assertEqual(CheckoutRequest.objects.filter(user=self.user).count(), 1)
         self.assertEqual(CheckoutRequest.objects.get(user=self.user).selected_crops.count(), 1)
+        garden = Garden.objects.get(subscription__organization__memberships__user=self.user)
+        subscription = Subscription.objects.get(organization__memberships__user=self.user)
+        self.assertEqual(garden.status, Garden.Status.WAITING_INSTALLATION)
+        self.assertEqual(garden.garden_model, self.garden_model)
+        self.assertEqual(garden.subscription, subscription)
+        self.assertEqual(garden.address.postal_code, "01001-000")
+        self.assertFalse(garden.devices.exists())
+        self.assertFalse(garden.planting_cycles.exists())
         self.client.post(reverse("checkout-complete"))
         self.assertEqual(Subscription.objects.filter(organization__memberships__user=self.user).count(), 1)
-        self.assertEqual(Payment.objects.filter(subscription__organization__memberships__user=self.user).count(), 1)
+        self.assertEqual(Payment.objects.filter(subscription__organization__memberships__user=self.user).count(), 0)
+        self.assertEqual(Garden.objects.filter(subscription__organization__memberships__user=self.user).count(), 1)
 
     def test_checkout_has_friendly_empty_plan_state(self):
         Plan.objects.update(is_active=False)

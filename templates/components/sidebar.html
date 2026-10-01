@@ -5,30 +5,21 @@
       <a class="sidebar-dashboard" href="{% url 'ops-dashboard' %}" data-nav-path="{% url 'ops-dashboard' %}"><i class="bi bi-grid"></i> Dashboard</a>
       <div class="sidebar-main-links">
         <a href="{% url 'ops-collection' 'clients' %}"><i class="bi bi-people"></i> Clientes</a>
-        <a href="{% url 'ops-collection' 'plans' %}"><i class="bi bi-bag-heart"></i> Planos</a>
-        <a href="{% url 'ops-collection' 'crops' %}"><i class="bi bi-flower2"></i> Culturas</a>
         <a href="{% url 'ops-collection' 'gardens' %}"><i class="bi bi-house-heart"></i> Hortas</a>
-        <a href="{% url 'ops-area' 'operacao' %}"><i class="bi bi-calendar2-check"></i> Operação</a>
-        <a href="{% url 'ops-collection' 'inventory' %}"><i class="bi bi-box-seam"></i> Estoque</a>
-        <a href="{% url 'ops-collection' 'devices' %}"><i class="bi bi-cpu"></i> Dispositivos</a>
+        <a href="{% url 'ops-collection' 'crops' %}"><i class="bi bi-flower2"></i> Culturas</a>
+        <a href="{% url 'ops-collection' 'visits' %}"><i class="bi bi-calendar2-check"></i> Visitas</a>
         <a href="{% url 'ops-collection' 'employees' %}"><i class="bi bi-person-badge"></i> Equipe</a>
+        <a href="{% url 'ops-collection' 'inventory' %}"><i class="bi bi-box-seam"></i> Estoque</a>
+        {% if request.user.is_hortaviva_admin %}<details class="advanced-nav admin-settings-nav">
+          <summary><i class="bi bi-gear"></i> Configurações</summary>
+          <div class="area-links" aria-label="Links de configurações">
+          <a href="{% url 'ops-collection' 'garden-models' %}">Modelos de horta</a>
+          <a href="{% url 'ops-area' 'configuracoes' %}">Planos/Assinaturas</a>
+          <a href="{% url 'ops-collection' 'devices' %}">Dispositivos</a>
+          <a href="{% url 'ops-area' 'iot' %}">Configurações técnicas</a>
+          </div>
+        </details>{% endif %}
       </div>
-      <details class="advanced-nav" {% if backoffice_current_section != 'clients' and backoffice_current_section != 'plans' and backoffice_current_section != 'crops' and backoffice_current_section != 'gardens' and backoffice_current_section != 'inventory' and backoffice_current_section != 'devices' and backoffice_current_section != 'employees' %}open{% endif %}>
-        <summary><i class="bi bi-sliders"></i> Configurações avançadas</summary>
-      <div class="area-selector-wrap">
-        <label for="backoffice-area-selector">Área atual</label>
-        <select id="backoffice-area-selector" class="area-selector" aria-label="Selecionar área administrativa">
-          {% for slug,config in backoffice_areas.items %}<option value="{% url 'ops-area' slug %}" {% if slug == backoffice_current_area %}selected{% endif %}>{{ config.label }}</option>{% endfor %}
-        </select>
-      </div>
-      <div class="area-links" aria-label="Links da área {{ backoffice_area_config.label }}">
-        {% for label,section in backoffice_area_config.links %}
-          {% if section %}<a href="{% url 'ops-collection' section %}" data-section="{{ section }}" {% if section == backoffice_current_section %}class="active" aria-current="page"{% endif %}>{{ label }}</a>
-          {% else %}<a href="{% url 'ops-area' backoffice_current_area %}" data-area-overview {% if request.resolver_match.url_name == 'ops-area' %}class="active" aria-current="page"{% endif %}>{{ label }}</a>{% endif %}
-        {% endfor %}
-        {% if backoffice_current_area == 'administracao' and request.user.is_superuser %}<a href="{% url 'ops-dashboard' %}#dados-demonstrativos">Dados demonstrativos</a>{% endif %}
-      </div>
-      </details>
     </nav>
     <div class="sidebar-user"><span class="sidebar-avatar">{{ request.user.full_name|default:request.user.email|slice:':1' }}</span><div><strong>{{ request.user.full_name|default:request.user.email }}</strong><small>Administrador</small></div></div>
   {% elif '/operacao/' in request.path %}<small>ÁREA DO TÉCNICO</small><nav><a href="{% url 'tech-dashboard' %}">Visão geral</a><a href="{% url 'tech-visits' %}">Visitas e agenda</a><a href="{% url 'customer-profile' %}">Perfil</a></nav>

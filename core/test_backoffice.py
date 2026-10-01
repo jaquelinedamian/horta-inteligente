@@ -84,8 +84,8 @@ class BackofficeTests(TestCase):
         self.assertEqual(self.client.get(reverse("ops-dashboard")).status_code, 200)
 
     def test_admin_can_create_controller_and_camera_in_same_garden(self):
-        organization = Organization.objects.first()
-        garden = Garden.objects.filter(organization=organization).first()
+        garden = Garden.objects.select_related("organization").first()
+        organization = garden.organization
         device_model = DeviceModel.objects.first()
         url = reverse("ops-create", args=["devices"])
         common = {
@@ -113,8 +113,8 @@ class BackofficeTests(TestCase):
         self.assertContains(credential_response, "Token do dispositivo")
 
     def test_device_kind_is_required_and_rejects_unknown_values(self):
-        organization = Organization.objects.first()
-        garden = Garden.objects.filter(organization=organization).first()
+        garden = Garden.objects.select_related("organization").first()
+        organization = garden.organization
         device_model = DeviceModel.objects.first()
         base = {
             "organization": organization.pk, "garden": garden.pk, "model": device_model.pk,

@@ -11,7 +11,7 @@ from subscriptions.models import Plan, PlanEntitlement, PlanVersion, Subscriptio
 from subscriptions.selectors import get_available_plan_versions
 from crops.models import Crop, PlantingCycle
 from crops.selectors import get_available_cultivars
-from gardens.models import Garden, GardenModule, ModuleInstallation
+from gardens.models import Garden, GardenModel, GardenModule, ModuleInstallation
 from operations.models import Visit
 
 
@@ -165,6 +165,8 @@ def resource_form_class(resource):
         return CropForm
     if resource.model is Visit:
         return VisitForm
+    if resource.model is Garden:
+        return GardenForm
     if resource.model is Device:
         return DeviceForm
     return modelform_factory(resource.model, form=OperationalModelForm, fields=resource.fields)
@@ -204,9 +206,9 @@ class VisitForm(OperationalModelForm):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.fields["technician"].queryset = User.objects.filter(
+            models.Q(employee_role=User.EmployeeRole.TECHNICIAN)
+            | models.Q(memberships__is_active=True, memberships__role=Membership.Role.TECHNICIAN),
             is_active=True,
-            memberships__is_active=True,
-            memberships__role=Membership.Role.TECHNICIAN,
         ).distinct().order_by("full_name", "email")
         organization_id = self.data.get(self.add_prefix("organization")) if self.is_bound else self.instance.organization_id
         if organization_id:
@@ -225,7 +227,7 @@ class CropForm(OperationalModelForm):
 
     class Meta:
         model = Crop
-        fields = ("common_name", "scientific_name", "code", "description", "difficulty", "light_requirement", "uses", "is_available", "botanical_family", "category", "origin", "life_cycle", "edible_part", "page_title", "short_description", "flavor", "aroma", "is_featured", "image_url", "minimum_temperature", "ideal_temperature_min", "ideal_temperature_max", "maximum_temperature", "minimum_humidity", "maximum_humidity", "light_hours", "target_ppfd", "root_depth_cm", "minimum_pot_liters", "allows_regrowth", "estimated_harvests", "cut_interval_days")
+        fields = ("common_name", "code", "description", "image_url", "is_available", "light_hours", "irrigation_frequency_count", "irrigation_frequency_period", "pump_duration_seconds")
 
     def clean_is_available(self):
         available = self.cleaned_data["is_available"]
@@ -241,7 +243,7 @@ class CommercialPlanForm(OperationalModelForm):
 
     class Meta:
         model = Plan
-        fields = ("name", "code", "commercial_title", "subtitle", "short_copy", "description", "ideal_for", "installation_fee_cents", "is_public", "is_featured", "display_order", "image_url", "exclusions", "is_active")
+        fields = ("garden_model", "name", "code", "description", "installation_fee_cents", "is_public", "is_active")
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -281,7 +283,7 @@ class EmployeeForm(OperationalModelForm):
 
     class Meta:
         model = User
-        fields = ("full_name", "email", "phone", "is_staff", "is_active")
+        fields = ("full_name", "email", "phone", "employee_role", "is_active")
 
     def clean_password(self):
         password = self.cleaned_data.get("password")
@@ -298,6 +300,42 @@ class EmployeeForm(OperationalModelForm):
         if commit:
             user.save()
         return user
+
+
+class GardenForm(OperationalModelForm):
+    light_hours = forms.DecimalField(label="Horas de luz por dia", max_digits=4, decimal_places=1, required=False)
+    irrigation_frequency_count = forms.IntegerField(label="Frequência de irrigação", min_value=1, required=False)
+    irrigation_frequency_period = forms.ChoiceField(label="Período", choices=Crop.IrrigationPeriod.choices, required=False)
+    pump_duration_seconds = forms.IntegerField(label="Duração da bomba (segundos)", min_value=1, max_value=300, required=False)
+
+    class Meta:
+        model = Garden
+        fields = ("organization", "name", "code", "garden_model", "subscription", "address", "status", "primary_technician", "installed_at", "operational_notes", "is_active")
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        config = self.instance.automation_overrides if self.instance.pk else {}
+        irrigation = config.get("irrigation", {})
+        self.initial.setdefault("light_hours", config.get("lighting", {}).get("hours_per_day"))
+        self.initial.setdefault("irrigation_frequency_count", irrigation.get("frequency_count"))
+        self.initial.setdefault("irrigation_frequency_period", irrigation.get("frequency_period"))
+        self.initial.setdefault("pump_duration_seconds", irrigation.get("pump_duration_seconds"))
+        self.fields["primary_technician"].queryset = User.objects.filter(is_active=True, employee_role=User.EmployeeRole.TECHNICIAN)
+
+    def save(self, commit=True):
+        garden = super().save(commit=False)
+        garden.automation_overrides = {
+            **(garden.automation_overrides or {}),
+            "lighting": {"hours_per_day": float(self.cleaned_data["light_hours"]) if self.cleaned_data.get("light_hours") is not None else None},
+            "irrigation": {
+                "frequency_count": self.cleaned_data.get("irrigation_frequency_count"),
+                "frequency_period": self.cleaned_data.get("irrigation_frequency_period"),
+                "pump_duration_seconds": self.cleaned_data.get("pump_duration_seconds"),
+            },
+        }
+        if commit:
+            garden.save()
+        return garden
 
 
 class ClientOnboardingForm(forms.Form):

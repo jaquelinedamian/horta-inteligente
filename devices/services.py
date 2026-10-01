@@ -8,6 +8,8 @@ from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
 from .models import Alert, AlertRule, Channel, Device, DeviceCommand, TelemetryReading
+from gardens.access import user_can_access_garden
+from gardens.configuration import effective_garden_configuration
 
 
 CONTROLLER_DEFAULT_CHANNELS = (
@@ -140,6 +142,32 @@ def pending_commands(device, limit=20):
         command.delivered_at = now
         command.save(update_fields=["status", "delivered_at", "updated_at"])
     return commands
+
+
+@transaction.atomic
+def queue_actuator_command(*, user, channel, action):
+    """Fila única e autorizada para comandos humanos de bomba e iluminação."""
+    if channel.kind != Channel.Kind.ACTUATOR or channel.metric not in {"pump_state", "light_state"}:
+        raise ValueError("canal de atuador inválido")
+    garden = channel.device.assigned_garden()
+    if not garden or not user_can_access_garden(user, garden):
+        from django.core.exceptions import PermissionDenied
+        raise PermissionDenied
+    if channel.metric == "pump_state":
+        if action != "irrigate":
+            raise ValueError("a bomba aceita somente irrigação temporizada")
+        irrigation = effective_garden_configuration(garden).get("irrigation", {})
+        duration = int(irrigation.get("pump_duration_seconds") or irrigation.get("duration_seconds") or 10)
+        payload = {"on": True, "duration_seconds": max(1, min(duration, 300)), "mode": "safe_preset"}
+    else:
+        if action not in {"on", "off"}:
+            raise ValueError("a iluminação aceita ligar ou desligar")
+        payload = {"on": action == "on", "mode": "manual"}
+    return DeviceCommand.objects.create(
+        device=channel.device, channel=channel, command_type="set_state", payload=payload,
+        idempotency_key=f"web:{user.pk}:{timezone.now().timestamp()}",
+        expires_at=timezone.now() + timedelta(minutes=5),
+    )
 
 
 def schedule_lighting(now=None):

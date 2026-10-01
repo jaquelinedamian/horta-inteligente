@@ -9,7 +9,10 @@ def role_required(*roles, staff_allowed=True):
         @login_required
         @wraps(view)
         def wrapped(request, *args, **kwargs):
-            if staff_allowed and request.user.is_staff:
+            if staff_allowed and request.user.is_hortaviva_admin:
+                request.membership = None
+                return view(request, *args, **kwargs)
+            if Membership.Role.TECHNICIAN in roles and request.user.employee_role == request.user.EmployeeRole.TECHNICIAN:
                 request.membership = None
                 return view(request, *args, **kwargs)
             memberships = request.user.memberships.filter(is_active=True, role__in=roles).select_related("organization")

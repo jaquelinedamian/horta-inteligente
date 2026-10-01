@@ -7,6 +7,10 @@ from gardens.models import GardenModule
 
 
 class Crop(BaseModel):
+    class IrrigationPeriod(models.TextChoices):
+        DAY = "day", "Dia"
+        WEEK = "week", "Semana"
+
     common_name = models.CharField(max_length=120)
     scientific_name = models.CharField(max_length=180, blank=True)
     code = models.SlugField(unique=True)
@@ -39,6 +43,9 @@ class Crop(BaseModel):
     allows_regrowth = models.BooleanField(default=False)
     estimated_harvests = models.PositiveSmallIntegerField(default=1)
     cut_interval_days = models.PositiveSmallIntegerField(null=True, blank=True)
+    irrigation_frequency_count = models.PositiveSmallIntegerField(null=True, blank=True)
+    irrigation_frequency_period = models.CharField(max_length=10, choices=IrrigationPeriod.choices, default=IrrigationPeriod.DAY)
+    pump_duration_seconds = models.PositiveSmallIntegerField(null=True, blank=True)
 
     def __str__(self):
         return self.common_name

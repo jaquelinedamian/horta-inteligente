@@ -10,7 +10,7 @@ def backoffice_navigation(request):
     if not area and section:
         area = SECTION_AREA.get(section)
     if not area:
-        area = "comercial"
+        area = "administracao"
     return {
         "backoffice_areas": BACKOFFICE_AREAS,
         "backoffice_current_area": area,

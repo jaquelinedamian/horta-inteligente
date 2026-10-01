@@ -7,6 +7,7 @@ from core.models import BaseModel
 
 
 class Plan(BaseModel):
+    garden_model = models.ForeignKey("gardens.GardenModel", on_delete=models.PROTECT, null=True, blank=True, related_name="plans")
     name = models.CharField(max_length=100)
     code = models.SlugField(unique=True)
     description = models.TextField(blank=True)

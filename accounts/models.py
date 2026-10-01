@@ -29,6 +29,11 @@ class UserManager(BaseUserManager):
 
 
 class User(AbstractUser):
+    class EmployeeRole(models.TextChoices):
+        ADMIN = "admin", "Administrador"
+        TECHNICIAN = "technician", "Técnico"
+        STOCK = "stock", "Estoque"
+
     public_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
     username = None
     email = models.EmailField(unique=True)
@@ -36,6 +41,7 @@ class User(AbstractUser):
     phone = models.CharField(max_length=30, blank=True)
     tax_id = models.CharField("CPF", max_length=14, blank=True)
     birth_date = models.DateField("data de nascimento", null=True, blank=True)
+    employee_role = models.CharField(max_length=20, choices=EmployeeRole.choices, null=True, blank=True)
 
     USERNAME_FIELD = "email"
     REQUIRED_FIELDS = []
@@ -43,6 +49,10 @@ class User(AbstractUser):
 
     def __str__(self):
         return self.full_name or self.email
+
+    @property
+    def is_hortaviva_admin(self):
+        return self.is_superuser or self.is_staff or self.employee_role == self.EmployeeRole.ADMIN
 
 
 class Organization(BaseModel):

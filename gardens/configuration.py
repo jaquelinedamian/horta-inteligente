@@ -14,14 +14,36 @@ def _merge(base, override):
 
 
 def effective_garden_configuration(garden):
-    cycle = (
+    cycles = list(
         PlantingCycle.objects.filter(garden=garden, status=PlantingCycle.Status.ACTIVE)
-        .select_related("crop", "cultivation_profile", "nutrition_plan")
-        .order_by("-planted_at", "-created_at")
-        .first()
+        .select_related("crop", "cultivar__crop", "cultivation_profile")
+        .order_by("module__position_label", "created_at")
     )
-    defaults = cycle.cultivation_profile.automation_config if cycle and cycle.cultivation_profile else {}
-    config = _merge(defaults, garden.automation_overrides)
-    config["culture"] = cycle.crop.code if cycle and cycle.crop else None
+    candidates = []
+    for cycle in cycles:
+        crop = cycle.crop or (cycle.cultivar.crop if cycle.cultivar_id else None)
+        candidate = deepcopy(cycle.cultivation_profile.automation_config) if cycle.cultivation_profile else {}
+        if crop:
+            simple = {}
+            if crop.light_hours is not None:
+                simple["lighting"] = {"hours_per_day": float(crop.light_hours)}
+            irrigation = {}
+            if crop.irrigation_frequency_count is not None:
+                irrigation.update(frequency_count=crop.irrigation_frequency_count, frequency_period=crop.irrigation_frequency_period)
+            if crop.pump_duration_seconds is not None:
+                irrigation["pump_duration_seconds"] = crop.pump_duration_seconds
+            if irrigation:
+                simple["irrigation"] = irrigation
+            candidate = _merge(candidate, simple)
+        candidates.append(candidate)
+    compatible = bool(candidates) and all(item == candidates[0] for item in candidates[1:])
+    config = _merge(candidates[0] if compatible else {}, garden.automation_overrides)
+    config["cultures"] = [(cycle.crop or cycle.cultivar.crop).code for cycle in cycles if cycle.crop_id or cycle.cultivar_id]
+    config["culture"] = config["cultures"][0] if len(config["cultures"]) == 1 else None
+    config["requires_confirmation"] = bool(candidates and not compatible)
+    config["camera"] = _merge(
+        {"photos_per_day": garden.garden_model.photos_per_day if garden.garden_model_id else None},
+        config.get("camera", {}),
+    )
     config["configuration_version"] = garden.updated_at.isoformat()
     return config

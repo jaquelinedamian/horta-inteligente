@@ -9,7 +9,7 @@ from django.core.exceptions import ValidationError
 from django.contrib import messages
 from django.core.management import call_command
 from django.core.paginator import Paginator
-from django.db.models import Count, Q
+from django.db.models import Count, F, Q
 from django.http import Http404, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -21,7 +21,7 @@ from crops.models import Crop, PlantingCycle
 from devices.models import Alert, Device, DeviceCredential
 from gardens.models import Garden, GardenModule, ModuleInstallation
 from gardens.selectors import get_active_installations
-from operations.models import SupportTicket, Visit, WorkOrder
+from operations.models import InventoryItem, SupportTicket, Visit, WorkOrder
 from subscriptions.models import Payment, Plan, Subscription
 
 from .backoffice import get_resource
@@ -33,7 +33,8 @@ from .permissions import operations_required
 
 
 AREAS = {
-    "comercial": ("Comercial", "Clientes, planos, assinaturas e faturamento.", ("clients", "organizations", "plans", "subscriptions", "coupons", "payments")),
+    "comercial": ("Clientes", "Clientes da HortaViva.", ("clients",)),
+    "configuracoes": ("Planos e assinaturas", "Configurações comerciais dos modelos de horta.", ("plans", "subscriptions")),
     "cultivo": ("Cultivo", "Catálogo agronômico, ciclos, colheitas e insumos.", ("crops", "cultivars", "cultivation-profiles", "crop-stages", "cycles", "harvests", "substrates", "substrate-recipes", "fertilizers", "nutrition-plans")),
     "hortas": ("Hortas", "Estrutura instalada, módulos e instalações.", ("gardens", "module-types", "modules", "installations", "qrcodes")),
     "iot": ("IoT", "Dispositivos, métricas, telemetria e automações.", ("device-models", "devices", "metrics", "channels", "telemetry", "calibrations", "commands", "alert-rules", "alerts", "lighting")),
@@ -110,26 +111,12 @@ def dashboard(request):
     today = timezone.localdate()
     now = timezone.now()
     cards = [
-        ("Planos ativos sem preço vigente", Plan.objects.filter(is_active=True).exclude(versions__retired_at__isnull=True).distinct().count(), "plans"),
-        ("Culturas disponíveis sem perfil", Crop.objects.filter(is_available=True, cultivation_profiles__isnull=True).count(), "crops"),
-        ("Módulos instalados sem ciclo", GardenModule.objects.filter(status=GardenModule.Status.INSTALLED, planting_cycles__isnull=True).count(), "modules"),
         ("Clientes ativos", Organization.objects.filter(is_active=True).count(), "clients"),
-        ("Organizações", Organization.objects.count(), "organizations"),
-        ("Assinaturas ativas", Subscription.objects.filter(status=Subscription.Status.ACTIVE).count(), "subscriptions"),
-        ("Inadimplentes", Subscription.objects.filter(status=Subscription.Status.PAST_DUE).count(), "subscriptions"),
-        ("Hortas", Garden.objects.filter(is_active=True).count(), "gardens"),
-        ("Módulos instalados", GardenModule.objects.filter(status=GardenModule.Status.INSTALLED).count(), "modules"),
-        ("Módulos disponíveis", GardenModule.objects.filter(status=GardenModule.Status.STOCK).count(), "modules"),
-        ("Dispositivos online", Device.objects.exclude(status=Device.Status.RETIRED).filter(last_seen_at__gte=now - timedelta(seconds=settings.DEVICE_ONLINE_THRESHOLD_SECONDS)).count(), "devices"),
-        ("Dispositivos offline", Device.objects.exclude(status=Device.Status.RETIRED).filter(Q(last_seen_at__lt=now - timedelta(seconds=settings.DEVICE_ONLINE_THRESHOLD_SECONDS)) | Q(last_seen_at__isnull=True)).count(), "devices"),
-        ("Culturas ativas", PlantingCycle.objects.filter(status=PlantingCycle.Status.ACTIVE).count(), "cycles"),
+        ("Hortas instaladas", Garden.objects.filter(is_active=True, status=Garden.Status.INSTALLED).count(), "gardens"),
+        ("Hortas offline", Garden.objects.filter(is_active=True).filter(Q(devices__last_seen_at__lt=now - timedelta(seconds=settings.DEVICE_ONLINE_THRESHOLD_SECONDS)) | Q(devices__last_seen_at__isnull=True)).distinct().count(), "gardens"),
         ("Visitas hoje", Visit.objects.filter(scheduled_start__date=today).count(), "visits"),
-        ("Próximas visitas", Visit.objects.filter(scheduled_start__gt=now, status=Visit.Status.SCHEDULED).count(), "visits"),
-        ("Ordens abertas", WorkOrder.objects.exclude(status__in=[WorkOrder.Status.COMPLETED, WorkOrder.Status.CANCELED]).count(), "orders"),
-        ("Ordens atrasadas", WorkOrder.objects.filter(scheduled_for__lt=now).exclude(status__in=[WorkOrder.Status.COMPLETED, WorkOrder.Status.CANCELED]).count(), "orders"),
-        ("Alertas técnicos", Alert.objects.filter(status=Alert.Status.OPEN).count(), "alerts"),
-        ("Pagamentos", Payment.objects.count(), "payments"),
-        ("Chamados", SupportTicket.objects.exclude(status=SupportTicket.Status.RESOLVED).count(), "tickets"),
+        ("Estoque abaixo do mínimo", InventoryItem.objects.filter(quantity__lt=F("minimum_quantity"), is_active=True).count(), "inventory"),
+        ("Chamados abertos", SupportTicket.objects.exclude(status=SupportTicket.Status.RESOLVED).count(), "tickets"),
     ]
     visits = Visit.objects.filter(scheduled_start__date=today).select_related("organization", "technician")[:8]
     alerts = Alert.objects.filter(status=Alert.Status.OPEN).select_related("rule", "rule__channel__device").order_by("-rule__severity")[:8]
@@ -160,7 +147,7 @@ def collection(request, section):
             history_count=Count("planting_cycles", distinct=True),
         ).order_by("common_name")
     if section == "employees":
-        queryset = queryset.filter(Q(is_staff=True) | Q(memberships__role=Membership.Role.TECHNICIAN)).distinct()
+        queryset = queryset.filter(employee_role__isnull=False).distinct()
     query = request.GET.get("q", "").strip()
     if query and resource.search:
         condition = Q()

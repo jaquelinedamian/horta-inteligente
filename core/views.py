@@ -12,6 +12,7 @@ from django.http import Http404, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils.http import url_has_allowed_host_and_scheme
+from django.utils.text import slugify
 from django.utils import timezone
 from django.views.decorators.http import require_POST
 
@@ -74,7 +75,7 @@ def signup(request):
 
 @login_required
 def post_login(request):
-    if request.user.is_staff: return redirect("ops-dashboard")
+    if request.user.is_hortaviva_admin: return redirect("ops-dashboard")
     memberships = request.user.memberships.filter(is_active=True).order_by("created_at", "id")
     customer = memberships.filter(role__in=[Membership.Role.OWNER, Membership.Role.MANAGER, Membership.Role.VIEWER]).first()
     technician = memberships.filter(role=Membership.Role.TECHNICIAN).first()
@@ -90,6 +91,8 @@ def post_login(request):
 
 
 def _plan_module_limit(plan_version):
+    if plan_version.plan.garden_model_id:
+        return plan_version.plan.garden_model.capacity
     feature = plan_version.features.filter(Q(key="modules") | Q(key__icontains="módulo")).order_by("created_at").first()
     return feature.limit if feature and feature.limit is not None else None
 
@@ -98,14 +101,11 @@ def _checkout_missing_step(state, plan=None):
     if not plan: return 1
     if not state.get("cultures"): return 2
     if not state.get("address"): return 3
-    if not state.get("survey"): return 4
-    if not state.get("scheduled_for"): return 5
-    if not state.get("payment"): return 6
     return None
 
 
 def checkout(request, step):
-    if step not in range(1, 8): raise Http404
+    if step not in range(1, 5): raise Http404
     state = request.session.get("checkout", {})
     available_plans = get_public_plans()
     selected_plan = available_plans.filter(id=state.get("plan")).first()
@@ -139,18 +139,14 @@ def checkout(request, step):
     elif step == 3:
         form = CheckoutAddressForm(request.POST or None, initial=state.get("address"))
         if request.method == "POST" and form.is_valid(): state["address"] = form.cleaned_data
-    elif step == 4:
-        form = InstallationSurveyForm(request.POST or None, initial=state.get("survey"))
-        if request.method == "POST" and form.is_valid(): state["survey"] = form.cleaned_data
-    elif step == 5:
-        form = InstallationDateForm(request.POST or None)
-        if request.method == "POST" and form.is_valid(): state["scheduled_for"] = form.cleaned_data["scheduled_for"].isoformat()
-    elif step == 6 and request.method == "POST": state["payment"] = "simulated-approved"
+    elif step == 4 and request.method == "POST":
+        request.session["checkout"] = state
+        return redirect("checkout-complete")
     if request.method == "POST" and step != 1 and (form is None or form.is_valid()):
         next_missing_step = _checkout_missing_step(state, selected_plan)
         if next_missing_step is None or next_missing_step > step:
             request.session["checkout"] = state
-            return redirect("checkout", step=min(step + 1, 7))
+            return redirect("checkout", step=min(step + 1, 4))
     selected_crops = Crop.objects.filter(id__in=state.get("cultures", []))
     return render(request, "public/checkout.html", {"step": step, "state": state, "plans": available_plans, "crops": get_available_crops(), "form": form, "selected_plan": selected_plan, "selected_crops": selected_crops, "module_limit": _plan_module_limit(selected_plan) if selected_plan else None})
 
@@ -182,12 +178,34 @@ def checkout_complete(request):
         messages.info(request, "Sua organização já possui uma assinatura ativa.")
         return render(request, "public/checkout_success.html", {"subscription": existing, "already_active": True})
     address_data = state.get("address", {})
-    if address_data: Address.objects.get_or_create(organization=org, postal_code=address_data["postal_code"], defaults=address_data)
-    subscription = Subscription.objects.create(organization=org, plan_version=plan, status=Subscription.Status.ACTIVE, current_period_start=timezone.now(), current_period_end=timezone.now() + timedelta(days=30))
-    Payment.objects.create(subscription=subscription, amount_cents=plan.price_cents, status=Payment.Status.PAID, due_at=timezone.now(), paid_at=timezone.now(), provider_reference=f"SIM-{uuid4().hex[:10]}")
-    checkout_request = CheckoutRequest.objects.create(user=request.user, plan_version=plan, installation_data={"address": address_data, "survey": state.get("survey", {})}, scheduled_for=state.get("scheduled_for") or None, status=CheckoutRequest.Status.CONFIRMED)
-    checkout_request.selected_crops.set(valid_crops); request.session.pop("checkout", None)
-    return render(request, "public/checkout_success.html", {"subscription": subscription})
+    address = None
+    if address_data:
+        address, _ = Address.objects.get_or_create(
+            organization=org,
+            postal_code=address_data["postal_code"],
+            street=address_data["street"],
+            number=address_data.get("number", ""),
+            defaults=address_data,
+        )
+    subscription = Subscription.objects.create(organization=org, plan_version=plan, status=Subscription.Status.TRIALING, current_period_start=timezone.now(), current_period_end=timezone.now() + timedelta(days=30), provider="manual", notes="Assinatura aguardando processamento manual; nenhum pagamento foi simulado.")
+    checkout_request = CheckoutRequest.objects.create(user=request.user, plan_version=plan, installation_data={"address": address_data}, status=CheckoutRequest.Status.CONFIRMED)
+    checkout_request.selected_crops.set(valid_crops)
+    model = plan.plan.garden_model
+    base_code = slugify(model.code if model else plan.plan.code) or "horta"
+    garden, _ = Garden.objects.get_or_create(
+        organization=org,
+        subscription=subscription,
+        defaults={
+            "name": model.name if model else f"HortaViva {plan.plan.name}",
+            "code": f"{base_code}-{str(subscription.pk)[:8]}",
+            "garden_model": model,
+            "address": address,
+            "status": Garden.Status.WAITING_INSTALLATION,
+            "is_active": True,
+        },
+    )
+    request.session.pop("checkout", None)
+    return render(request, "public/checkout_success.html", {"subscription": subscription, "garden": garden})
 
 
 def _customer_context(request):
@@ -268,15 +286,17 @@ def history(request):
     return render(request, "customer/history.html", {"series": series, "days": days})
 
 
-@customer_required
+@login_required
 @require_POST
 def device_action(request):
-    channel = get_object_or_404(Channel, id=request.POST.get("channel"), device__organization=request.membership.organization, kind=Channel.Kind.ACTUATOR); action = request.POST.get("action")
-    if channel.metric == "pump_state": payload = {"on": True, "mode": "safe_preset"}
-    elif action in ("on", "off"): payload = {"on": action == "on", "mode": "manual"}
-    else: raise Http404
-    DeviceCommand.objects.create(device=channel.device, channel=channel, command_type="set_state", payload=payload, idempotency_key=f"web:{request.user.id}:{uuid4().hex}")
-    messages.success(request, "Comando enviado ao controlador."); return redirect("customer-dashboard")
+    from devices.services import queue_actuator_command
+    channel = get_object_or_404(Channel.objects.select_related("device__garden"), id=request.POST.get("channel"))
+    try:
+        queue_actuator_command(user=request.user, channel=channel, action=request.POST.get("action"))
+    except ValueError:
+        raise Http404
+    messages.success(request, "Comando enviado ao controlador.")
+    return redirect(request.POST.get("next") or "customer-dashboard")
 
 
 @operations_required
@@ -315,7 +335,7 @@ def tech_visits(request):
 @login_required
 def garden_detail(request, garden_id):
     garden = get_object_or_404(gardens_for_user(request.user).select_related("organization", "address", "primary_technician"), id=garden_id)
-    return render(request, "shared/garden_detail.html", {"snapshot": garden_snapshot(garden), "technical": request.user.is_staff or request.user.memberships.filter(role=Membership.Role.TECHNICIAN, is_active=True).exists()})
+    return render(request, "shared/garden_detail.html", {"snapshot": garden_snapshot(garden), "technical": request.user.is_hortaviva_admin or request.user.employee_role == User.EmployeeRole.TECHNICIAN or request.user.memberships.filter(role=Membership.Role.TECHNICIAN, is_active=True).exists()})
 
 
 @login_required
@@ -330,10 +350,10 @@ def garden_photo(request, photo_id):
 @technician_required
 def visit_detail(request, visit_id):
     visits = Visit.objects.select_related("organization", "garden", "work_order", "technician")
-    if not request.user.is_staff:
+    if not request.user.is_hortaviva_admin:
         visits = visits.filter(technician=request.user)
     visit = get_object_or_404(visits, id=visit_id)
-    checklist, _ = ChecklistExecution.objects.get_or_create(visit=visit, defaults={"items": [{"label": label, "done": False, "status": "not_tested"} for label in ("Identificar horta", "Vincular ESP8266", "Configurar Wi-Fi do ESP8266", "Testar sensores", "Testar bomba", "Testar iluminação", "Vincular ESP32-CAM", "Configurar Wi-Fi da ESP32-CAM", "Testar câmera", "Confirmar cultura e configuração", "Teste final")]})
+    checklist, _ = ChecklistExecution.objects.get_or_create(visit=visit, defaults={"items": [{"label": label, "done": False, "status": "not_tested"} for label in ("Identificar horta", "Configurar Wi-Fi do ESP8266", "Configurar Wi-Fi da ESP32-CAM", "Testar temperatura/umidade", "Testar câmera", "Testar bomba", "Testar iluminação", "Confirmar culturas", "Teste final")]})
     snapshot = garden_snapshot(visit.garden)
     controller = next((device for device in snapshot["devices"] if device.kind == Device.Kind.CONTROLLER), None)
     camera = next((device for device in snapshot["devices"] if device.kind == Device.Kind.CAMERA), None)
@@ -347,7 +367,7 @@ def visit_detail(request, visit_id):
 @require_POST
 def visit_update(request, visit_id):
     visits = Visit.objects.all()
-    if not request.user.is_staff:
+    if not request.user.is_hortaviva_admin:
         visits = visits.filter(technician=request.user)
     visit = get_object_or_404(visits, id=visit_id); checklist, _ = ChecklistExecution.objects.get_or_create(visit=visit, defaults={"items": []})
     labels = request.POST.getlist("all_item")

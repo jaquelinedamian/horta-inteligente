@@ -5,7 +5,7 @@ from crops.models import (Crop, CropCultivationProfile, CropNutritionPlan, CropR
     Cultivar, Fertilizer, HarvestEvent, PlantingCycle, SubstrateMaterial, SubstrateRecipe, SubstrateRecipeComponent)
 from devices.models import (Alert, AlertRule, Channel, Device, DeviceCommand, DeviceCredential, DeviceHeartbeat,
     DeviceModel, GardenPhoto, LightingSchedule, SensorCalibration, TelemetryMetric, TelemetryReading)
-from gardens.models import Garden, GardenModule, ModuleInstallation, ModuleType
+from gardens.models import Garden, GardenModel, GardenModule, ModuleInstallation, ModuleType
 from operations.models import (Assignment, ChecklistExecution, InventoryCategory, InventoryItem, MaintenancePlan,
     MaintenanceRecord, MaintenanceTask, StockLot, StockMovement, Supplier, SupportTicket, Visit,
     VisitMaterialUsage, WorkOrder)
@@ -28,11 +28,12 @@ def r(title, model, fields, search=()):
 
 
 RESOURCES = {
+    "garden-models": r("Modelos de horta", GardenModel, "name code description capacity reservoir_liters photos_per_day is_active", ("name", "code")),
     "organizations": r("Organizações", Organization, "name slug kind tax_id primary_contact phone email billing_email internal_notes is_active", ("name", "slug", "tax_id")),
     "memberships": r("Membros", Membership, "organization user role is_active", ("organization__name", "user__email")),
     "addresses": r("Endereços", Address, "organization label street number complement district city state postal_code country address_type access_instructions property_type floor has_elevator has_doorman condominium_restrictions access_notes latitude longitude", ("organization__name", "street", "city")),
-    "employees": Resource("Funcionários", User, ("full_name", "email", "phone", "tax_id", "birth_date", "is_staff", "is_active"), ("full_name", "email"), ordering=("full_name",)),
-    "plans": r("Planos", Plan, "name code commercial_title subtitle short_copy description ideal_for installation_fee_cents is_public is_featured display_order image_url exclusions is_active", ("name", "code")),
+    "employees": Resource("Funcionários", User, ("full_name", "email", "phone", "employee_role", "is_active"), ("full_name", "email"), ordering=("full_name",)),
+    "plans": r("Assinaturas e planos", Plan, "garden_model name code description installation_fee_cents is_public is_active", ("name", "code")),
     "plan-versions": r("Versões de plano", PlanVersion, "plan version price_cents currency billing_interval_months effective_from retired_at installation_fee_cents", ("plan__name",)),
     "plan-features": r("Recursos legados", PlanFeature, "plan_version key enabled limit", ("key",)),
     "entitlements": r("Itens incluídos no plano", PlanEntitlement, "plan_version benefit_type name description quantity unit period unlimited carries_balance is_featured display_order", ("name", "plan_version__plan__name")),
@@ -41,19 +42,19 @@ RESOURCES = {
     "subscriptions": r("Assinaturas", Subscription, "organization plan_version status current_period_start current_period_end contracted_price_cents billing_day next_billing_at auto_renew coupon discount_cents canceled_at cancellation_reason notes provider provider_reference", ("organization__name", "plan_version__plan__name")),
     "subscription-events": Resource("Histórico de assinaturas", SubscriptionEvent, search=("subscription__organization__name", "event_type"), readonly=True),
     "payments": r("Pagamentos", Payment, "subscription competence gross_amount_cents coupon discount_cents amount_cents currency due_at paid_at payment_method status provider_reference notes", ("subscription__organization__name", "provider_reference")),
-    "crops": r("Culturas", Crop, "common_name scientific_name code description difficulty light_requirement uses is_available botanical_family category origin life_cycle edible_part page_title short_description flavor aroma is_featured image_url minimum_temperature ideal_temperature_min ideal_temperature_max maximum_temperature minimum_humidity maximum_humidity light_hours target_ppfd root_depth_cm minimum_pot_liters allows_regrowth estimated_harvests cut_interval_days", ("common_name", "scientific_name", "code")),
+    "crops": r("Culturas", Crop, "common_name code description image_url is_available light_hours irrigation_frequency_count irrigation_frequency_period pump_duration_seconds", ("common_name", "code")),
     "cultivars": r("Variedades", Cultivar, "crop name code description size color flavor vigor resistance days_to_harvest specific_characteristics is_active", ("crop__common_name", "name")),
     "crop-requirements": r("Requisitos de cultivo", CropRequirement, "cultivar metric unit minimum maximum target", ("cultivar__name", "metric")),
     "cultivation-profiles": r("Perfis de cultivo", CropCultivationProfile, "crop cultivar cultivation_system name description is_active target_temperature_min target_temperature_max target_humidity_min target_humidity_max photoperiod_hours target_ppfd substrate_moisture_min substrate_moisture_max initial_irrigation_amount irrigation_unit initial_irrigation_interval_hours ph_min ph_target ph_max ec_min ec_target ec_max automation_config", ("crop__common_name", "name")),
     "crop-stages": r("Estágios", CropStageProfile, "profile name position estimated_duration_days temperature humidity photoperiod_hours ppfd substrate_moisture irrigation_notes ph ec fertilization_notes notes", ("name",)),
-    "cycles": r("Ciclos de cultivo", PlantingCycle, "organization garden module crop cultivar cultivation_profile substrate_recipe nutrition_plan origin batch_code planted_at current_stage expected_harvest_at expected_end_at status responsible closure_reason maximum_cuts cuts_completed next_harvest_at notes", ("module__name", "cultivar__name")),
+    "cycles": r("Culturas da horta", PlantingCycle, "organization garden module crop planted_at status expected_end_at notes", ("module__name", "crop__common_name")),
     "harvests": r("Colheitas", HarvestEvent, "cycle harvest_number harvested_at quantity unit quality notes", ("cycle__cultivar__name",)),
     "substrates": r("Substratos", SubstrateMaterial, "name category manufacturer supplier description organic_matter_percent ph ec density water_retention_percent aeration_percent porosity_percent particle_size stock_unit is_active", ("name",)),
     "substrate-recipes": r("Receitas de substrato", SubstrateRecipe, "name code version description intended_use target_ph target_ec is_active", ("name", "code")),
     "substrate-components": r("Componentes de receitas", SubstrateRecipeComponent, "recipe material percentage quantity unit", ("recipe__name", "material__name")),
     "fertilizers": r("Fertilizantes", Fertilizer, "name code manufacturer supplier kind form nitrogen phosphorus potassium micronutrients unit recommended_dilution application_method is_active", ("name", "code")),
     "nutrition-plans": r("Planos nutricionais", CropNutritionPlan, "crop cultivar cultivation_profile stage fertilizer dose unit dilution_volume frequency_days method target_ec target_ph notes", ("crop__common_name", "fertilizer__name")),
-    "gardens": r("Hortas", Garden, "organization name code address timezone responsible subscription status location_name position_description sunlight socket_nearby wifi_available wifi_quality pets children restrictions site_notes equipment_model installed_at module_capacity reservoir_liters grow_light_type pump_model controller_model technical_status primary_technician last_visit_at next_visit_at operational_notes automation_overrides is_active", ("name", "code", "organization__name")),
+    "gardens": r("Hortas", Garden, "organization name code garden_model subscription address status primary_technician installed_at operational_notes is_active", ("name", "code", "organization__name")),
     "module-types": r("Tipos de módulos", ModuleType, "name code capabilities description width_cm height_cm depth_cm pot_volume_liters substrate_capacity_liters water_capacity_liters supports_irrigation supports_lighting supports_sensors recommended_crops is_active", ("name", "code")),
     "modules": r("Módulos", GardenModule, "organization module_type serial_number name qr_identifier status position_label pot_volume_liters substrate_capacity_liters installed_at last_changed_at next_change_at notes", ("name", "serial_number")),
     "installations": r("Instalações", ModuleInstallation, "module garden position_label installed_at removed_at", ("module__serial_number", "garden__name")),
@@ -78,7 +79,7 @@ RESOURCES = {
     "maintenance-tasks": r("Tarefas de manutenção", MaintenanceTask, "plan name description is_required position", ("name",)),
     "maintenance-records": r("Registros de manutenção", MaintenanceRecord, "work_order performed_by started_at finished_at notes parts_used cost_cents", ("work_order__title",)),
     "tickets": r("Suporte", SupportTicket, "organization opened_by garden module device category priority subject description status assigned_to concluded_at generated_order", ("subject",)),
-    "inventory": r("Itens de estoque", InventoryItem, "sku name inventory_category description brand primary_supplier unit minimum_quantity reorder_point average_cost_cents reference_price_cents tracks_lots tracks_expiration is_active physical_location", ("name", "sku")),
+    "inventory": r("Itens de estoque", InventoryItem, "sku name inventory_category quantity minimum_quantity unit primary_supplier physical_location is_active", ("name", "sku")),
     "inventory-categories": r("Categorias", InventoryCategory, "name description is_active", ("name",)),
     "stock-lots": r("Lotes", StockLot, "item code supplier received_at manufactured_at expires_at received_quantity available_quantity unit_cost_cents notes", ("item__name", "code")),
     "stock-movements": r("Movimentações", StockMovement, "item lot kind quantity unit occurred_at user supplier visit work_order garden cycle notes", ("item__name", "item__sku")),
@@ -89,7 +90,8 @@ RESOURCES = {
 ALIASES = {"clients": "organizations", "agenda": "visits", "finance": "payments"}
 
 BACKOFFICE_AREAS = {
-    "comercial": {"label": "Comercial", "description": "Clientes, planos, assinaturas e faturamento.", "links": (("Visão geral", None), ("Clientes", "clients"), ("Organizações", "organizations"), ("Planos", "plans"), ("Assinaturas", "subscriptions"), ("Cupons", "coupons"), ("Pagamentos", "payments"))},
+    "comercial": {"label": "Clientes", "description": "Clientes da HortaViva.", "links": (("Visão geral", None), ("Clientes", "clients"))},
+    "configuracoes": {"label": "Configurações", "description": "Modelos, planos, assinaturas e dispositivos.", "links": (("Visão geral", None), ("Modelos de horta", "garden-models"), ("Planos", "plans"), ("Assinaturas", "subscriptions"), ("Dispositivos", "devices"))},
     "cultivo": {"label": "Cultivo", "description": "Catálogo agronômico, ciclos, colheitas e insumos.", "links": (("Visão geral", None), ("Culturas", "crops"), ("Variedades", "cultivars"), ("Perfis de cultivo", "cultivation-profiles"), ("Estágios", "crop-stages"), ("Ciclos e colheitas", "cycles"), ("Substratos", "substrates"), ("Receitas de substrato", "substrate-recipes"), ("Fertilizantes", "fertilizers"), ("Planos nutricionais", "nutrition-plans"))},
     "hortas": {"label": "Hortas", "description": "Estrutura instalada, módulos e instalações.", "links": (("Visão geral", None), ("Hortas", "gardens"), ("Tipos de módulos", "module-types"), ("Módulos", "modules"), ("Instalações", "installations"), ("QR Codes", "qrcodes"))},
     "iot": {"label": "IoT", "description": "Dispositivos, métricas, telemetria e automações.", "links": (("Visão geral", None), ("Modelos de dispositivos", "device-models"), ("Dispositivos", "devices"), ("Métricas", "metrics"), ("Canais", "channels"), ("Telemetria", "telemetry"), ("Calibrações", "calibrations"), ("Comandos", "commands"), ("Regras de alerta", "alert-rules"), ("Alertas", "alerts"), ("Iluminação", "lighting"))},
