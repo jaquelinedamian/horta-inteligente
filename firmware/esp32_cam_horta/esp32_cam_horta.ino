@@ -3,6 +3,7 @@
 #include <WiFiManager.h>
 #include <HTTPClient.h>
 #include <WiFiClientSecure.h>
+#include <ArduinoJson.h>
 #include <time.h>
 #include "esp_camera.h"
 #include "esp_http_server.h"
@@ -14,14 +15,61 @@ namespace {
 httpd_handle_t cameraServer = nullptr;
 constexpr char STREAM_BOUNDARY[] = "horta-camera-boundary";
 unsigned long lastPhotoUploadAt = 0;
+unsigned long lastConfigFetchAt = 0;
 unsigned long lastWifiAttemptAt = 0;
 bool servicesStarted = false;
 bool clockSynchronized = false;
 String serialCommand;
 constexpr time_t MIN_VALID_EPOCH = 1700000000;
 constexpr unsigned long NTP_TIMEOUT_MS = 30000UL;
+constexpr uint8_t DEFAULT_PHOTOS_PER_DAY = 4;
+constexpr unsigned long CONFIG_REFRESH_INTERVAL_MS = 30UL * 60UL * 1000UL;
+constexpr unsigned long MILLIS_PER_DAY = 86400000UL;
+unsigned long photoIntervalMs = MILLIS_PER_DAY / DEFAULT_PHOTOS_PER_DAY;
 
 void processSerialCommand();
+
+void useCameraSchedule(uint8_t photosPerDay) {
+  photosPerDay = constrain(photosPerDay, 1, 24);
+  photoIntervalMs = MILLIS_PER_DAY / photosPerDay;
+  Serial.printf("Config camera: %u fotos/dia\n", photosPerDay);
+  Serial.printf("Intervalo de foto: %lu segundos\n", photoIntervalMs / 1000UL);
+}
+
+bool fetchCameraConfiguration() {
+  if (WiFi.status() != WL_CONNECTED || time(nullptr) < MIN_VALID_EPOCH) return false;
+  HTTPClient http;
+  WiFiClientSecure secure;
+  String url = String(API_BASE_URL) + "/api/device/config/";
+  if (!url.startsWith("https://") || strlen(HTTPS_ROOT_CA) < 40) {
+    Serial.println("Config camera indisponivel; usando 4 fotos/dia");
+    useCameraSchedule(DEFAULT_PHOTOS_PER_DAY);
+    return false;
+  }
+  secure.setCACert(HTTPS_ROOT_CA);
+  if (!http.begin(secure, url)) {
+    Serial.println("Config camera indisponivel; usando 4 fotos/dia");
+    useCameraSchedule(DEFAULT_PHOTOS_PER_DAY);
+    return false;
+  }
+  http.setTimeout(15000);
+  http.addHeader("Authorization", String("Device ") + DEVICE_API_TOKEN);
+  http.addHeader("X-Device-ID", DEVICE_ID);
+  const int status = http.GET();
+  uint8_t photosPerDay = DEFAULT_PHOTOS_PER_DAY;
+  bool valid = false;
+  if (status == HTTP_CODE_OK) {
+    JsonDocument document;
+    DeserializationError error = deserializeJson(document, http.getString());
+    int configured = document["camera"]["photos_per_day"] | 0;
+    valid = !error && configured >= 1 && configured <= 24;
+    if (valid) photosPerDay = static_cast<uint8_t>(configured);
+  }
+  http.end();
+  if (!valid) Serial.println("Config camera indisponivel; usando 4 fotos/dia");
+  useCameraSchedule(photosPerDay);
+  return valid;
+}
 
 String wifiAccessPointName() {
   uint64_t chipId = ESP.getEfuseMac();
@@ -308,6 +356,10 @@ void setup() {
     ESP.restart();
   }
   clockSynchronized = synchronizeClock();
+  if (clockSynchronized) {
+    fetchCameraConfiguration();
+    lastConfigFetchAt = millis();
+  }
 }
 
 void loop() {
@@ -324,7 +376,11 @@ void loop() {
     lastWifiAttemptAt = millis();
     WiFi.reconnect();
   }
-  if (millis() - lastPhotoUploadAt >= PHOTO_INTERVAL_MS) {
+  if (clockSynchronized && millis() - lastConfigFetchAt >= CONFIG_REFRESH_INTERVAL_MS) {
+    lastConfigFetchAt = millis();
+    fetchCameraConfiguration();
+  }
+  if (millis() - lastPhotoUploadAt >= photoIntervalMs) {
     lastPhotoUploadAt = millis();
     uploadPhoto();
   }
