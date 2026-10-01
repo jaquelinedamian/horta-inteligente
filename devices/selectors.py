@@ -40,10 +40,10 @@ def garden_snapshot(garden):
                 metrics[channel.metric] = {
                     "value": value, "unit": channel.unit, "recorded_at": reading.recorded_at,
                 }
-    cycles = PlantingCycle.objects.filter(
+    cycles = list(PlantingCycle.objects.filter(
         garden=garden, status=PlantingCycle.Status.ACTIVE
-    ).select_related("crop", "cultivar__crop", "cultivation_profile", "nutrition_plan")
-    cycle = cycles.first()
+    ).select_related("crop", "cultivar__crop", "module", "cultivation_profile", "nutrition_plan"))
+    cycle = cycles[0] if cycles else None
     checkout = None
     if garden.subscription_id:
         checkout = CheckoutRequest.objects.filter(
@@ -51,6 +51,11 @@ def garden_snapshot(garden):
             plan_version=garden.subscription.plan_version,
             status=CheckoutRequest.Status.CONFIRMED,
         ).prefetch_related("selected_crops").order_by("-created_at").first()
+    contracted_crops = []
+    if checkout:
+        contracted_crops = list(checkout.selected_crops.all())
+        if not contracted_crops:
+            contracted_crops = list({cultivar.crop_id: cultivar.crop for cultivar in checkout.selected_cultures.select_related("crop")}.values())
     actuator_channels = [channel for device in devices for channel in device.channels.all() if channel.kind == "actuator" and channel.is_enabled]
     return {
         "garden": garden,
@@ -58,7 +63,7 @@ def garden_snapshot(garden):
         "metrics": metrics,
         "cycle": cycle,
         "cycles": cycles,
-        "contracted_crops": checkout.selected_crops.all() if checkout else [],
+        "contracted_crops": contracted_crops,
         "controller": next((item for item in devices if item.kind == Device.Kind.CONTROLLER), None),
         "camera": next((item for item in devices if item.kind == Device.Kind.CAMERA), None),
         "pump_channel": next((item for item in actuator_channels if item.metric == "pump_state"), None),

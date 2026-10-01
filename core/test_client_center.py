@@ -6,7 +6,8 @@ from django.urls import reverse
 
 from accounts.models import Membership, Organization, User
 from crops.models import Crop, Cultivar, PlantingCycle
-from gardens.models import Garden, GardenModule, ModuleInstallation, ModuleType
+from devices.models import Channel, Device, DeviceModel
+from gardens.models import Garden, GardenModel, GardenModule, ModuleInstallation, ModuleType
 from gardens.services import install_module, move_module
 from django.core.exceptions import ValidationError
 from django.utils import timezone
@@ -131,3 +132,117 @@ class ClientCenterTests(TestCase):
         self.assertIsNotNone(first.removed_at)
         self.assertIsNone(second.removed_at)
         self.assertEqual(second.garden, other_garden)
+
+
+class LegacyGardenClientCenterTests(TestCase):
+    def setUp(self):
+        self.admin = User.objects.create_user(
+            email="legacy-admin@example.test",
+            password="test",
+            full_name="Admin",
+            employee_role=User.EmployeeRole.ADMIN,
+        )
+        self.customer = User.objects.create_user(
+            email="legacy-customer@example.test", password="test", full_name="Cliente legado"
+        )
+        self.organization = Organization.objects.create(name="Cliente legado", slug="cliente-legado")
+        Membership.objects.create(
+            user=self.customer, organization=self.organization, role=Membership.Role.OWNER
+        )
+        self.device_model = DeviceModel.objects.create(name="Hardware legado", code="hardware-legado")
+        self.client.force_login(self.admin)
+
+    def _garden(self, code="legada", **kwargs):
+        return Garden.objects.create(
+            organization=self.organization, name=f"Horta {code}", code=code, **kwargs
+        )
+
+    def _response(self):
+        return self.client.get(
+            f"{reverse('ops-client-detail', args=[self.customer.pk])}?aba=gardens"
+        )
+
+    def _device(self, garden, kind, serial):
+        return Device.objects.create(
+            organization=self.organization,
+            garden=garden,
+            model=self.device_model,
+            serial_number=serial,
+            name=serial,
+            kind=kind,
+        )
+
+    def test_minimal_legacy_garden_returns_200(self):
+        self._garden()
+        response = self._response()
+        self.assertEqual(response.status_code, 200)
+        for text in (
+            "Não definido", "Não configurado", "Sem comunicação",
+            "Nenhuma fotografia", "Nenhuma cultura contratada",
+            "Nenhuma cultura plantada", "Não agendada",
+        ):
+            self.assertContains(response, text)
+
+    def test_garden_without_garden_model_returns_200(self):
+        self._garden(garden_model=None)
+        self.assertEqual(self._response().status_code, 200)
+
+    def test_garden_without_subscription_returns_200(self):
+        self._garden(subscription=None)
+        self.assertEqual(self._response().status_code, 200)
+
+    def test_garden_without_devices_returns_200(self):
+        self._garden()
+        response = self._response()
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Não configurado", count=2)
+
+    def test_garden_without_planting_cycle_returns_200(self):
+        self._garden()
+        response = self._response()
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Nenhuma cultura plantada")
+
+    def test_garden_with_only_esp8266_returns_200(self):
+        garden = self._garden()
+        self._device(garden, Device.Kind.CONTROLLER, "ESP8266-ONLY")
+        response = self._response()
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Controlador ESP8266")
+        self.assertContains(response, "Câmera ESP32-CAM")
+
+    def test_garden_with_only_esp32_cam_returns_200(self):
+        garden = self._garden()
+        self._device(garden, Device.Kind.CAMERA, "ESP32-CAM-ONLY")
+        response = self._response()
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Controlador ESP8266")
+        self.assertContains(response, "Câmera ESP32-CAM")
+
+    def test_garden_with_legacy_config_returns_200(self):
+        self._garden(automation_overrides=["irrigation", "camera"])
+        self.assertEqual(self._response().status_code, 200)
+
+    def test_complete_garden_returns_200(self):
+        garden_model = GardenModel.objects.create(
+            name="Completa", code="completa", capacity=4, photos_per_day=6
+        )
+        garden = self._garden(
+            garden_model=garden_model,
+            automation_overrides={
+                "irrigation": {"frequency_count": 2, "frequency_period": "dia", "pump_duration_seconds": 15},
+                "lighting": {"hours_per_day": 8},
+                "camera": {"photos_per_day": 6},
+            },
+        )
+        controller = self._device(garden, Device.Kind.CONTROLLER, "ESP8266-COMPLETE")
+        self._device(garden, Device.Kind.CAMERA, "ESP32-CAM-COMPLETE")
+        self.assertTrue(controller.channels.filter(metric="pump_state").exists())
+        Channel.objects.create(
+            device=controller, key="light", name="Luz", kind=Channel.Kind.ACTUATOR,
+            metric="light_state", value_type=Channel.ValueType.BOOLEAN,
+        )
+        response = self._response()
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Irrigar agora")
+        self.assertContains(response, "Ligar luz")

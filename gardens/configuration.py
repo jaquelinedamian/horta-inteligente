@@ -1,11 +1,14 @@
 from copy import deepcopy
+from collections.abc import Mapping
 
 from crops.models import PlantingCycle
 
 
 def _merge(base, override):
-    result = deepcopy(base)
-    for key, value in (override or {}).items():
+    result = deepcopy(base) if isinstance(base, Mapping) else {}
+    if not isinstance(override, Mapping):
+        return result
+    for key, value in override.items():
         if isinstance(value, dict) and isinstance(result.get(key), dict):
             result[key] = _merge(result[key], value)
         else:
@@ -43,7 +46,7 @@ def effective_garden_configuration(garden):
     config["requires_confirmation"] = bool(candidates and not compatible)
     config["camera"] = _merge(
         {"photos_per_day": garden.garden_model.photos_per_day if garden.garden_model_id else None},
-        config.get("camera", {}),
+        config.get("camera") if isinstance(config.get("camera"), Mapping) else {},
     )
     config["configuration_version"] = garden.updated_at.isoformat()
     return config

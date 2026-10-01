@@ -5,6 +5,7 @@ from io import BytesIO
 
 from django.conf import settings
 from django import forms
+from collections.abc import Mapping
 from django.core.exceptions import ValidationError
 from django.contrib import messages
 from django.core.management import call_command
@@ -254,13 +255,27 @@ def client_detail(request, user_id):
         lighting_schedule = None
         if snapshot["light_channel"]:
             lighting_schedule = snapshot["light_channel"].lighting_schedules.filter(enabled=True).first()
+        irrigation = config.get("irrigation", {}) if isinstance(config.get("irrigation"), Mapping) else {}
+        irrigation_duration = irrigation.get("pump_duration_seconds")
+        if irrigation_duration is None:
+            irrigation_duration = irrigation.get("duration_seconds")
+        planted_crops = []
+        for cycle in snapshot["cycles"]:
+            crop = cycle.crop or (cycle.cultivar.crop if cycle.cultivar_id else None)
+            planted_crops.append({
+                "cycle": cycle,
+                "name": crop.common_name if crop else "Cultura não definida",
+                "position": cycle.module.position_label or "Posição não informada",
+            })
         garden_panels.append({
             "garden": garden,
             "snapshot": snapshot,
             "configuration": config,
-            "irrigation": config.get("irrigation", {}),
-            "lighting": config.get("lighting", {}),
+            "irrigation": irrigation,
+            "irrigation_duration": irrigation_duration,
+            "lighting": config.get("lighting", {}) if isinstance(config.get("lighting"), Mapping) else {},
             "lighting_schedule": lighting_schedule,
+            "planted_crops": planted_crops,
         })
     allowed_tabs = {"resumo", "dados", "subscriptions", "gardens", "visits", "tickets"}
     active_tab = request.GET.get("aba", "resumo")
