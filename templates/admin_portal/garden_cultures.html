@@ -1,0 +1,9 @@
+{% extends 'base.html' %}
+{% block area_name %}Administração da horta{% endblock %}
+{% block content %}
+<div class="page-header"><div><span class="eyebrow">Culturas</span><h1>{{ garden.name }}</h1><p class="text-muted">Corrija culturas contratadas e gerencie o que está plantado.</p></div>{% if client %}<a class="btn btn-light" href="{% url 'ops-client-detail' client.pk %}?aba=gardens">Voltar à Central do Cliente</a>{% endif %}</div>
+<div class="row g-4">
+  <div class="col-lg-5"><section class="content-card h-100"><div class="section-heading"><h2 class="h5">Culturas contratadas</h2>{% if checkout %}<a class="btn btn-sm btn-brand" href="{% url 'ops-garden-contracted-crops' garden.pk %}">Editar culturas contratadas</a>{% endif %}</div>{% if checkout %}{% for crop in checkout.selected_crops.all %}<span class="badge-soft me-1">{{ crop.common_name }}</span>{% empty %}<p class="text-muted">Nenhuma cultura selecionada.</p>{% endfor %}{% else %}<p class="text-muted">Nenhum checkout confirmado disponível.</p>{% endif %}</section></div>
+  <div class="col-lg-7"><section class="content-card h-100"><div class="section-heading"><h2 class="h5">Culturas plantadas</h2>{% if client %}<a class="btn btn-sm btn-brand" href="{% url 'ops-client-related-create' client.pk 'cycles' %}">Adicionar cultura</a>{% endif %}</div>{% for cycle in cycles %}<div class="border-bottom py-3 d-flex justify-content-between"><div><strong>{{ cycle.crop.common_name|default:cycle.cultivar.crop.common_name|default:'Cultura não definida' }}</strong><small class="d-block text-muted">{{ cycle.module.position_label|default:'Posição não informada' }} · {{ cycle.get_status_display }} · {{ cycle.planted_at|date:'d/m/Y'|default:'Data não definida' }}</small></div><a class="btn btn-sm btn-light" href="{% url 'ops-garden-crop-edit' garden.pk cycle.pk %}">Alterar cultura</a></div>{% empty %}<p class="text-muted">Nenhuma cultura plantada.</p>{% endfor %}</section></div>
+</div>
+{% endblock %}

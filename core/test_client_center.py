@@ -33,6 +33,44 @@ class ClientCenterTests(TestCase):
         for section in ("modules", "cycles", "devices", "payments"):
             self.assertNotContains(response, f"?aba={section}")
 
+    def test_admin_garden_tab_exposes_operational_controls(self):
+        organization, garden = self._customer_org_garden()
+        garden.status = Garden.Status.PLANNED
+        garden.automation_overrides = {"camera": {"photos_per_day": 3}}
+        garden.save(update_fields=["status", "automation_overrides", "updated_at"])
+        response = self.client.get(f"{reverse('ops-client-detail', args=[self.customer.pk])}?aba=gardens")
+        self.assertEqual(response.status_code, 200)
+        for label in (
+            "Editar horta", "Editar configurações", "Gerenciar culturas",
+            "Gerenciar dispositivos", "Agendar visita", "Ver desenvolvimento",
+            "Ver relatórios", "Excluir horta", "Restaurar padrão", "Marcar como instalada",
+        ):
+            self.assertContains(response, label)
+        self.assertContains(response, "Status da horta")
+        self.assertContains(response, "Conectividade")
+
+    def test_admin_can_open_garden_administration_routes_and_mark_installed(self):
+        _, garden = self._customer_org_garden()
+        garden.status = Garden.Status.PLANNED
+        garden.installed_at = None
+        garden.save(update_fields=["status", "installed_at", "updated_at"])
+        for name in ("ops-garden-edit", "ops-garden-cultures", "ops-garden-devices"):
+            with self.subTest(name=name):
+                self.assertEqual(self.client.get(reverse(name, args=[garden.pk])).status_code, 200)
+        response = self.client.post(reverse("ops-garden-mark-installed", args=[garden.pk]))
+        self.assertEqual(response.status_code, 302)
+        garden.refresh_from_db()
+        self.assertEqual(garden.status, Garden.Status.INSTALLED)
+        self.assertIsNotNone(garden.installed_at)
+
+    def test_customer_and_technician_do_not_receive_global_admin_controls(self):
+        _, garden = self._customer_org_garden()
+        self.client.force_login(self.customer)
+        self.assertEqual(self.client.get(reverse("ops-garden-edit", args=[garden.pk])).status_code, 403)
+        technician = User.objects.get(email="tecnico@hortaviva.local")
+        self.client.force_login(technician)
+        self.assertEqual(self.client.get(reverse("ops-garden-edit", args=[garden.pk])).status_code, 403)
+
     def test_edit_client_renders_real_fields(self):
         response = self.client.get(reverse("ops-client-edit", args=[self.customer.pk]))
         self.assertContains(response, 'name="full_name"')
@@ -179,7 +217,7 @@ class LegacyGardenClientCenterTests(TestCase):
         for text in (
             "Não definido", "Não configurado", "Sem comunicação",
             "Nenhuma fotografia", "Nenhuma cultura contratada",
-            "Nenhuma cultura plantada", "Não agendada",
+            "Nenhuma cultura plantada", "Nenhuma visita agendada",
         ):
             self.assertContains(response, text)
 
@@ -195,7 +233,8 @@ class LegacyGardenClientCenterTests(TestCase):
         self._garden()
         response = self._response()
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Não configurado", count=2)
+        self.assertContains(response, "Não configurado")
+        self.assertContains(response, "Não configurada")
 
     def test_garden_without_planting_cycle_returns_200(self):
         self._garden()
@@ -208,16 +247,16 @@ class LegacyGardenClientCenterTests(TestCase):
         self._device(garden, Device.Kind.CONTROLLER, "ESP8266-ONLY")
         response = self._response()
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Controlador ESP8266")
-        self.assertContains(response, "Câmera ESP32-CAM")
+        self.assertContains(response, "Controlador da horta")
+        self.assertContains(response, "Câmera da horta")
 
     def test_garden_with_only_esp32_cam_returns_200(self):
         garden = self._garden()
         self._device(garden, Device.Kind.CAMERA, "ESP32-CAM-ONLY")
         response = self._response()
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Controlador ESP8266")
-        self.assertContains(response, "Câmera ESP32-CAM")
+        self.assertContains(response, "Controlador da horta")
+        self.assertContains(response, "Câmera da horta")
 
     def test_garden_with_legacy_config_returns_200(self):
         self._garden(automation_overrides=["irrigation", "camera"])
@@ -245,4 +284,4 @@ class LegacyGardenClientCenterTests(TestCase):
         response = self._response()
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Irrigar agora")
-        self.assertContains(response, "Ligar luz")
+        self.assertContains(response, ">Ligar</button>")

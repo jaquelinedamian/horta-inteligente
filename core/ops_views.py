@@ -18,14 +18,14 @@ from django.utils import timezone
 from django.views.decorators.http import require_POST
 
 from accounts.models import Membership, Organization, User
-from crops.models import Crop, PlantingCycle
+from crops.models import Crop, Cultivar, PlantingCycle
 from devices.models import Alert, Device, DeviceCredential
 from gardens.models import Garden, GardenModule, ModuleInstallation
 from gardens.selectors import get_active_installations
 from gardens.configuration import effective_garden_configuration
 from devices.selectors import garden_snapshot
 from operations.models import InventoryItem, SupportTicket, Visit, WorkOrder
-from subscriptions.models import Payment, Plan, Subscription
+from subscriptions.models import CheckoutRequest, Payment, Plan, Subscription
 
 from .backoffice import get_resource
 from .backoffice_forms import ClientOnboardingForm, CustomerModuleForm, CustomerModuleInstallationForm, resource_form_class
@@ -50,6 +50,68 @@ AREAS = {
     "estoque": ("Estoque", "Itens, categorias, fornecedores, lotes e movimentações.", ("inventory", "inventory-categories", "suppliers", "stock-lots", "stock-movements")),
     "administracao": ("Administração", "Equipe e configurações operacionais.", ("employees", "settings")),
 }
+
+
+class GardenAdministrationForm(forms.ModelForm):
+    class Meta:
+        model = Garden
+        fields = ("name", "garden_model", "address", "status", "primary_technician", "installed_at", "operational_notes")
+        labels = {"operational_notes": "Observações", "primary_technician": "Técnico responsável", "installed_at": "Data de instalação"}
+        widgets = {"installed_at": forms.DateTimeInput(attrs={"type": "datetime-local"}), "operational_notes": forms.Textarea(attrs={"rows": 4})}
+
+    def __init__(self, *args, organization=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        for field in self.fields.values():
+            field.widget.attrs["class"] = "form-control"
+        if organization:
+            self.fields["address"].queryset = organization.addresses.order_by("label", "street")
+        self.fields["primary_technician"].queryset = User.objects.filter(employee_role=User.EmployeeRole.TECHNICIAN, is_active=True).order_by("full_name")
+
+
+class ContractedCropsForm(forms.Form):
+    crops = forms.ModelMultipleChoiceField(
+        label="Culturas contratadas",
+        queryset=Crop.objects.filter(is_available=True).order_by("common_name"),
+        widget=forms.CheckboxSelectMultiple,
+    )
+
+    def __init__(self, *args, capacity=None, **kwargs):
+        self.capacity = capacity
+        super().__init__(*args, **kwargs)
+
+    def clean_crops(self):
+        crops = self.cleaned_data["crops"]
+        if self.capacity and crops.count() > self.capacity:
+            raise forms.ValidationError(f"Selecione no máximo {self.capacity} culturas para este modelo de horta.")
+        return crops
+
+
+class PlantedCropAdministrationForm(forms.ModelForm):
+    position = forms.CharField(label="Posição", required=False)
+
+    class Meta:
+        model = PlantingCycle
+        fields = ("cultivar", "status", "planted_at", "notes")
+        labels = {"cultivar": "Cultura e variedade", "planted_at": "Data do plantio", "notes": "Observações"}
+        widgets = {"planted_at": forms.DateTimeInput(attrs={"type": "datetime-local"}), "notes": forms.Textarea(attrs={"rows": 4})}
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["position"].initial = self.instance.module.position_label
+        self.fields["cultivar"].queryset = Cultivar.objects.filter(is_active=True).select_related("crop").order_by("crop__common_name", "name")
+        for field in self.fields.values():
+            field.widget.attrs["class"] = "form-control"
+
+    def save(self, commit=True):
+        cycle = super().save(commit=False)
+        cycle.crop = cycle.cultivar.crop
+        if commit:
+            cycle.save()
+            position = self.cleaned_data["position"].strip()
+            if cycle.module.position_label != position:
+                cycle.module.position_label = position
+                cycle.module.save(update_fields=["position_label", "updated_at"])
+        return cycle
 SECTION_AREA = {section: slug for slug, (_, _, sections) in AREAS.items() for section in sections}
 
 
@@ -281,6 +343,14 @@ def client_detail(request, user_id):
             "lighting": config.get("lighting", {}) if isinstance(config.get("lighting"), Mapping) else {},
             "lighting_schedule": lighting_schedule,
             "planted_crops": planted_crops,
+            "configuration_origins": {
+                section: "Personalizado" if isinstance(garden.automation_overrides, dict) and section in garden.automation_overrides else "Padrão HortaViva"
+                for section in ("irrigation", "lighting", "camera", "monitoring")
+            },
+            "has_operational_overrides": bool(
+                isinstance(garden.automation_overrides, dict)
+                and {"irrigation", "lighting", "camera", "monitoring"}.intersection(garden.automation_overrides)
+            ),
         })
     allowed_tabs = {"resumo", "dados", "subscriptions", "gardens", "reports", "visits", "tickets"}
     active_tab = request.GET.get("aba", "resumo")
@@ -288,6 +358,95 @@ def client_detail(request, user_id):
         active_tab = "resumo"
     client = user
     return render(request, "admin_portal/client_detail.html", locals())
+
+
+def _client_for_garden(garden):
+    return User.objects.filter(
+        memberships__organization=garden.organization,
+        memberships__role__in=[Membership.Role.OWNER, Membership.Role.MANAGER],
+        memberships__is_active=True,
+    ).order_by("memberships__role", "id").first()
+
+
+def _current_checkout(garden):
+    if not garden.subscription_id:
+        return None
+    return CheckoutRequest.objects.filter(
+        user__memberships__organization=garden.organization,
+        plan_version=garden.subscription.plan_version,
+        status=CheckoutRequest.Status.CONFIRMED,
+    ).prefetch_related("selected_crops").order_by("-created_at").first()
+
+
+@admin_required
+def garden_admin_edit(request, garden_id):
+    garden = get_object_or_404(Garden.objects.select_related("organization"), pk=garden_id)
+    form = GardenAdministrationForm(request.POST or None, instance=garden, organization=garden.organization)
+    if request.method == "POST" and form.is_valid():
+        form.save()
+        messages.success(request, "Horta atualizada com sucesso.")
+        client = _client_for_garden(garden)
+        return redirect(f"{reverse('ops-client-detail', args=[client.pk])}?aba=gardens") if client else redirect("ops-detail", section="gardens", pk=garden.pk)
+    return render(request, "admin_portal/form.html", _form_context(form, "gardens", f"Editar horta — {garden.name}", garden))
+
+
+@admin_required
+@require_POST
+def garden_mark_installed(request, garden_id):
+    garden = get_object_or_404(Garden, pk=garden_id)
+    if garden.status != Garden.Status.INSTALLED:
+        garden.status = Garden.Status.INSTALLED
+        if not garden.installed_at:
+            garden.installed_at = timezone.now()
+        garden.save(update_fields=["status", "installed_at", "updated_at"])
+        messages.success(request, "Horta marcada como instalada.")
+    client = _client_for_garden(garden)
+    return redirect(f"{reverse('ops-client-detail', args=[client.pk])}?aba=gardens") if client else redirect("ops-detail", section="gardens", pk=garden.pk)
+
+
+@admin_required
+def garden_cultures(request, garden_id):
+    garden = get_object_or_404(Garden.objects.select_related("organization", "garden_model"), pk=garden_id)
+    cycles = garden.planting_cycles.select_related("crop", "cultivar__crop", "module").order_by("-created_at")
+    checkout = _current_checkout(garden)
+    client = _client_for_garden(garden)
+    return render(request, "admin_portal/garden_cultures.html", {"garden": garden, "cycles": cycles, "checkout": checkout, "client": client})
+
+
+@admin_required
+def garden_crop_edit(request, garden_id, cycle_id):
+    garden = get_object_or_404(Garden, pk=garden_id)
+    cycle = get_object_or_404(PlantingCycle.objects.select_related("module", "cultivar__crop"), pk=cycle_id, garden=garden)
+    form = PlantedCropAdministrationForm(request.POST or None, instance=cycle)
+    if request.method == "POST" and form.is_valid():
+        form.save()
+        messages.success(request, "Cultura plantada atualizada.")
+        return redirect("ops-garden-cultures", garden_id=garden.pk)
+    return render(request, "admin_portal/form.html", _form_context(form, "cycles", f"Alterar cultura — {garden.name}", cycle))
+
+
+@admin_required
+def garden_contracted_crops(request, garden_id):
+    garden = get_object_or_404(Garden.objects.select_related("garden_model"), pk=garden_id)
+    checkout = _current_checkout(garden)
+    if not checkout:
+        messages.error(request, "Não há checkout confirmado para editar as culturas contratadas.")
+        return redirect("ops-garden-cultures", garden_id=garden.pk)
+    capacity = garden.garden_model.capacity if garden.garden_model_id else None
+    form = ContractedCropsForm(request.POST or None, capacity=capacity, initial={"crops": checkout.selected_crops.all()})
+    if request.method == "POST" and form.is_valid():
+        checkout.selected_crops.set(form.cleaned_data["crops"])
+        messages.success(request, "Culturas contratadas atualizadas sem alterar os cultivos plantados.")
+        return redirect("ops-garden-cultures", garden_id=garden.pk)
+    return render(request, "admin_portal/form.html", _form_context(form, "crops", f"Editar culturas contratadas — {garden.name}"))
+
+
+@admin_required
+def garden_devices(request, garden_id):
+    garden = get_object_or_404(Garden.objects.select_related("organization"), pk=garden_id)
+    assigned = garden.devices.select_related("model").order_by("kind", "name")
+    available = Device.objects.filter(organization=garden.organization, garden__isnull=True).select_related("model").order_by("name")
+    return render(request, "admin_portal/garden_devices.html", {"garden": garden, "assigned": assigned, "available": available})
 
 
 @operations_required
