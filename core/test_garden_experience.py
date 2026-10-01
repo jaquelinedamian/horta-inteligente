@@ -29,7 +29,7 @@ class GardenExperienceTests(TestCase):
         self.pump = self.device.channels.get(metric="pump_state")
 
     def _configuration_payload(self, **overrides):
-        data = {"light_hours": "10", "irrigation_frequency_count": "3", "irrigation_frequency_period": "day", "pump_duration_seconds": "25", "photos_per_day": "6", "monitoring_interval_minutes": "60"}
+        data = {"light_hours": "10", "irrigation_frequency_count": "3", "irrigation_frequency_period": "day", "pump_duration_seconds": "25", "photos_per_day": "4", "monitoring_interval_minutes": "60"}
         data.update(overrides)
         return data
 
@@ -63,7 +63,7 @@ class GardenExperienceTests(TestCase):
         _, token = DeviceCredential.issue(self.device)
         api = self.client.get(reverse("device_api:configuration"), HTTP_AUTHORIZATION=f"Device {token}", HTTP_X_DEVICE_ID=str(self.device.pk))
         self.assertEqual(api.json()["monitoring"]["interval_minutes"], 60)
-        self.assertEqual(api.json()["camera"]["photos_per_day"], 6)
+        self.assertEqual(api.json()["camera"]["photos_per_day"], 4)
 
     def test_customer_cannot_edit_foreign_garden(self):
         self.client.force_login(self.owner)
@@ -78,11 +78,43 @@ class GardenExperienceTests(TestCase):
 
     def test_invalid_safety_limits_are_rejected(self):
         self.client.force_login(self.owner)
-        response = self.client.post(reverse("garden-configuration", args=[self.garden.pk]), self._configuration_payload(light_hours="19", pump_duration_seconds="301", photos_per_day="25", monitoring_interval_minutes="10"))
+        response = self.client.post(reverse("garden-configuration", args=[self.garden.pk]), self._configuration_payload(light_hours="19", pump_duration_seconds="301", photos_per_day="24", monitoring_interval_minutes="10"))
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.context["form"].errors)
         self.garden.refresh_from_db()
         self.assertFalse(self.garden.automation_overrides)
+
+    def test_photo_frequency_accepts_only_product_choices(self):
+        self.client.force_login(self.owner)
+        for value in (1, 2, 3, 4):
+            with self.subTest(value=value):
+                response = self.client.post(
+                    reverse("garden-configuration", args=[self.garden.pk]),
+                    self._configuration_payload(photos_per_day=str(value)),
+                )
+                self.assertEqual(response.status_code, 302)
+                self.garden.refresh_from_db()
+                self.assertEqual(self.garden.automation_overrides["camera"]["photos_per_day"], value)
+        for value in (5, 24):
+            with self.subTest(value=value):
+                response = self.client.post(
+                    reverse("garden-configuration", args=[self.garden.pk]),
+                    self._configuration_payload(photos_per_day=str(value)),
+                )
+                self.assertEqual(response.status_code, 200)
+                self.assertIn("photos_per_day", response.context["form"].errors)
+
+    def test_legacy_and_missing_photo_frequency_are_safe(self):
+        self.model.photos_per_day = 24
+        self.model.save(update_fields=["photos_per_day", "updated_at"])
+        self.garden.automation_overrides = {"camera": {"photos_per_day": 24}}
+        self.garden.save(update_fields=["automation_overrides", "updated_at"])
+        self.assertEqual(effective_garden_configuration(self.garden)["camera"]["photos_per_day"], 4)
+
+        self.garden.automation_overrides = {"camera": {}}
+        self.garden.garden_model = None
+        self.garden.save(update_fields=["automation_overrides", "garden_model", "updated_at"])
+        self.assertEqual(effective_garden_configuration(self.garden)["camera"]["photos_per_day"], 4)
 
     def test_restore_requires_confirmation_post_and_records_history(self):
         self.client.force_login(self.owner)

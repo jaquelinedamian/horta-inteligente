@@ -184,6 +184,18 @@ class DeviceApiTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["irrigation"], {"enabled": True, "times": ["08:00"], "duration_seconds": 45})
 
+    def test_configuration_api_never_returns_more_than_four_photos(self):
+        self.garden.automation_overrides = {"camera": {"photos_per_day": 24}}
+        self.garden.save(update_fields=["automation_overrides", "updated_at"])
+        response = self.client.get(reverse("device_api:configuration"), HTTP_X_DEVICE_ID=str(self.device.id), **self.headers)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["camera"]["photos_per_day"], 4)
+
+    def test_configuration_api_defaults_to_four_photos(self):
+        response = self.client.get(reverse("device_api:configuration"), HTTP_X_DEVICE_ID=str(self.device.id), **self.headers)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["camera"]["photos_per_day"], 4)
+
 
 class ControllerChannelProvisioningTests(TestCase):
     def setUp(self):

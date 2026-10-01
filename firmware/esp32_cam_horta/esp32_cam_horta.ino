@@ -30,7 +30,7 @@ unsigned long photoIntervalMs = MILLIS_PER_DAY / DEFAULT_PHOTOS_PER_DAY;
 void processSerialCommand();
 
 void useCameraSchedule(uint8_t photosPerDay) {
-  photosPerDay = constrain(photosPerDay, 1, 24);
+  photosPerDay = constrain(photosPerDay, 1, 4);
   photoIntervalMs = MILLIS_PER_DAY / photosPerDay;
   Serial.printf("Config camera: %u fotos/dia\n", photosPerDay);
   Serial.printf("Intervalo de foto: %lu segundos\n", photoIntervalMs / 1000UL);
@@ -62,8 +62,8 @@ bool fetchCameraConfiguration() {
     JsonDocument document;
     DeserializationError error = deserializeJson(document, http.getString());
     int configured = document["camera"]["photos_per_day"] | 0;
-    valid = !error && configured >= 1 && configured <= 24;
-    if (valid) photosPerDay = static_cast<uint8_t>(configured);
+    valid = !error && configured >= 1;
+    if (valid) photosPerDay = static_cast<uint8_t>(constrain(configured, 1, 4));
   }
   http.end();
   if (!valid) Serial.println("Config camera indisponivel; usando 4 fotos/dia");

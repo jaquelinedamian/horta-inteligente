@@ -225,14 +225,14 @@ class LegacyGardenClientCenterTests(TestCase):
 
     def test_complete_garden_returns_200(self):
         garden_model = GardenModel.objects.create(
-            name="Completa", code="completa", capacity=4, photos_per_day=6
+            name="Completa", code="completa", capacity=4, photos_per_day=4
         )
         garden = self._garden(
             garden_model=garden_model,
             automation_overrides={
                 "irrigation": {"frequency_count": 2, "frequency_period": "dia", "pump_duration_seconds": 15},
                 "lighting": {"hours_per_day": 8},
-                "camera": {"photos_per_day": 6},
+                "camera": {"photos_per_day": 4},
             },
         )
         controller = self._device(garden, Device.Kind.CONTROLLER, "ESP8266-COMPLETE")

@@ -4,6 +4,16 @@ from collections.abc import Mapping
 from crops.models import PlantingCycle
 
 
+def safe_photos_per_day(value):
+    if isinstance(value, bool):
+        return 4
+    try:
+        value = int(value)
+    except (TypeError, ValueError, OverflowError):
+        return 4
+    return max(1, min(value, 4))
+
+
 def _merge(base, override):
     result = deepcopy(base) if isinstance(base, Mapping) else {}
     if not isinstance(override, Mapping):
@@ -41,7 +51,7 @@ def effective_garden_configuration(garden):
         candidates.append(candidate)
     compatible = bool(candidates) and all(item == candidates[0] for item in candidates[1:])
     model = garden.garden_model if garden.garden_model_id else None
-    model_defaults = {"camera": {"photos_per_day": model.photos_per_day if model else 4}, "monitoring": {"interval_minutes": model.monitoring_interval_minutes if model else 60}}
+    model_defaults = {"camera": {"photos_per_day": safe_photos_per_day(model.photos_per_day if model else 4)}, "monitoring": {"interval_minutes": model.monitoring_interval_minutes if model else 60}}
     if model and model.light_hours_per_day is not None:
         model_defaults["lighting"] = {"hours_per_day": float(model.light_hours_per_day)}
     if model and (model.irrigation_frequency_count is not None or model.pump_duration_seconds is not None):
@@ -52,8 +62,9 @@ def effective_garden_configuration(garden):
     config["culture"] = config["cultures"][0] if len(config["cultures"]) == 1 else None
     config["requires_confirmation"] = bool(candidates and not compatible)
     config["camera"] = _merge(
-        {"photos_per_day": model.photos_per_day if model else 4},
+        {"photos_per_day": safe_photos_per_day(model.photos_per_day if model else 4)},
         config.get("camera") if isinstance(config.get("camera"), Mapping) else {},
     )
+    config["camera"]["photos_per_day"] = safe_photos_per_day(config["camera"].get("photos_per_day"))
     config["configuration_version"] = garden.updated_at.isoformat()
     return config

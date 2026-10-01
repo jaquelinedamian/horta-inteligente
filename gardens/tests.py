@@ -1,3 +1,6 @@
+import importlib
+
+from django.core.exceptions import ValidationError
 from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
@@ -5,7 +8,7 @@ from django.utils import timezone
 from accounts.models import Membership, Organization, User
 from devices.models import Device, DeviceModel, GardenPhoto
 from gardens.access import gardens_for_user
-from .models import Garden
+from .models import Garden, GardenModel
 
 
 class GardenAccessTests(TestCase):
@@ -52,3 +55,41 @@ class GardenAccessTests(TestCase):
         )
         self.client.force_login(self.client_user)
         self.assertEqual(self.client.get(reverse("garden-photo", args=[photo.id])).status_code, 404)
+
+
+class PhotoFrequencyMigrationTests(TestCase):
+    def test_data_migration_limits_models_and_preserves_other_overrides(self):
+        model = GardenModel.objects.create(name="Legado", code="legado-fotos", photos_per_day=24)
+        garden = Garden.objects.create(
+            organization=Organization.objects.create(name="Legado", slug="legado-fotos"),
+            name="Horta legada",
+            code="legada-fotos",
+            automation_overrides={"camera": {"photos_per_day": 12, "quality": "high"}, "lighting": {"hours_per_day": 10}},
+        )
+        migration = importlib.import_module("gardens.migrations.0006_limit_photos_per_day")
+
+        class Apps:
+            @staticmethod
+            def get_model(app_label, model_name):
+                return {"GardenModel": GardenModel, "Garden": Garden}[model_name]
+
+        migration.limit_legacy_photo_frequency(Apps(), None)
+        migration.limit_legacy_photo_frequency(Apps(), None)
+        model.refresh_from_db()
+        garden.refresh_from_db()
+        self.assertEqual(model.photos_per_day, 4)
+        self.assertEqual(garden.automation_overrides["camera"], {"photos_per_day": 4, "quality": "high"})
+        self.assertEqual(garden.automation_overrides["lighting"], {"hours_per_day": 10})
+
+    def test_model_validation_rejects_out_of_range_values(self):
+        model = GardenModel(name="Inválido", code="invalido-fotos", photos_per_day=5)
+        with self.assertRaises(ValidationError):
+            model.full_clean()
+        garden = Garden(
+            organization=Organization.objects.create(name="Validação", slug="validacao-fotos"),
+            name="Inválida",
+            code="invalida-fotos",
+            automation_overrides={"camera": {"photos_per_day": 24}},
+        )
+        with self.assertRaises(ValidationError):
+            garden.full_clean()

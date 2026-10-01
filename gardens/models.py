@@ -1,9 +1,28 @@
 from django.conf import settings
+from django.core.exceptions import ValidationError
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from django.db.models import Q
 
 from accounts.models import Address, Organization
 from core.models import BaseModel
+
+
+def validate_automation_overrides(value):
+    if not isinstance(value, dict):
+        return
+    camera = value.get("camera")
+    if not isinstance(camera, dict) or "photos_per_day" not in camera:
+        return
+    photos_per_day = camera["photos_per_day"]
+    if isinstance(photos_per_day, bool):
+        raise ValidationError("Fotos por dia deve ser um número entre 1 e 4.")
+    try:
+        numeric_value = int(photos_per_day)
+    except (TypeError, ValueError):
+        raise ValidationError("Fotos por dia deve ser um número entre 1 e 4.")
+    if numeric_value != photos_per_day or not 1 <= numeric_value <= 4:
+        raise ValidationError("Fotos por dia deve estar entre 1 e 4.")
 
 
 class GardenModel(BaseModel):
@@ -12,7 +31,7 @@ class GardenModel(BaseModel):
     description = models.TextField(blank=True)
     capacity = models.PositiveSmallIntegerField(default=4)
     reservoir_liters = models.DecimalField(max_digits=8, decimal_places=2, null=True, blank=True)
-    photos_per_day = models.PositiveSmallIntegerField(default=4)
+    photos_per_day = models.PositiveSmallIntegerField(default=4, validators=[MinValueValidator(1), MaxValueValidator(4)])
     light_hours_per_day = models.DecimalField(max_digits=4, decimal_places=1, null=True, blank=True)
     irrigation_frequency_count = models.PositiveSmallIntegerField(null=True, blank=True)
     irrigation_frequency_period = models.CharField(max_length=10, choices=(("day", "Dia"), ("week", "Semana")), default="day")
@@ -64,7 +83,7 @@ class Garden(BaseModel):
     next_visit_at = models.DateTimeField(null=True, blank=True)
     operational_notes = models.TextField(blank=True)
     automation_overrides = models.JSONField(
-        default=dict, blank=True,
+        default=dict, blank=True, validators=[validate_automation_overrides],
         help_text="Exceções locais sobre a configuração padrão da cultura.",
     )
 
