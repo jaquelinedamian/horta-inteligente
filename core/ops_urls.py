@@ -14,6 +14,7 @@ urlpatterns = [
     path("administracao/", ops_views.area_dashboard, {"area": "administracao"}),
     path("clientes/novo/", ops_views.client_create, name="ops-client-create"),
     path("clientes/<int:user_id>/editar/", ops_views.client_edit, name="ops-client-edit"),
+    path("clientes/<int:user_id>/excluir/", ops_views.client_delete, name="ops-client-delete"),
     path("clientes/<int:user_id>/<slug:section>/novo/", ops_views.client_related_create, name="ops-client-related-create"),
     path("clientes/<int:user_id>/modulos/<uuid:module_id>/instalar/", ops_views.client_module_install, name="ops-client-module-install"),
     path("clientes/<int:user_id>/", ops_views.client_detail, name="ops-client-detail"),
@@ -24,6 +25,7 @@ urlpatterns = [
     path("ordens/nova/", ops_views.create, {"section": "orders"}, name="create-work-order"),
     path("<str:section>/novo/", ops_views.create, name="ops-create"),
     path("<str:section>/<str:pk>/editar/", ops_views.edit, name="ops-edit"),
+    path("<str:section>/<str:pk>/excluir/", ops_views.administrative_delete, name="ops-delete"),
     path("<str:section>/<str:pk>/", ops_views.detail, name="ops-detail"),
     path("<str:section>/", ops_views.collection, name="ops-collection"),
 ]

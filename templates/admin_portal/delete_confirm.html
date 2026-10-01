@@ -1,0 +1,13 @@
+{% extends 'base.html' %}
+{% block area_name %}Exclusão administrativa{% endblock %}
+{% block content %}
+<div class="page-header"><div><span class="eyebrow">Zona de perigo</span><h1>Excluir {{ record_type|lower }}</h1></div><a class="btn btn-light" href="javascript:history.back()">Voltar</a></div>
+<div class="content-card border border-danger" style="max-width:760px">
+  <h2 class="h4">Tem certeza que deseja excluir?</h2>
+  <dl class="row mt-4"><dt class="col-sm-4">Tipo</dt><dd class="col-sm-8">{{ record_type }}</dd><dt class="col-sm-4">Nome do registro</dt><dd class="col-sm-8"><strong>{{ record_name }}</strong></dd></dl>
+  {% if summary %}<h3 class="h6 mt-4">Relações importantes afetadas</h3><ul>{% for label,count in summary.items %}<li>{{ label }}: <strong>{{ count }}</strong></li>{% endfor %}</ul>{% endif %}
+  <div class="alert alert-danger"><strong>Aviso de irreversibilidade:</strong> {{ warning }}</div>
+  {% if allow_deactivate %}<form method="post" class="mb-4">{% csrf_token %}<input type="hidden" name="action" value="deactivate"><button class="btn btn-outline-secondary">Desativar {{ record_type|lower }}</button><p class="form-text">Preserva o histórico e impede novos usos deste cadastro.</p></form>{% endif %}
+  <form method="post">{% csrf_token %}<input type="hidden" name="action" value="delete">{% if strong_confirmation %}<label class="form-label" for="confirmation">Digite <strong>EXCLUIR</strong> para confirmar</label><input class="form-control mb-3" id="confirmation" name="confirmation" autocomplete="off" required>{% endif %}<button class="btn btn-danger">Excluir permanentemente</button></form>
+</div>
+{% endblock %}

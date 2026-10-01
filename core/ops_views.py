@@ -32,7 +32,12 @@ from .backoffice_forms import ClientOnboardingForm, CustomerModuleForm, Customer
 from gardens.services import install_module
 from .guided_flows import PRIMARY_ACTIONS, get_flow
 from .workflow_services import create_customer, run_guided_workflow
-from .permissions import operations_required
+from .permissions import admin_required, operations_required
+from .deletion_services import (
+    DELETE_POLICIES, DeletionBlocked, can_deactivate, customer_deletion_summary,
+    deactivate_object, delete_administrative_object, delete_customer_completely,
+    object_deletion_summary, requires_strong_confirmation,
+)
 
 
 AREAS = {
@@ -72,7 +77,7 @@ def _form_context(form, section, title, obj=None):
         if obj:
             spec.append(("Execução", "actual_start actual_end reason notes conclusion"))
         groups = [(label, [form[name] for name in names.split() if name in form.fields]) for label, names in spec]
-    return {"title": title, "form": form, "section": section, "object": obj, "related_actions": actions, "field_groups": groups, "area": SECTION_AREA.get(section)}
+    return {"title": title, "form": form, "section": section, "object": obj, "related_actions": actions, "field_groups": groups, "area": SECTION_AREA.get(section), "delete_available": bool(obj and section in DELETE_POLICIES)}
 
 
 def _guided_context(form, section, resource):
@@ -179,7 +184,7 @@ def detail(request, section, pk):
     if not resource:
         raise Http404
     obj = get_object_or_404(resource.model, pk=pk)
-    context = {"title": resource.title, "section": section, "object": obj, "display_fields": _display_fields(obj), "resource": resource}
+    context = {"title": resource.title, "section": section, "object": obj, "display_fields": _display_fields(obj), "resource": resource, "delete_available": section in DELETE_POLICIES}
     if section == "crops":
         context.update({
             "varieties": obj.cultivars.order_by("name"),
@@ -294,6 +299,61 @@ def client_edit(request, user_id):
         messages.success(request, "Cliente atualizado.")
         return redirect("ops-client-detail", user_id=user.pk)
     return render(request, "admin_portal/form.html", _form_context(form, "clients", "Editar cliente", user))
+
+
+@admin_required
+def client_delete(request, user_id):
+    user = get_object_or_404(User, pk=user_id)
+    summary = customer_deletion_summary(user)
+    if request.method == "POST":
+        if request.POST.get("confirmation", "").strip() != "EXCLUIR":
+            messages.error(request, "Digite EXCLUIR para confirmar a exclusão completa.")
+        else:
+            name = user.full_name or user.email
+            try:
+                delete_customer_completely(user)
+            except DeletionBlocked as error:
+                messages.error(request, error.message)
+            else:
+                messages.success(request, f"Cliente {name} e seus dados de teste foram excluídos.")
+                return redirect("ops-collection", section="clients")
+    return render(request, "admin_portal/delete_confirm.html", {
+        "object": user, "record_name": user.full_name or user.email, "record_type": "Cliente",
+        "summary": summary, "strong_confirmation": True,
+        "warning": "O cliente, suas organizações e todos os dados vinculados serão removidos permanentemente.",
+    })
+
+
+@admin_required
+def administrative_delete(request, section, pk):
+    if section not in DELETE_POLICIES:
+        raise Http404
+    resource = get_resource(section)
+    obj = get_object_or_404(resource.model, pk=pk)
+    summary = object_deletion_summary(section, obj)
+    strong = requires_strong_confirmation(section, summary)
+    allow_deactivate = can_deactivate(section, summary)
+    if request.method == "POST":
+        action = request.POST.get("action", "delete")
+        if action == "deactivate" and allow_deactivate:
+            deactivate_object(section, obj)
+            messages.success(request, f"{DELETE_POLICIES[section].label} desativado com sucesso.")
+            return redirect("ops-detail", section=section, pk=obj.pk)
+        if strong and request.POST.get("confirmation", "").strip() != "EXCLUIR":
+            messages.error(request, "Digite EXCLUIR para confirmar a exclusão.")
+        else:
+            try:
+                delete_administrative_object(section, obj)
+            except DeletionBlocked as error:
+                messages.error(request, error.message)
+            else:
+                messages.success(request, f"{DELETE_POLICIES[section].label} excluído com sucesso.")
+                return redirect("ops-collection", section=section)
+    return render(request, "admin_portal/delete_confirm.html", {
+        "object": obj, "record_name": str(obj), "record_type": DELETE_POLICIES[section].label,
+        "summary": summary, "strong_confirmation": strong, "allow_deactivate": allow_deactivate,
+        "warning": "Esta ação é irreversível e remove permanentemente o cadastro e os dados explicitamente relacionados.",
+    })
 
 
 CLIENT_SECTIONS = {"subscriptions": "Nova assinatura", "gardens": "Nova horta", "modules": "Novo módulo", "cycles": "Novo cultivo", "devices": "Novo dispositivo", "visits": "Nova visita", "payments": "Novo pagamento", "tickets": "Novo chamado"}

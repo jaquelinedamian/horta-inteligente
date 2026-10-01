@@ -31,3 +31,13 @@ def role_required(*roles, staff_allowed=True):
 customer_required = role_required(Membership.Role.OWNER, Membership.Role.MANAGER, Membership.Role.VIEWER, staff_allowed=False)
 technician_required = role_required(Membership.Role.TECHNICIAN)
 operations_required = role_required(staff_allowed=True)
+
+
+def admin_required(view):
+    @login_required
+    @wraps(view)
+    def wrapped(request, *args, **kwargs):
+        if not request.user.is_hortaviva_admin:
+            raise PermissionDenied
+        return view(request, *args, **kwargs)
+    return wrapped

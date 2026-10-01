@@ -1,7 +1,7 @@
 {% extends 'base.html' %}
 {% block area_name %}Central do cliente{% endblock %}
 {% block content %}
-<div class="client-hero content-card mb-4"><div><span class="eyebrow">Central do cliente</span><h1>{{ client.full_name }}</h1><p>{{ client.email }}{% if client.phone %} · {{ client.phone }}{% endif %}</p><span class="badge-soft">{% if client.is_active %}Cliente ativo{% else %}Cliente inativo{% endif %}</span></div><a class="btn btn-light" href="{% url 'ops-client-edit' client.pk %}">Editar dados</a></div>
+<div class="client-hero content-card mb-4"><div><span class="eyebrow">Central do cliente</span><h1>{{ client.full_name }}</h1><p>{{ client.email }}{% if client.phone %} · {{ client.phone }}{% endif %}</p><span class="badge-soft">{% if client.is_active %}Cliente ativo{% else %}Cliente inativo{% endif %}</span></div><div class="d-flex gap-2"><a class="btn btn-light" href="{% url 'ops-client-edit' client.pk %}">Editar dados</a>{% if request.user.is_hortaviva_admin %}<a class="btn btn-outline-danger" href="{% url 'ops-client-delete' client.pk %}">Excluir cliente e dados de teste</a>{% endif %}</div></div>
 
 <nav class="client-tabs mb-4" aria-label="Áreas do cliente">
   <a href="?aba=resumo" class="{% if active_tab == 'resumo' %}active{% endif %}">Resumo</a>
