@@ -125,3 +125,47 @@ class GardenExperienceTests(TestCase):
         self.assertEqual(self.client.get(reverse("garden-reports", args=[self.garden.pk])).status_code, 404)
         self.client.force_login(self.admin)
         self.assertEqual(self.client.get(reverse("garden-reports", args=[self.garden.pk])).status_code, 200)
+
+    def test_customer_experience_has_new_sections_and_friendly_empty_states(self):
+        self.garden.status = Garden.Status.INSTALLED
+        self.garden.garden_model = None
+        self.garden.save(update_fields=["status", "garden_model", "updated_at"])
+        self.client.force_login(self.owner)
+
+        dashboard = self.client.get(reverse("customer-dashboard"))
+        self.assertEqual(dashboard.status_code, 200)
+        for text in ("Desenvolvimento da horta", "Configurações da horta", "Editar configurações", "Relatórios", "Padrão HortaViva"):
+            self.assertContains(dashboard, text)
+        for text in ("Nenhuma foto ainda", "Sensor ainda não disponível", "Iluminação não configurada", "Sem visita agendada", "Offline"):
+            self.assertContains(dashboard, text)
+        self.assertNotContains(dashboard, "Reservatório")
+        self.assertContains(dashboard, "Desenvolvimento")
+        self.assertNotContains(dashboard, "Minhas culturas</a>")
+
+        garden_page = self.client.get(reverse("customer-section", args=["garden"]))
+        self.assertEqual(garden_page.status_code, 200)
+        self.assertContains(garden_page, "Nenhuma cultura plantada")
+        self.assertContains(garden_page, "Iluminação não configurada")
+
+    def test_customer_experience_shows_complete_and_personalized_garden(self):
+        now = timezone.now()
+        self.garden.status = Garden.Status.INSTALLED
+        self.garden.automation_overrides = {"lighting": {"hours_per_day": 10}}
+        self.garden.save(update_fields=["status", "automation_overrides", "updated_at"])
+        self.device.last_seen_at = now
+        self.device.status = Device.Status.ONLINE
+        self.device.save(update_fields=["last_seen_at", "status", "updated_at"])
+        humidity = Channel.objects.create(device=self.device, key="humidity-ui", name="Umidade", kind=Channel.Kind.SENSOR, metric="air_humidity", unit="%")
+        Channel.objects.create(device=self.device, key="light-ui", name="Luz", kind=Channel.Kind.ACTUATOR, metric="light_state")
+        TelemetryReading.objects.create(channel=self.temperature, recorded_at=now, decimal_value=24, idempotency_key="temp-ui")
+        TelemetryReading.objects.create(channel=humidity, recorded_at=now, decimal_value=68, idempotency_key="humidity-ui")
+        camera = Device.objects.create(organization=self.org, garden=self.garden, model=self.device.model, serial_number="EXPERIENCE-CAM", name="Câmera", kind=Device.Kind.CAMERA, status=Device.Status.ONLINE, last_seen_at=now)
+        GardenPhoto.objects.create(garden=self.garden, device=camera, captured_at=now, image_data=b"photo", byte_size=5)
+
+        self.client.force_login(self.owner)
+        dashboard = self.client.get(reverse("customer-dashboard"))
+        self.assertEqual(dashboard.status_code, 200)
+        for text in ("Online", "24", "68", "Personalizado", "Restaurar padrão", "Ver desenvolvimento"):
+            self.assertContains(dashboard, text)
+        self.assertEqual(self.client.get(reverse("customer-development")).status_code, 302)
+        self.assertEqual(self.client.get(reverse("customer-history")).status_code, 200)

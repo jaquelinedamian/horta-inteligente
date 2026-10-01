@@ -227,7 +227,11 @@ def customer_dashboard(request):
             reading = channel.readings.order_by("-recorded_at").first(); metrics[channel.metric] = {"value": reading.decimal_value if reading else None, "unit": channel.unit}
         schedule = LightingSchedule.objects.filter(actuator__device=device, enabled=True).first()
     has_telemetry = any(item.get("value") is not None for item in metrics.values())
-    return render(request, "customer/dashboard.html", {"organization": org, "gardens": gardens, "garden": garden, "snapshot": snapshot, "has_garden": bool(garden), "active_subscription": active_subscription, "device": device, "has_telemetry": has_telemetry, "metrics": metrics, "schedule": schedule, "cycles": get_customer_cycles(org).filter(status=PlantingCycle.Status.ACTIVE)[:6], "alerts": snapshot["alerts"] if snapshot else [], "next_visit": get_customer_visits(org).filter(scheduled_start__gte=timezone.now()).order_by("scheduled_start").first()})
+    configuration = effective_garden_configuration(garden) if garden else {}
+    recent_photos = GardenPhoto.objects.filter(garden=garden)[:7] if garden else []
+    overrides = garden.automation_overrides if garden and isinstance(garden.automation_overrides, dict) else {}
+    configuration_origins = {section: "Personalizado" if section in overrides else "Padrão HortaViva" for section in ("irrigation", "lighting", "camera", "monitoring")}
+    return render(request, "customer/dashboard.html", {"organization": org, "gardens": gardens, "garden": garden, "snapshot": snapshot, "configuration": configuration, "configuration_origins": configuration_origins, "recent_photos": recent_photos, "has_overrides": bool(overrides), "has_garden": bool(garden), "active_subscription": active_subscription, "device": device, "has_telemetry": has_telemetry, "metrics": metrics, "schedule": schedule, "cycles": get_customer_cycles(org).filter(status=PlantingCycle.Status.ACTIVE)[:6], "next_visit": get_customer_visits(org).filter(scheduled_start__gte=timezone.now()).order_by("scheduled_start").first()})
 
 
 @customer_required
@@ -237,6 +241,14 @@ def customer_section(request, section):
     if section not in sections: raise Http404
     title, objects = sections[section]
     context = {"title": title, "objects": objects, "organization": org}
+    if section == "garden":
+        panels = []
+        for garden in gardens.select_related("garden_model", "address", "primary_technician"):
+            config = effective_garden_configuration(garden)
+            overrides = garden.automation_overrides if isinstance(garden.automation_overrides, dict) else {}
+            origins = {section: "Personalizado" if section in overrides else "Padrão HortaViva" for section in ("irrigation", "lighting", "camera", "monitoring")}
+            panels.append({"garden": garden, "snapshot": garden_snapshot(garden), "configuration": config, "configuration_origins": origins, "overrides": overrides, "recent_photos": garden.photos.all()[:7]})
+        context["panels"] = panels
     if section == "crops":
         context["active_modules"] = GardenModule.objects.filter(organization=org, status=GardenModule.Status.INSTALLED).count()
         subscription = Subscription.objects.filter(organization=org, status=Subscription.Status.ACTIVE).select_related("plan_version").first()
@@ -281,11 +293,18 @@ def module_detail(request, module_id):
 
 @customer_required
 def history(request):
-    org = request.membership.organization; raw_days = request.GET.get("days", "7"); days = int(raw_days) if raw_days.isdigit() and int(raw_days) in (1, 7, 30) else 7
-    rows = TelemetryReading.objects.filter(channel__device__organization=org, recorded_at__gte=timezone.now() - timedelta(days=days), channel__metric__in=["air_temperature", "air_humidity", "air_pressure", "water_level"]).annotate(bucket=TruncHour("recorded_at")).values("bucket", "channel__metric").annotate(value=Avg("decimal_value")).order_by("bucket")[:1000]
-    series = {}
-    for row in rows: series.setdefault(row["channel__metric"], []).append({"x": row["bucket"].isoformat(), "y": float(row["value"])})
-    return render(request, "customer/history.html", {"series": series, "days": days})
+    garden = get_customer_gardens(request.membership.organization).order_by("name").first()
+    if garden:
+        return garden_reports(request, garden.pk)
+    return render(request, "customer/history.html")
+
+
+@customer_required
+def customer_development(request):
+    garden = get_customer_gardens(request.membership.organization).order_by("name").first()
+    if garden:
+        return redirect("garden-gallery", garden_id=garden.pk)
+    return render(request, "customer/history.html", {"development": True})
 
 
 @login_required

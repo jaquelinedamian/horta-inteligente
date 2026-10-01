@@ -49,6 +49,19 @@ class GardenOperationalConfigurationForm(StyledFormMixin, forms.Form):
     photos_per_day = forms.IntegerField(label="Fotos por dia", min_value=1, max_value=24)
     monitoring_interval_minutes = forms.IntegerField(label="Intervalo de monitoramento (minutos)", min_value=15, max_value=1440)
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        help_texts = {
+            "light_hours": "Permitido: 1 a 18 horas por dia.",
+            "irrigation_frequency_count": "Permitido: 0 a 6 vezes no período escolhido.",
+            "irrigation_frequency_period": "Escolha se a frequência é diária ou semanal.",
+            "pump_duration_seconds": "Permitido: 1 a 300 segundos.",
+            "photos_per_day": "Permitido: 1 a 24 fotos por dia.",
+            "monitoring_interval_minutes": "Permitido: 15 a 1.440 minutos.",
+        }
+        for name, help_text in help_texts.items():
+            self.fields[name].help_text = help_text
+
 
 class WorkOrderForm(StyledFormMixin, forms.ModelForm):
     class Meta:

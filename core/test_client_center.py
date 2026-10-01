@@ -78,8 +78,8 @@ class ClientCenterTests(TestCase):
         self.assertTrue(ModuleInstallation.objects.filter(module=module, garden=garden, removed_at__isnull=True).exists())
         self.client.force_login(self.customer)
         response = self.client.get(reverse("customer-section", args=["garden"]))
-        self.assertContains(response, module.name)
-        self.assertContains(response, "Sem cultivo")
+        self.assertNotContains(response, module.name)
+        self.assertContains(response, "Nenhuma cultura plantada")
 
     def test_stock_module_is_admin_only_not_installed_for_customer(self):
         organization, garden = self._customer_org_garden()
@@ -117,7 +117,7 @@ class ClientCenterTests(TestCase):
         PlantingCycle.objects.create(organization=organization, garden=garden, module=module, crop=cultivar.crop, cultivar=cultivar, status=PlantingCycle.Status.ACTIVE, planted_at=timezone.now())
         self.client.force_login(self.customer)
         response = self.client.get(reverse("customer-section", args=["garden"]))
-        self.assertContains(response, module.name)
+        self.assertNotContains(response, module.name)
         self.assertContains(response, cultivar.crop.common_name)
 
     def test_install_does_not_silently_replace_active_installation(self):

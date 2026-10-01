@@ -114,9 +114,9 @@ class CustomerPortalTests(DemoDataTestCase):
     def test_expected_empty_states_render(self):
         cases = {
             "semassinatura@hortaviva.local": "Finalize sua assinatura",
-            "semhorta@hortaviva.local": "horta ainda está sendo preparada",
-            "semdispositivo@hortaviva.local": "Dispositivo ainda não conectado",
-            "semtelemetria@hortaviva.local": "Aguardando telemetria",
+            "semhorta@hortaviva.local": "horta está sendo preparada",
+            "semdispositivo@hortaviva.local": "Sem comunicação",
+            "semtelemetria@hortaviva.local": "Sensor ainda não disponível",
         }
         for email, expected in cases.items():
             with self.subTest(email=email):
