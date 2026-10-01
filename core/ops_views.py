@@ -21,6 +21,8 @@ from crops.models import Crop, PlantingCycle
 from devices.models import Alert, Device, DeviceCredential
 from gardens.models import Garden, GardenModule, ModuleInstallation
 from gardens.selectors import get_active_installations
+from gardens.configuration import effective_garden_configuration
+from devices.selectors import garden_snapshot
 from operations.models import InventoryItem, SupportTicket, Visit, WorkOrder
 from subscriptions.models import Payment, Plan, Subscription
 
@@ -239,39 +241,33 @@ def client_detail(request, user_id):
     if not organization:
         raise Http404
     subscriptions = organization.subscriptions.select_related("plan_version__plan", "coupon").order_by("-created_at")
-    gardens = organization.gardens.select_related("address", "subscription").order_by("name")
-    modules = organization.garden_modules.select_related("module_type").prefetch_related("installations__garden", "planting_cycles__crop", "planting_cycles__cultivar").order_by("name")
-    for module in modules:
-        module.active_installation = next((item for item in module.installations.all() if item.removed_at is None), None)
-        module.current_cycle = next((cycle for cycle in module.planting_cycles.all() if cycle.status == PlantingCycle.Status.ACTIVE), None)
-        module.installation_incomplete = module.status == GardenModule.Status.INSTALLED and module.active_installation is None
-    cycles = organization.planting_cycles.select_related("crop", "cultivar", "garden", "module", "current_stage").order_by("-created_at")
-    devices = organization.devices.select_related("model", "module").order_by("name")
+    gardens = organization.gardens.select_related("address", "garden_model", "primary_technician", "subscription__plan_version__plan__garden_model").order_by("name")
     visits = organization.visits.select_related("garden", "technician").order_by("-scheduled_start")
-    payments = Payment.objects.filter(subscription__organization=organization).select_related("subscription__plan_version__plan").order_by("-due_at")
     tickets = organization.support_tickets.select_related("garden", "module", "device").order_by("-created_at")
-    alerts = Alert.objects.filter(rule__organization=organization, status=Alert.Status.OPEN).select_related("rule")[:8]
     active_subscription = subscriptions.filter(status__in=[Subscription.Status.ACTIVE, Subscription.Status.TRIALING]).first()
     next_visit = visits.filter(scheduled_start__gte=timezone.now(), status=Visit.Status.SCHEDULED).order_by("scheduled_start").first()
-    last_payment = payments.filter(status=Payment.Status.PAID).order_by("-paid_at").first()
     address = organization.addresses.first()
-    active_installations = get_active_installations(organization)
-    incomplete_modules = modules.filter(status=GardenModule.Status.INSTALLED).exclude(pk__in=active_installations.values("module_id"))
-    checklist = (("Dados pessoais", bool(user.full_name and user.email)), ("Endereço", bool(address)), ("Assinatura", bool(active_subscription)), ("Horta", gardens.exists()), ("Módulos instalados", active_installations.exists()), ("Dispositivo conectado", devices.exists()))
-    if not active_subscription:
-        recommended = ("Criar assinatura", "subscriptions")
-    elif not gardens.exists():
-        recommended = ("Criar horta e planejar a instalação", "gardens")
-    elif incomplete_modules.exists():
-        recommended = ("Corrigir instalação dos módulos", "modules")
-    elif not modules.exists():
-        recommended = ("Adicionar módulos", "modules")
-    elif not cycles.filter(status=PlantingCycle.Status.ACTIVE).exists():
-        recommended = ("Iniciar cultivo", "cycles")
-    else:
-        recommended = ("Acompanhar operação", "visits")
+    garden_panels = []
+    for garden in gardens:
+        snapshot = garden_snapshot(garden)
+        config = effective_garden_configuration(garden)
+        lighting_schedule = None
+        if snapshot["light_channel"]:
+            lighting_schedule = snapshot["light_channel"].lighting_schedules.filter(enabled=True).first()
+        garden_panels.append({
+            "garden": garden,
+            "snapshot": snapshot,
+            "configuration": config,
+            "irrigation": config.get("irrigation", {}),
+            "lighting": config.get("lighting", {}),
+            "lighting_schedule": lighting_schedule,
+        })
+    allowed_tabs = {"resumo", "dados", "subscriptions", "gardens", "visits", "tickets"}
+    active_tab = request.GET.get("aba", "resumo")
+    if active_tab not in allowed_tabs:
+        active_tab = "resumo"
     client = user
-    return render(request, "admin_portal/client_detail.html", {**locals(), "active_tab": request.GET.get("aba", "resumo")})
+    return render(request, "admin_portal/client_detail.html", locals())
 
 
 @operations_required

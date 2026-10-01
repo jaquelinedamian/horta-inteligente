@@ -23,12 +23,14 @@ class ClientCenterTests(TestCase):
     def setUp(self):
         self.client.force_login(self.admin)
 
-    def test_admin_sees_summary_and_all_local_navigation(self):
+    def test_admin_sees_only_simplified_client_navigation(self):
         response = self.client.get(reverse("ops-client-detail", args=[self.customer.pk]))
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Central do cliente")
-        for label in ("Resumo", "Dados", "Assinatura", "Horta", "Módulos", "Cultivos", "Dispositivos", "Visitas", "Pagamentos", "Suporte"):
+        for label in ("Resumo", "Dados", "Assinatura", "Horta", "Visitas", "Suporte"):
             self.assertContains(response, label)
+        for section in ("modules", "cycles", "devices", "payments"):
+            self.assertNotContains(response, f"?aba={section}")
 
     def test_edit_client_renders_real_fields(self):
         response = self.client.get(reverse("ops-client-edit", args=[self.customer.pk]))
@@ -87,15 +89,15 @@ class ClientCenterTests(TestCase):
         self.client.force_login(self.customer)
         self.assertNotContains(self.client.get(reverse("customer-section", args=["garden"])), module.name)
 
-    def test_installed_without_installation_is_flagged(self):
+    def test_legacy_module_tab_falls_back_without_exposing_module_structure(self):
         organization, garden = self._customer_org_garden()
         ModuleInstallation.objects.filter(module__organization=organization, removed_at__isnull=True).update(removed_at=timezone.now())
         module = GardenModule.objects.create(organization=organization, module_type=ModuleType.objects.first(), serial_number="BROKEN-INST-1", name="Módulo inconsistente", status=GardenModule.Status.INSTALLED)
         response = self.client.get(f"{reverse('ops-client-detail', args=[self.customer.pk])}?aba=modules")
-        self.assertContains(response, "Instalação incompleta")
-        self.assertContains(response, "Nenhuma horta vinculada")
-        self.assertEqual(response.context["recommended"][0], "Corrigir instalação dos módulos")
-        self.assertIn(("Módulos instalados", False), response.context["checklist"])
+        self.assertEqual(response.context["active_tab"], "resumo")
+        self.assertNotContains(response, "Instalação incompleta")
+        self.assertNotContains(response, "Nenhuma horta vinculada")
+        self.assertNotContains(response, module.name)
 
     def test_cross_organization_install_is_blocked(self):
         organization, garden = self._customer_org_garden()

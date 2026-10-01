@@ -15,7 +15,7 @@ class GuidedBackofficeTests(TestCase):
         self.assertContains(response, "O que você quer fazer?")
         self.assertContains(response, "Novo plano de assinatura")
         self.assertContains(response, "Nova cultura")
-        self.assertContains(response, "Configurações avançadas")
+        self.assertContains(response, "Configurações")
 
     def test_primary_creation_routes_use_reusable_stepper(self):
         for section in ("plans", "crops", "gardens", "modules", "employees", "inventory", "devices", "visits", "orders"):

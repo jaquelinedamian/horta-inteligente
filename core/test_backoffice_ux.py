@@ -63,3 +63,19 @@ class BackofficeUXTests(TestCase):
         self.assertContains(response, "Dispositivos")
         self.assertContains(response, "Configurações técnicas")
         self.assertNotContains(response, 'id="backoffice-area-selector"')
+
+    def test_admin_dashboard_exposes_only_mvp_navigation(self):
+        response = self.client.get(reverse("ops-dashboard"))
+        for label in ("Dashboard", "Clientes", "Hortas", "Culturas", "Visitas", "Equipe", "Estoque", "Configurações"):
+            self.assertContains(response, label)
+        for hidden in ("Organizações</a>", "Cupons</a>", "Pagamentos</a>"):
+            self.assertNotContains(response, hidden)
+        for setting in ("Modelos de horta", "Planos/Assinaturas", "Dispositivos", "Configurações técnicas"):
+            self.assertContains(response, setting)
+
+    def test_legacy_commercial_area_does_not_expose_old_links(self):
+        response = self.client.get(reverse("ops-area", args=["comercial"]))
+        self.assertContains(response, "Clientes")
+        self.assertEqual([card["section"] for card in response.context["cards"]], ["clients"])
+        for hidden in ("Organizações</a>", "Cupons</a>", "Pagamentos</a>"):
+            self.assertNotContains(response, hidden)
