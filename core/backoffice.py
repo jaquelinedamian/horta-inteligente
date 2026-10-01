@@ -28,7 +28,7 @@ def r(title, model, fields, search=()):
 
 
 RESOURCES = {
-    "garden-models": r("Modelos de horta", GardenModel, "name code description capacity reservoir_liters photos_per_day is_active", ("name", "code")),
+    "garden-models": r("Modelos de horta", GardenModel, "name code description capacity reservoir_liters light_hours_per_day irrigation_frequency_count irrigation_frequency_period pump_duration_seconds photos_per_day monitoring_interval_minutes is_active", ("name", "code")),
     "organizations": r("Organizações", Organization, "name slug kind tax_id primary_contact phone email billing_email internal_notes is_active", ("name", "slug", "tax_id")),
     "memberships": r("Membros", Membership, "organization user role is_active", ("organization__name", "user__email")),
     "addresses": r("Endereços", Address, "organization label street number complement district city state postal_code country address_type access_instructions property_type floor has_elevator has_doorman condominium_restrictions access_notes latitude longitude", ("organization__name", "street", "city")),

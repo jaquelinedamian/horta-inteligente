@@ -41,6 +41,15 @@ class LightingScheduleForm(StyledFormMixin, forms.ModelForm):
         widgets = {"start_time": forms.TimeInput(attrs={"type": "time"}), "end_time": forms.TimeInput(attrs={"type": "time"})}
 
 
+class GardenOperationalConfigurationForm(StyledFormMixin, forms.Form):
+    light_hours = forms.DecimalField(label="Horas de luz por dia", min_value=1, max_value=18, decimal_places=1)
+    irrigation_frequency_count = forms.IntegerField(label="Irrigações", min_value=0, max_value=6)
+    irrigation_frequency_period = forms.ChoiceField(label="Período", choices=(("day", "Dia"), ("week", "Semana")))
+    pump_duration_seconds = forms.IntegerField(label="Duração da bomba (segundos)", min_value=1, max_value=300)
+    photos_per_day = forms.IntegerField(label="Fotos por dia", min_value=1, max_value=24)
+    monitoring_interval_minutes = forms.IntegerField(label="Intervalo de monitoramento (minutos)", min_value=15, max_value=1440)
+
+
 class WorkOrderForm(StyledFormMixin, forms.ModelForm):
     class Meta:
         model = WorkOrder

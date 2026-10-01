@@ -40,12 +40,19 @@ def effective_garden_configuration(garden):
             candidate = _merge(candidate, simple)
         candidates.append(candidate)
     compatible = bool(candidates) and all(item == candidates[0] for item in candidates[1:])
-    config = _merge(candidates[0] if compatible else {}, garden.automation_overrides)
+    model = garden.garden_model if garden.garden_model_id else None
+    model_defaults = {"camera": {"photos_per_day": model.photos_per_day if model else 4}, "monitoring": {"interval_minutes": model.monitoring_interval_minutes if model else 60}}
+    if model and model.light_hours_per_day is not None:
+        model_defaults["lighting"] = {"hours_per_day": float(model.light_hours_per_day)}
+    if model and (model.irrigation_frequency_count is not None or model.pump_duration_seconds is not None):
+        model_defaults["irrigation"] = {"frequency_count": model.irrigation_frequency_count, "frequency_period": model.irrigation_frequency_period, "pump_duration_seconds": model.pump_duration_seconds}
+    config = _merge(model_defaults, candidates[0] if compatible else {})
+    config = _merge(config, garden.automation_overrides)
     config["cultures"] = [(cycle.crop or cycle.cultivar.crop).code for cycle in cycles if cycle.crop_id or cycle.cultivar_id]
     config["culture"] = config["cultures"][0] if len(config["cultures"]) == 1 else None
     config["requires_confirmation"] = bool(candidates and not compatible)
     config["camera"] = _merge(
-        {"photos_per_day": garden.garden_model.photos_per_day if garden.garden_model_id else None},
+        {"photos_per_day": model.photos_per_day if model else 4},
         config.get("camera") if isinstance(config.get("camera"), Mapping) else {},
     )
     config["configuration_version"] = garden.updated_at.isoformat()

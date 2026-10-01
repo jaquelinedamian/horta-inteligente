@@ -1,4 +1,5 @@
 from django import forms
+from collections.abc import Mapping
 from django.contrib.auth.password_validation import validate_password
 from django.db import models, transaction
 from django.forms import modelform_factory
@@ -314,9 +315,10 @@ class GardenForm(OperationalModelForm):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        config = self.instance.automation_overrides if self.instance.pk else {}
-        irrigation = config.get("irrigation", {})
-        self.initial.setdefault("light_hours", config.get("lighting", {}).get("hours_per_day"))
+        config = self.instance.automation_overrides if self.instance.pk and isinstance(self.instance.automation_overrides, Mapping) else {}
+        irrigation = config.get("irrigation", {}) if isinstance(config.get("irrigation"), Mapping) else {}
+        lighting = config.get("lighting", {}) if isinstance(config.get("lighting"), Mapping) else {}
+        self.initial.setdefault("light_hours", lighting.get("hours_per_day"))
         self.initial.setdefault("irrigation_frequency_count", irrigation.get("frequency_count"))
         self.initial.setdefault("irrigation_frequency_period", irrigation.get("frequency_period"))
         self.initial.setdefault("pump_duration_seconds", irrigation.get("pump_duration_seconds"))
@@ -325,7 +327,7 @@ class GardenForm(OperationalModelForm):
     def save(self, commit=True):
         garden = super().save(commit=False)
         garden.automation_overrides = {
-            **(garden.automation_overrides or {}),
+            **(garden.automation_overrides if isinstance(garden.automation_overrides, Mapping) else {}),
             "lighting": {"hours_per_day": float(self.cleaned_data["light_hours"]) if self.cleaned_data.get("light_hours") is not None else None},
             "irrigation": {
                 "frequency_count": self.cleaned_data.get("irrigation_frequency_count"),

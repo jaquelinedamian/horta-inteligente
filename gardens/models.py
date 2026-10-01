@@ -13,6 +13,11 @@ class GardenModel(BaseModel):
     capacity = models.PositiveSmallIntegerField(default=4)
     reservoir_liters = models.DecimalField(max_digits=8, decimal_places=2, null=True, blank=True)
     photos_per_day = models.PositiveSmallIntegerField(default=4)
+    light_hours_per_day = models.DecimalField(max_digits=4, decimal_places=1, null=True, blank=True)
+    irrigation_frequency_count = models.PositiveSmallIntegerField(null=True, blank=True)
+    irrigation_frequency_period = models.CharField(max_length=10, choices=(("day", "Dia"), ("week", "Semana")), default="day")
+    pump_duration_seconds = models.PositiveSmallIntegerField(null=True, blank=True)
+    monitoring_interval_minutes = models.PositiveSmallIntegerField(default=60)
     is_active = models.BooleanField(default=True)
 
     def __str__(self):
@@ -76,6 +81,23 @@ class GardenMember(BaseModel):
 
     class Meta:
         constraints = [models.UniqueConstraint(fields=["garden", "user"], name="uniq_garden_user")]
+
+
+class GardenConfigurationEvent(BaseModel):
+    class Origin(models.TextChoices):
+        CUSTOMER = "customer", "Cliente"
+        TECHNICIAN = "technician", "Técnico"
+        ADMIN = "admin", "Admin"
+        RESTORE = "restore", "Restauração padrão"
+
+    garden = models.ForeignKey(Garden, on_delete=models.CASCADE, related_name="configuration_events")
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, related_name="garden_configuration_events")
+    origin = models.CharField(max_length=20, choices=Origin.choices)
+    previous_configuration = models.JSONField(default=dict)
+    new_configuration = models.JSONField(default=dict)
+
+    class Meta:
+        ordering = ("-created_at",)
 
 
 class ModuleType(BaseModel):

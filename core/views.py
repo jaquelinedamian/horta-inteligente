@@ -29,7 +29,9 @@ from crops.selectors import get_available_crops, get_customer_cycles, get_public
 from gardens.selectors import get_customer_devices, get_customer_gardens
 from gardens.services import install_module
 from operations.selectors import get_customer_visits, get_technician_orders, get_technician_visits
-from .forms import CheckoutAddressForm, InstallationDateForm, InstallationSurveyForm, LightingScheduleForm, ProfileForm, SignupForm, SupportTicketForm, WorkOrderForm
+from .forms import CheckoutAddressForm, GardenOperationalConfigurationForm, InstallationDateForm, InstallationSurveyForm, LightingScheduleForm, ProfileForm, SignupForm, SupportTicketForm, WorkOrderForm
+from .garden_experience import garden_report, restore_garden_configuration, update_garden_configuration
+from gardens.configuration import effective_garden_configuration
 from .permissions import customer_required, operations_required, technician_required
 
 
@@ -335,7 +337,64 @@ def tech_visits(request):
 @login_required
 def garden_detail(request, garden_id):
     garden = get_object_or_404(gardens_for_user(request.user).select_related("organization", "address", "primary_technician"), id=garden_id)
-    return render(request, "shared/garden_detail.html", {"snapshot": garden_snapshot(garden), "technical": request.user.is_hortaviva_admin or request.user.employee_role == User.EmployeeRole.TECHNICIAN or request.user.memberships.filter(role=Membership.Role.TECHNICIAN, is_active=True).exists()})
+    config = effective_garden_configuration(garden)
+    return render(request, "shared/garden_detail.html", {"snapshot": garden_snapshot(garden), "configuration": config, "has_overrides": bool(garden.automation_overrides), "technical": request.user.is_hortaviva_admin or request.user.employee_role == User.EmployeeRole.TECHNICIAN or request.user.memberships.filter(role=Membership.Role.TECHNICIAN, is_active=True).exists()})
+
+
+@login_required
+def garden_gallery(request, garden_id):
+    garden = get_object_or_404(gardens_for_user(request.user), pk=garden_id)
+    photos = GardenPhoto.objects.filter(garden=garden)
+    period = request.GET.get("period", "7d")
+    days = {"today": 1, "7d": 7, "30d": 30}.get(period)
+    if days:
+        photos = photos.filter(captured_at__gte=timezone.now() - timedelta(days=days))
+    order = request.GET.get("order", "desc")
+    photos = photos.order_by("captured_at" if order == "asc" else "-captured_at")
+    limit = request.GET.get("limit", "30")
+    if limit in {"7", "30"}:
+        photos = photos[:int(limit)]
+    return render(request, "shared/garden_gallery.html", {"garden": garden, "photos": photos, "period": period, "order": order, "limit": limit})
+
+
+@login_required
+def garden_configuration(request, garden_id):
+    garden = get_object_or_404(gardens_for_user(request.user), pk=garden_id)
+    effective = effective_garden_configuration(garden)
+    irrigation = effective.get("irrigation") if isinstance(effective.get("irrigation"), dict) else {}
+    initial = {
+        "light_hours": (effective.get("lighting") or {}).get("hours_per_day"),
+        "irrigation_frequency_count": irrigation.get("frequency_count") or 0,
+        "irrigation_frequency_period": irrigation.get("frequency_period") or "day",
+        "pump_duration_seconds": irrigation.get("pump_duration_seconds") or irrigation.get("duration_seconds") or 10,
+        "photos_per_day": (effective.get("camera") or {}).get("photos_per_day") or 4,
+        "monitoring_interval_minutes": (effective.get("monitoring") or {}).get("interval_minutes") or 60,
+    }
+    form = GardenOperationalConfigurationForm(request.POST or None, initial=initial)
+    if request.method == "POST" and form.is_valid():
+        update_garden_configuration(garden=garden, user=request.user, cleaned_data=form.cleaned_data)
+        messages.success(request, "Configurações operacionais atualizadas.")
+        return redirect("garden-detail", garden_id=garden.pk)
+    return render(request, "shared/garden_configuration.html", {"garden": garden, "form": form, "has_overrides": bool(garden.automation_overrides)})
+
+
+@login_required
+def garden_configuration_restore(request, garden_id):
+    garden = get_object_or_404(gardens_for_user(request.user), pk=garden_id)
+    if request.method == "POST":
+        restore_garden_configuration(garden=garden, user=request.user)
+        messages.success(request, "Configuração padrão restaurada.")
+        return redirect("garden-detail", garden_id=garden.pk)
+    return render(request, "shared/garden_configuration_restore.html", {"garden": garden})
+
+
+@login_required
+def garden_reports(request, garden_id):
+    garden = get_object_or_404(gardens_for_user(request.user), pk=garden_id)
+    period = request.GET.get("period", "7d")
+    if period not in {"today", "24h", "7d", "30d"}:
+        period = "7d"
+    return render(request, "shared/garden_reports.html", {"garden": garden, "report": garden_report(garden, period)})
 
 
 @login_required

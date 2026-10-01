@@ -282,7 +282,7 @@ def client_detail(request, user_id):
             "lighting_schedule": lighting_schedule,
             "planted_crops": planted_crops,
         })
-    allowed_tabs = {"resumo", "dados", "subscriptions", "gardens", "visits", "tickets"}
+    allowed_tabs = {"resumo", "dados", "subscriptions", "gardens", "reports", "visits", "tickets"}
     active_tab = request.GET.get("aba", "resumo")
     if active_tab not in allowed_tabs:
         active_tab = "resumo"
