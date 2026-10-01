@@ -2,6 +2,7 @@ from django.test import TestCase
 from django.urls import reverse
 
 from accounts.models import User
+from devices.models import Device
 
 
 class GuidedBackofficeTests(TestCase):
@@ -30,3 +31,11 @@ class GuidedBackofficeTests(TestCase):
         self.assertContains(response, "Novo cliente")
         self.assertContains(response, "Assinatura")
         self.assertContains(response, 'data-wizard-stepper', html=False)
+
+    def test_device_flow_exposes_kind_choices_for_dynamic_summary(self):
+        response = self.client.get(reverse("ops-create", args=["devices"]))
+        self.assertContains(response, "Tipo do dispositivo")
+        self.assertContains(response, Device.Kind.CONTROLLER.label)
+        self.assertContains(response, Device.Kind.CAMERA.label)
+        self.assertContains(response, 'name="kind"', html=False)
+        self.assertContains(response, 'data-wizard-summary', html=False)

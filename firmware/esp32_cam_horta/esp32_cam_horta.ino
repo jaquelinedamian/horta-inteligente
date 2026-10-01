@@ -3,6 +3,7 @@
 #include <WiFiManager.h>
 #include <HTTPClient.h>
 #include <WiFiClientSecure.h>
+#include <time.h>
 #include "esp_camera.h"
 #include "esp_http_server.h"
 #include "img_converters.h"
@@ -15,7 +16,12 @@ constexpr char STREAM_BOUNDARY[] = "horta-camera-boundary";
 unsigned long lastPhotoUploadAt = 0;
 unsigned long lastWifiAttemptAt = 0;
 bool servicesStarted = false;
+bool clockSynchronized = false;
 String serialCommand;
+constexpr time_t MIN_VALID_EPOCH = 1700000000;
+constexpr unsigned long NTP_TIMEOUT_MS = 30000UL;
+
+void processSerialCommand();
 
 String wifiAccessPointName() {
   uint64_t chipId = ESP.getEfuseMac();
@@ -33,8 +39,36 @@ bool configureWifi() {
   Serial.printf("Conectando ao Wi-Fi salvo; portal alternativo: %s em 192.168.4.1\n",
                 accessPoint.c_str());
   bool connected = manager.autoConnect(accessPoint.c_str());
-  if (!connected) Serial.println("Falha no provisionamento Wi-Fi");
+  if (!connected) {
+    Serial.println("Falha no provisionamento Wi-Fi");
+  } else {
+    Serial.println("Wi-Fi conectado!");
+    Serial.printf("SSID: %s\n", WiFi.SSID().c_str());
+    Serial.printf("IP: %s\n", WiFi.localIP().toString().c_str());
+    Serial.printf("RSSI: %d dBm\n", WiFi.RSSI());
+  }
   return connected;
+}
+
+bool synchronizeClock() {
+  Serial.println("Sincronizando horario...");
+  configTime(0, 0, "pool.ntp.org", "time.google.com", "time.cloudflare.com");
+  const unsigned long startedAt = millis();
+  while (time(nullptr) < MIN_VALID_EPOCH && millis() - startedAt < NTP_TIMEOUT_MS) {
+    processSerialCommand();
+    delay(250);
+  }
+  const time_t now = time(nullptr);
+  if (now < MIN_VALID_EPOCH) {
+    Serial.println("Erro: horario nao sincronizado dentro do timeout; HTTPS sera adiado");
+    return false;
+  }
+  char formatted[32];
+  struct tm utcTime;
+  gmtime_r(&now, &utcTime);
+  strftime(formatted, sizeof(formatted), "%Y-%m-%dT%H:%M:%SZ", &utcTime);
+  Serial.printf("Horario sincronizado: %s\n", formatted);
+  return true;
 }
 
 void resetOwnWifi() {
@@ -165,11 +199,13 @@ bool startCamera() {
   config.pin_reset = RESET_GPIO_NUM;
   config.xclk_freq_hz = 20000000;
   config.pixel_format = PIXFORMAT_JPEG;
-  config.frame_size = psramFound() ? FRAMESIZE_SVGA : FRAMESIZE_VGA;
-  config.jpeg_quality = psramFound() ? 10 : 12;
-  config.fb_count = psramFound() ? 2 : 1;
-  config.grab_mode = psramFound() ? CAMERA_GRAB_LATEST : CAMERA_GRAB_WHEN_EMPTY;
-  config.fb_location = psramFound() ? CAMERA_FB_IN_PSRAM : CAMERA_FB_IN_DRAM;
+  const bool hasPsram = psramFound();
+  config.frame_size = hasPsram ? FRAMESIZE_SVGA : FRAMESIZE_VGA;
+  config.jpeg_quality = hasPsram ? 10 : 12;
+  // Um unico buffer evita a fila de frames que provocou FB-OVF no uso periodico.
+  config.fb_count = 1;
+  config.grab_mode = CAMERA_GRAB_WHEN_EMPTY;
+  config.fb_location = hasPsram ? CAMERA_FB_IN_PSRAM : CAMERA_FB_IN_DRAM;
 
   esp_err_t error = esp_camera_init(&config);
   if (error != ESP_OK) {
@@ -177,8 +213,13 @@ bool startCamera() {
     return false;
   }
 
+  Serial.printf("PSRAM: %s\n", hasPsram ? "ok" : "nao detectada");
   sensor_t* sensor = esp_camera_sensor_get();
-  if (sensor) Serial.printf("Sensor detectado, PID: 0x%04x\n", sensor->id.PID);
+  if (sensor) {
+    const char* sensorName = sensor->id.PID == OV5640_PID ? "OV5640" : "outro sensor suportado";
+    Serial.printf("Camera: %s (PID: 0x%04x)\n", sensorName, sensor->id.PID);
+  }
+  Serial.println("Camera inicializada");
   return true;
 }
 
@@ -197,6 +238,10 @@ bool startHttpServer() {
 
 void uploadPhoto() {
   if (WiFi.status() != WL_CONNECTED) return;
+  if (time(nullptr) < MIN_VALID_EPOCH) {
+    clockSynchronized = synchronizeClock();
+    if (!clockSynchronized) return;
+  }
   camera_fb_t* frame = esp_camera_fb_get();
   if (!frame) {
     Serial.println("Upload: falha ao capturar imagem");
@@ -208,32 +253,44 @@ void uploadPhoto() {
     return;
   }
 
+  Serial.printf("JPEG capturado: %u bytes\n", static_cast<unsigned>(frame->len));
+
   HTTPClient http;
-  WiFiClient plain;
   WiFiClientSecure secure;
   String url = String(API_BASE_URL) + "/api/device/photo/";
-  bool started = false;
-  if (url.startsWith("https://")) {
-    if (strlen(HTTPS_ROOT_CA) < 40) {
-      Serial.println("Upload HTTPS recusado: configure HTTPS_ROOT_CA");
-      esp_camera_fb_return(frame);
-      return;
-    }
-    secure.setCACert(HTTPS_ROOT_CA);
-    started = http.begin(secure, url);
-  } else {
-    started = http.begin(plain, url);
+  if (!url.startsWith("https://") || strlen(HTTPS_ROOT_CA) < 40) {
+    Serial.println("Upload recusado: API_BASE_URL deve usar HTTPS e HTTPS_ROOT_CA deve estar configurada");
+    esp_camera_fb_return(frame);
+    return;
   }
+  secure.setCACert(HTTPS_ROOT_CA);
+  Serial.println("Iniciando upload da foto...");
+  const bool started = http.begin(secure, url);
   if (!started) {
+    Serial.println("Falha ao iniciar conexao HTTPS");
     esp_camera_fb_return(frame);
     return;
   }
   http.setTimeout(15000);
-  http.addHeader("Authorization", String("Device ") + DEVICE_TOKEN);
+  http.addHeader("Authorization", String("Device ") + DEVICE_API_TOKEN);
   http.addHeader("X-Device-ID", DEVICE_ID);
   http.addHeader("Content-Type", "image/jpeg");
+  char capturedAt[32];
+  const time_t now = time(nullptr);
+  struct tm utcTime;
+  gmtime_r(&now, &utcTime);
+  strftime(capturedAt, sizeof(capturedAt), "%Y-%m-%dT%H:%M:%SZ", &utcTime);
+  http.addHeader("X-Captured-At", capturedAt);
   int status = http.POST(frame->buf, frame->len);
-  Serial.printf("Upload da foto: HTTP %d\n", status);
+  if (status > 0) {
+    Serial.printf("photo: HTTP %d\n", status);
+    if (status >= 400) Serial.printf("Resposta: %s\n", http.getString().c_str());
+  } else {
+    Serial.printf("photo: erro HTTP %d (%s)\n", status, HTTPClient::errorToString(status).c_str());
+    char tlsError[160] = {};
+    const int tlsCode = secure.lastError(tlsError, sizeof(tlsError));
+    Serial.printf("TLS: codigo %d, mensagem: %s\n", tlsCode, tlsError[0] ? tlsError : "indisponivel");
+  }
   http.end();
   esp_camera_fb_return(frame);
 }
@@ -242,7 +299,7 @@ void uploadPhoto() {
 void setup() {
   Serial.begin(115200);
   Serial.setDebugOutput(true);
-  Serial.println("\nIniciando ESP32-CAM da Horta (AI Thinker)...");
+  Serial.println("\nHORTA INTELIGENTE - ESP32-CAM");
 
   if (!startCamera()) return;
 
@@ -250,6 +307,7 @@ void setup() {
     delay(1000);
     ESP.restart();
   }
+  clockSynchronized = synchronizeClock();
 }
 
 void loop() {

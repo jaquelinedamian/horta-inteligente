@@ -6,7 +6,7 @@ from django.core.exceptions import FieldDoesNotExist
 from django.utils import timezone
 
 from accounts.models import Address, Membership, Organization, User
-from devices.models import Channel
+from devices.models import Channel, Device
 from subscriptions.models import Plan, PlanEntitlement, PlanVersion, Subscription
 from subscriptions.selectors import get_available_plan_versions
 from crops.models import Crop, PlantingCycle
@@ -54,6 +54,7 @@ LABELS = {
     "device": "Dispositivo", "channel": "Canal", "position": "Ordem", "enabled": "Ativo",
     "occurred_at": "Data", "received_at": "Data de entrada", "expires_at": "Validade", "manufactured_at": "Fabricação",
     "received_quantity": "Quantidade recebida", "available_quantity": "Quantidade disponível", "unit_cost_cents": "Custo unitário em centavos",
+    "kind": "Tipo do dispositivo",
 }
 
 
@@ -164,7 +165,22 @@ def resource_form_class(resource):
         return CropForm
     if resource.model is Visit:
         return VisitForm
+    if resource.model is Device:
+        return DeviceForm
     return modelform_factory(resource.model, form=OperationalModelForm, fields=resource.fields)
+
+
+class DeviceForm(OperationalModelForm):
+    class Meta:
+        model = Device
+        fields = ("organization", "garden", "model", "module", "serial_number", "name", "kind", "status", "firmware_version", "local_ip", "metadata")
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # O default do model preserva compatibilidade fora do Admin, mas neste
+        # fluxo o operador deve confirmar explicitamente o tipo do equipamento.
+        self.fields["kind"].required = True
+        self.fields["kind"].label = "Tipo do dispositivo"
 
 
 class VisitForm(OperationalModelForm):

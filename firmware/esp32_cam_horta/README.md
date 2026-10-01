@@ -35,8 +35,10 @@ Thinker. O flat cable precisa ter pinout, quantidade de vias, tensoes e interfac
 DVP compativeis com a placa. Se a inicializacao falhar, nao adapte GPIOs por
 tentativa: confirme primeiro a documentacao exata do modulo e do fornecedor.
 
-Foi escolhida resolucao SVGA com PSRAM (VGA sem PSRAM), conservadora para
-captura e streaming. Autofoco de alguns OV5640 exige suporte/configuracao
+Foi escolhida resolução SVGA com PSRAM (VGA sem PSRAM), qualidade JPEG 10
+(12 sem PSRAM), um framebuffer e `CAMERA_GRAB_WHEN_EMPTY`. Essa combinação
+prioriza estabilidade e evita acumular frames, reduzindo ocorrências de
+`cam_hal: FB-OVF`. Autofoco de alguns OV5640 exige suporte/configuração
 adicional do driver e nao e necessario para os endpoints deste MVP.
 
 ## Rede e seguranca
@@ -46,8 +48,9 @@ outra origem local. O servidor nao possui autenticacao; mantenha-o em uma rede
 Wi-Fi confiavel/isolada e nao encaminhe a porta 80 no roteador. O firmware usa
 HTTP local, nao HTTPS.
 
-No fluxo normal, a câmera envia um JPEG periodicamente para
-`POST /api/device/photo/`. Os endpoints `/capture` e `/stream` continuam apenas
+No fluxo normal, a câmera envia o JPEG bruto (`Content-Type: image/jpeg`) a cada
+60 segundos para `POST /api/device/photo/`, com `Authorization: Device <token>`,
+`X-Device-ID: <UUID>` e `X-Captured-At`. Os endpoints `/capture` e `/stream` continuam apenas
 para diagnóstico local. O token identifica a câmera e nunca deve aparecer em QR
 público, HTML ou logs.
 
@@ -71,10 +74,14 @@ abra o monitor em 115200 baud, envie `RESET_WIFI` seguido de Enter e aguarde o
 AP próprio. Como alternativa de manutenção, apague a flash e grave novamente.
 Ambos os procedimentos afetam somente a câmera.
 
-## HTTPS_ROOT_CA
+## NTP e HTTPS_ROOT_CA
 
-O upload HTTPS é recusado quando a CA está vazia. Obtenha a cadeia TLS do
-domínio Render real por navegador ou OpenSSL, valide emissor e validade e copie
-o PEM da CA raiz para `HTTPS_ROOT_CA`. O firmware usa `setCACert()` e nunca
-desativa a validação TLS. Não há uma CA aleatória hardcodada porque a cadeia do
-serviço pode mudar.
+Antes do primeiro upload, o firmware sincroniza UTC por NTP por no máximo 30
+segundos e só aceita epoch igual ou superior a `1700000000`. Sem horário válido,
+o HTTPS é adiado e uma nova tentativa ocorre no próximo intervalo.
+
+O exemplo contém a mesma GlobalSign Root CA usada pelo ESP8266 para a cadeia
+Render atualmente observada (`onrender.com` → WE1 → GTS Root R4 cross-signed →
+GlobalSign Root CA). Ela expira em 28/01/2028 e deve ser revalidada antes disso.
+O firmware exige URL HTTPS, usa `WiFiClientSecure::setCACert()` e nunca desativa
+a validação TLS.

@@ -102,6 +102,57 @@ class DeviceApiTests(TestCase):
         )
         self.assertEqual(response.status_code, 201)
         self.assertEqual(GardenPhoto.objects.filter(garden=self.garden, device=camera).count(), 1)
+        camera.refresh_from_db()
+        self.assertEqual(camera.status, Device.Status.ONLINE)
+        self.assertIsNotNone(camera.last_seen_at)
+
+    def test_photo_rejects_wrong_uuid_even_with_valid_camera_token(self):
+        model = DeviceModel.objects.create(name="ESP32-CAM UUID", code="camera-uuid", hardware_platform="ESP32")
+        camera = Device.objects.create(
+            organization=self.organization, garden=self.garden, model=model,
+            serial_number="CAM-UUID", name="Camera UUID", kind=Device.Kind.CAMERA,
+        )
+        _, token = DeviceCredential.issue(camera)
+        response = self.client.post(
+            reverse("device_api:photo"), b"\xff\xd8jpeg-test\xff\xd9", content_type="image/jpeg",
+            HTTP_AUTHORIZATION=f"Device {token}", HTTP_X_DEVICE_ID=str(self.device.id),
+        )
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(GardenPhoto.objects.filter(device=camera).exists())
+
+    def test_controller_cannot_use_photo_endpoint(self):
+        response = self.client.post(
+            reverse("device_api:photo"), b"\xff\xd8jpeg-test\xff\xd9", content_type="image/jpeg",
+            HTTP_X_DEVICE_ID=str(self.device.id), **self.headers,
+        )
+        self.assertEqual(response.status_code, 403)
+
+    def test_camera_credential_cannot_represent_controller_uuid(self):
+        model = DeviceModel.objects.create(name="ESP32-CAM Bound", code="camera-bound", hardware_platform="ESP32")
+        camera = Device.objects.create(
+            organization=self.organization, garden=self.garden, model=model,
+            serial_number="CAM-BOUND", name="Camera Bound", kind=Device.Kind.CAMERA,
+        )
+        _, camera_token = DeviceCredential.issue(camera)
+        response = self.client.post(
+            reverse("device_api:photo"), b"\xff\xd8jpeg-test\xff\xd9", content_type="image/jpeg",
+            HTTP_AUTHORIZATION=f"Device {camera_token}", HTTP_X_DEVICE_ID=str(self.device.id),
+        )
+        self.assertEqual(response.status_code, 403)
+
+    def test_photo_rejects_truncated_jpeg(self):
+        model = DeviceModel.objects.create(name="ESP32-CAM JPEG", code="camera-jpeg", hardware_platform="ESP32")
+        camera = Device.objects.create(
+            organization=self.organization, garden=self.garden, model=model,
+            serial_number="CAM-JPEG", name="Camera JPEG", kind=Device.Kind.CAMERA,
+        )
+        _, token = DeviceCredential.issue(camera)
+        response = self.client.post(
+            reverse("device_api:photo"), b"\xff\xd8not-complete", content_type="image/jpeg",
+            HTTP_AUTHORIZATION=f"Device {token}", HTTP_X_DEVICE_ID=str(camera.id),
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(GardenPhoto.objects.filter(device=camera).exists())
 
     def test_controller_and_camera_share_garden_with_independent_credentials(self):
         camera_model = DeviceModel.objects.create(name="ESP32-CAM", code="camera-independent", hardware_platform="ESP32")

@@ -164,7 +164,11 @@ def photo(request):
         content_type = upload.content_type if upload else request.content_type
         data = upload.read() if upload else request.body
         limit = getattr(settings, "DEVICE_PHOTO_MAX_BYTES", 5 * 1024 * 1024)
-        if content_type not in ("image/jpeg", "image/jpg") or not data.startswith(b"\xff\xd8"):
+        if (
+            content_type not in ("image/jpeg", "image/jpg")
+            or not data.startswith(b"\xff\xd8")
+            or not data.endswith(b"\xff\xd9")
+        ):
             raise ValueError("envie uma imagem JPEG válida")
         if not data or len(data) > limit:
             raise ValueError(f"imagem excede o limite de {limit} bytes")

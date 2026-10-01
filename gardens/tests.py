@@ -1,7 +1,9 @@
 from django.test import TestCase
 from django.urls import reverse
+from django.utils import timezone
 
 from accounts.models import Membership, Organization, User
+from devices.models import Device, DeviceModel, GardenPhoto
 from gardens.access import gardens_for_user
 from .models import Garden
 
@@ -37,3 +39,16 @@ class GardenAccessTests(TestCase):
         self.assertEqual(self.client.get(reverse("garden-detail", args=[self.garden_b.id])).status_code, 404)
         self.client.force_login(self.admin)
         self.assertEqual(self.client.get(reverse("garden-detail", args=[self.garden_b.id])).status_code, 200)
+
+    def test_customer_cannot_view_photo_from_another_garden(self):
+        model = DeviceModel.objects.create(name="ESP32-CAM", code="access-camera", hardware_platform="ESP32")
+        camera = Device.objects.create(
+            organization=self.org_b, garden=self.garden_b, model=model,
+            serial_number="CAM-B", name="Camera B", kind=Device.Kind.CAMERA,
+        )
+        photo = GardenPhoto.objects.create(
+            garden=self.garden_b, device=camera, captured_at=timezone.now(),
+            image_data=b"\xff\xd8jpeg\xff\xd9", content_type="image/jpeg", byte_size=10,
+        )
+        self.client.force_login(self.client_user)
+        self.assertEqual(self.client.get(reverse("garden-photo", args=[photo.id])).status_code, 404)

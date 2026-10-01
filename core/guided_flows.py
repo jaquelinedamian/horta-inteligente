@@ -70,9 +70,9 @@ FLOWS = {
         step("Valores", "Quais são os valores de referência?", "Custos apoiam estoque e operação, sem alterar movimentações.", "average_cost_cents reference_price_cents is_active"),
     ), (("Ver estoque", "inventory"), ("Registrar entrada", "stock-movements"))),
     "devices": GuidedFlow("devices", "Novo dispositivo", "Identifique o equipamento e associe-o ao local de uso.", "bi-cpu", (
-        step("Modelo", "Qual é o modelo do dispositivo?", "O modelo reúne capacidades e especificações de hardware.", "model"),
+        step("Tipo e modelo", "Qual é o tipo e o modelo do dispositivo?", "O tipo distingue controladores de câmeras; o modelo reúne as especificações de hardware.", "kind model"),
         step("Identificação", "Como este equipamento será reconhecido?", "Nome e serial são usados no suporte e na telemetria.", "name serial_number firmware_version"),
-        step("Uso", "Onde será utilizado?", "A associação correta filtra módulos, leituras e comandos.", "organization module status"),
+        step("Uso", "Onde será utilizado?", "A associação correta filtra hortas, módulos, leituras e comandos.", "organization garden module status"),
         step("Avançado", "Há metadados técnicos adicionais?", "Use somente quando a implantação exigir configuração específica.", "metadata"),
     ), (("Ver dispositivos", "devices"), ("Configurar sensores", "channels"))),
     "visits": GuidedFlow("visits", "Nova visita", "Agende o atendimento no contexto do cliente e da horta.", "bi-calendar2-check", (

@@ -58,7 +58,7 @@ class BackofficeTests(TestCase):
         self.assert_created("modules", {"organization": organization.pk, "module_type": module_type.pk, "serial_number": "CRUD-MOD-001", "name": "Módulo CRUD", "status": "stock"})
         module = GardenModule.objects.get(serial_number="CRUD-MOD-001")
         device_model = DeviceModel.objects.first()
-        self.assert_created("devices", {"organization": organization.pk, "model": device_model.pk, "module": module.pk, "serial_number": "CRUD-DEV-001", "name": "Dispositivo CRUD", "status": "provisioning", "firmware_version": "1.0", "metadata": "{}"})
+        self.assert_created("devices", {"organization": organization.pk, "garden": garden.pk, "model": device_model.pk, "module": module.pk, "serial_number": "CRUD-DEV-001", "name": "Dispositivo CRUD", "kind": Device.Kind.CONTROLLER, "status": "provisioning", "firmware_version": "1.0", "metadata": "{}"})
         device = Device.objects.get(serial_number="CRUD-DEV-001")
         self.assert_created("channels", {"device": device.pk, "key": "air-humidity", "name": "Umidade", "kind": "sensor", "metric": "air_humidity", "unit": "%", "value_type": "decimal", "pin": "I2C", "configuration": "{}", "is_enabled": "on"})
         self.assert_created("orders", {"organization": organization.pk, "garden": garden.pk, "module": module.pk, "device": device.pk, "maintenance_plan": "", "kind": "installation", "status": "open", "title": "Instalar horta CRUD", "description": "", "priority": 2, "scheduled_for": (now + timedelta(days=2)).strftime("%Y-%m-%dT%H:%M"), "completed_at": ""})
@@ -82,6 +82,55 @@ class BackofficeTests(TestCase):
         self.assertEqual(self.client.get(reverse("ops-dashboard")).status_code, 403)
         self.client.force_login(self.admin)
         self.assertEqual(self.client.get(reverse("ops-dashboard")).status_code, 200)
+
+    def test_admin_can_create_controller_and_camera_in_same_garden(self):
+        organization = Organization.objects.first()
+        garden = Garden.objects.filter(organization=organization).first()
+        device_model = DeviceModel.objects.first()
+        url = reverse("ops-create", args=["devices"])
+        common = {
+            "organization": organization.pk, "garden": garden.pk, "model": device_model.pk,
+            "module": "", "status": Device.Status.PROVISIONING, "firmware_version": "",
+            "local_ip": "", "metadata": "{}",
+        }
+
+        response = self.client.post(url, {**common, "serial_number": "CTRL-MOD-P", "name": "Controlador Modulo P", "kind": Device.Kind.CONTROLLER})
+        self.assertEqual(response.status_code, 302)
+        response = self.client.post(url, {**common, "serial_number": "CAM-MOD-P", "name": "Câmera Modulo P", "kind": Device.Kind.CAMERA})
+        self.assertEqual(response.status_code, 302)
+
+        controller = Device.objects.get(serial_number="CTRL-MOD-P")
+        camera = Device.objects.get(serial_number="CAM-MOD-P")
+        self.assertEqual(controller.garden, garden)
+        self.assertEqual(camera.garden, garden)
+        self.assertEqual(controller.kind, Device.Kind.CONTROLLER)
+        self.assertEqual(camera.kind, Device.Kind.CAMERA)
+        self.assertEqual(camera.status, Device.Status.PROVISIONING)
+
+        credential_response = self.client.post(reverse("ops-credential-issue", args=[camera.pk]))
+        self.assertEqual(credential_response.status_code, 200)
+        self.assertContains(credential_response, str(camera.id))
+        self.assertContains(credential_response, "Token do dispositivo")
+
+    def test_device_kind_is_required_and_rejects_unknown_values(self):
+        organization = Organization.objects.first()
+        garden = Garden.objects.filter(organization=organization).first()
+        device_model = DeviceModel.objects.first()
+        base = {
+            "organization": organization.pk, "garden": garden.pk, "model": device_model.pk,
+            "module": "", "serial_number": "INVALID-KIND", "name": "Dispositivo inválido",
+            "status": Device.Status.PROVISIONING, "firmware_version": "", "local_ip": "", "metadata": "{}",
+        }
+        url = reverse("ops-create", args=["devices"])
+
+        self.assertEqual(self.client.post(url, base).status_code, 200)
+        self.assertEqual(self.client.post(url, {**base, "kind": "arbitrary"}).status_code, 200)
+        self.assertFalse(Device.objects.filter(serial_number="INVALID-KIND").exists())
+
+    def test_non_admin_cannot_create_device(self):
+        self.client.force_login(User.objects.get(email="cliente@hortaviva.local"))
+        response = self.client.post(reverse("ops-create", args=["devices"]), {})
+        self.assertEqual(response.status_code, 403)
 
     def test_device_credential_is_shown_once_and_qr_is_safe(self):
         device = Device.objects.first()
