@@ -60,6 +60,17 @@ Instale um botão momentâneo entre **D0/GPIO16 e GND**. Mantenha-o pressionado 
 `Horta-<chip-id>`. Esse reset não afeta a câmera. D0 aceita `INPUT_PULLUP` e não
 é pino de boot.
 
+## Umidade do solo e iluminacao
+
+O firmware 1.2 usa `A0` para o sensor analogico de umidade do solo e `D6`
+para o segundo canal do rele (iluminacao). A bomba permanece em `D5`; ambos os
+reles sao tratados como active-low e iniciam desligados. Os valores seco e
+molhado sao recebidos em `soil_moisture.dry_raw` e `soil_moisture.wet_raw`.
+
+As agendas estruturadas de irrigacao e iluminacao sao guardadas no mesmo JSON
+do LittleFS. Irrigacao mantem compatibilidade com o formato legado `times` e
+`duration_seconds`; cada execucao da bomba e limitada a 300 segundos.
+
 ## HTTPS_ROOT_CA
 
 HTTPS é recusado quando `HTTPS_ROOT_CA` está vazio; o firmware não usa

@@ -1,4 +1,5 @@
-from datetime import timedelta
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from django.conf import settings
 from django.db.models import Q
@@ -13,7 +14,9 @@ def devices_for_garden(garden):
     return Device.objects.filter(
         Q(garden=garden)
         | Q(module__installations__garden=garden, module__installations__removed_at__isnull=True)
-    ).select_related("model", "garden").prefetch_related("channels").distinct()
+    ).select_related("model", "garden").prefetch_related(
+        "channels", "credentials", "heartbeats", "channels__irrigation_schedules", "channels__lighting_schedules"
+    ).distinct()
 
 
 def garden_status(garden):
@@ -28,6 +31,8 @@ def garden_status(garden):
 
 def garden_snapshot(garden):
     devices = list(devices_for_garden(garden))
+    for device in devices:
+        device.latest_heartbeat = device.heartbeats.order_by("-recorded_at").first()
     metrics = {}
     for device in devices:
         for channel in device.channels.filter(kind="sensor", is_enabled=True):
@@ -39,6 +44,7 @@ def garden_snapshot(garden):
                     value = reading.boolean_value
                 metrics[channel.metric] = {
                     "value": value, "unit": channel.unit, "recorded_at": reading.recorded_at,
+                    "raw": reading.raw, "is_recent": reading.recorded_at >= timezone.now() - timedelta(minutes=10),
                 }
     cycles = list(PlantingCycle.objects.filter(
         garden=garden, status=PlantingCycle.Status.ACTIVE
@@ -57,6 +63,26 @@ def garden_snapshot(garden):
         if not contracted_crops:
             contracted_crops = list({cultivar.crop_id: cultivar.crop for cultivar in checkout.selected_cultures.select_related("crop")}.values())
     actuator_channels = [channel for device in devices for channel in device.channels.all() if channel.kind == "actuator" and channel.is_enabled]
+    pump_channel = next((item for item in actuator_channels if item.metric == "pump_state"), None)
+    light_channel = next((item for item in actuator_channels if item.metric == "light_state"), None)
+    next_irrigation = None
+    if pump_channel:
+        now = timezone.now()
+        candidates = []
+        for schedule in pump_channel.irrigation_schedules.filter(enabled=True):
+            local_now = now.astimezone(ZoneInfo(schedule.timezone))
+            for offset in range(8):
+                day = local_now.date() + timedelta(days=offset)
+                if day.weekday() not in schedule.days_of_week:
+                    continue
+                candidate = timezone.make_aware(datetime.combine(day, schedule.start_time), ZoneInfo(schedule.timezone))
+                if candidate > now:
+                    candidates.append((candidate, schedule))
+                    break
+        next_irrigation = min(candidates, key=lambda item: item[0]) if candidates else None
+    commands = {}
+    for channel in actuator_channels:
+        commands[channel.metric] = channel.commands.filter(status="succeeded").order_by("-acknowledged_at").first()
     return {
         "garden": garden,
         "devices": devices,
@@ -66,8 +92,10 @@ def garden_snapshot(garden):
         "contracted_crops": contracted_crops,
         "controller": next((item for item in devices if item.kind == Device.Kind.CONTROLLER), None),
         "camera": next((item for item in devices if item.kind == Device.Kind.CAMERA), None),
-        "pump_channel": next((item for item in actuator_channels if item.metric == "pump_state"), None),
-        "light_channel": next((item for item in actuator_channels if item.metric == "light_state"), None),
+        "pump_channel": pump_channel,
+        "light_channel": light_channel,
+        "next_irrigation": next_irrigation,
+        "actuator_states": commands,
         "next_visit": garden.visits.filter(scheduled_start__gte=timezone.now(), status="scheduled").order_by("scheduled_start").first(),
         "latest_photo": GardenPhoto.objects.filter(garden=garden).first(),
         "alerts": Alert.objects.filter(rule__channel__device__in=devices).select_related("rule")[:5],

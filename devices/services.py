@@ -31,6 +31,18 @@ CONTROLLER_DEFAULT_CHANNELS = (
         "value_type": Channel.ValueType.BOOLEAN, "pin": "D5",
         "configuration": {"component": "relay_1ch", "active_low": True},
     },
+    {
+        "key": "soil-moisture", "name": "Umidade do solo",
+        "kind": Channel.Kind.SENSOR, "metric": "soil_moisture", "unit": "%",
+        "value_type": Channel.ValueType.DECIMAL, "pin": "A0",
+        "configuration": {"component": "analog_soil_sensor", "dry_raw": 850, "wet_raw": 350},
+    },
+    {
+        "key": "grow-light", "name": "Iluminação",
+        "kind": Channel.Kind.ACTUATOR, "metric": "light_state", "unit": "",
+        "value_type": Channel.ValueType.BOOLEAN, "pin": "D6",
+        "configuration": {"component": "relay_2ch", "active_low": True},
+    },
 )
 
 
@@ -153,12 +165,31 @@ def queue_actuator_command(*, user, channel, action):
     if not garden or not user_can_access_garden(user, garden):
         from django.core.exceptions import PermissionDenied
         raise PermissionDenied
+    from accounts.models import Membership
+    can_operate = (
+        user.is_hortaviva_admin
+        or user.employee_role == user.EmployeeRole.TECHNICIAN
+        or user.memberships.filter(
+            organization=garden.organization, is_active=True,
+            role__in=[Membership.Role.OWNER, Membership.Role.MANAGER],
+        ).exists()
+    )
+    if not can_operate:
+        from django.core.exceptions import PermissionDenied
+        raise PermissionDenied
+    if not channel.device.is_online:
+        raise ConnectionError("Controlador offline. Comando não executado.")
     if channel.metric == "pump_state":
-        if action != "irrigate":
-            raise ValueError("a bomba aceita somente irrigação temporizada")
+        if action not in {"on", "off", "irrigate"}:
+            raise ValueError("ação inválida para a bomba")
         irrigation = effective_garden_configuration(garden).get("irrigation", {})
         duration = int(irrigation.get("pump_duration_seconds") or irrigation.get("duration_seconds") or 10)
-        payload = {"on": True, "duration_seconds": max(1, min(duration, 300)), "mode": "safe_preset"}
+        turn_on = action in {"on", "irrigate"}
+        payload = {
+            "on": turn_on,
+            "duration_seconds": max(1, min(duration, 300)) if turn_on else 0,
+            "mode": "manual_safe" if action == "on" else ("safe_preset" if action == "irrigate" else "manual"),
+        }
     else:
         if action not in {"on", "off"}:
             raise ValueError("a iluminação aceita ligar ou desligar")

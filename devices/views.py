@@ -73,7 +73,10 @@ def heartbeat(request):
         request.device.last_seen_at = timezone.now()
         request.device.status = request.device.Status.ONLINE
         request.device.firmware_version = beat.firmware_version or request.device.firmware_version
-        request.device.save(update_fields=["last_seen_at", "status", "firmware_version", "updated_at"])
+        local_ip = beat.diagnostics.get("local_ip") if isinstance(beat.diagnostics, dict) else None
+        if local_ip:
+            request.device.local_ip = local_ip
+        request.device.save(update_fields=["last_seen_at", "status", "firmware_version", "local_ip", "updated_at"])
         return JsonResponse({"id": str(beat.id)}, status=202)
     except ValueError as exc:
         return api_error(exc)

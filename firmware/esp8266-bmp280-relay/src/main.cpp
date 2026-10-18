@@ -19,11 +19,13 @@ namespace {
 // ============================================================
 
 constexpr uint8_t RELAY_PIN = D5;
+constexpr uint8_t LIGHT_RELAY_PIN = D6;
+constexpr uint8_t SOIL_SENSOR_PIN = A0;
 
 constexpr bool RELAY_ACTIVE_LOW = true;
 
 constexpr char FIRMWARE_VERSION[] =
-    "horta-esp8266-1.1.0";
+    "horta-esp8266-1.2.0";
 
 // ============================================================
 // SENSOR / ESTADO
@@ -33,6 +35,9 @@ Adafruit_BMP280 bmp;
 
 bool bmpReady = false;
 bool relayOn = false;
+bool lightRelayOn = false;
+int soilRaw = 0;
+float soilPercent = 0.0F;
 
 uint32_t sequenceNumber = 0;
 
@@ -46,6 +51,7 @@ uint32_t pumpStopAt = 0;
 
 String cachedConfiguration = "{}";
 String lastIrrigationBucket;
+String lastLightingBucket;
 
 // ============================================================
 // RESET DE WIFI
@@ -90,6 +96,23 @@ void setRelay(bool on) {
       RELAY_PIN,
       (on == RELAY_ACTIVE_LOW) ? LOW : HIGH
   );
+}
+
+void setLight(bool on) {
+  lightRelayOn = on;
+  digitalWrite(LIGHT_RELAY_PIN, (on == RELAY_ACTIVE_LOW) ? LOW : HIGH);
+}
+
+float calibratedSoilPercent(int raw) {
+  int dryRaw = 850;
+  int wetRaw = 350;
+  JsonDocument config;
+  if (!deserializeJson(config, cachedConfiguration)) {
+    dryRaw = config["soil_moisture"]["dry_raw"] | dryRaw;
+    wetRaw = config["soil_moisture"]["wet_raw"] | wetRaw;
+  }
+  if (dryRaw == wetRaw) return 0.0F;
+  return constrain(100.0F * (raw - dryRaw) / (wetRaw - dryRaw), 0.0F, 100.0F);
 }
 
 
@@ -444,6 +467,16 @@ void sendTelemetry() {
   pressureItem["idempotency_key"] =
       nextKey("pressure");
 
+  soilRaw = analogRead(SOIL_SENSOR_PIN);
+  soilPercent = calibratedSoilPercent(soilRaw);
+
+  JsonObject soilItem = readings.add<JsonObject>();
+  soilItem["channel"] = "soil-moisture";
+  soilItem["value"] = soilPercent;
+  soilItem["recorded_at"] = recordedAt;
+  soilItem["idempotency_key"] = nextKey("soil");
+  soilItem["raw"]["raw"] = soilRaw;
+
 
   String body;
   String response;
@@ -531,6 +564,13 @@ void sendHeartbeat() {
 
   doc["diagnostics"]["relay_on"] =
       relayOn;
+  doc["diagnostics"]["relay_pump_on"] = relayOn;
+  doc["diagnostics"]["relay_light_on"] = lightRelayOn;
+  doc["diagnostics"]["soil_moisture_raw"] = soilRaw;
+  doc["diagnostics"]["soil_moisture_percent"] = soilPercent;
+  doc["diagnostics"]["wifi_rssi"] = WiFi.RSSI();
+  doc["diagnostics"]["firmware_version"] = FIRMWARE_VERSION;
+  doc["diagnostics"]["local_ip"] = WiFi.localIP().toString();
 
 
   String body;
@@ -569,7 +609,8 @@ void sendHeartbeat() {
 void acknowledge(
     const String& id,
     bool succeeded,
-    const String& detail
+    const String& detail,
+    bool relayState
 ) {
 
   JsonDocument doc;
@@ -580,7 +621,7 @@ void acknowledge(
           : "failed";
 
   doc["result"]["relay"] =
-      relayOn;
+      relayState;
 
   doc["result"]["detail"] =
       detail;
@@ -685,32 +726,33 @@ void pollCommands() {
       setRelay(on);
 
 
-      String mode =
-          command["payload"]["mode"]
-              | "";
-
-
-      pumpStopAt =
-          on &&
-          mode == "safe_preset"
-              ? millis()
-                  + SAFE_PUMP_DURATION_MS
-              : 0;
+      uint32_t durationSeconds = command["payload"]["duration_seconds"] | (SAFE_PUMP_DURATION_MS / 1000UL);
+      pumpStopAt = on ? millis() + constrain(durationSeconds, 1UL, 300UL) * 1000UL : 0;
 
 
       acknowledge(
           id,
           true,
-          "relay atualizado"
+          "relay atualizado",
+          relayOn
       );
     }
 
+    else if (
+        channel == "grow-light" &&
+        type == "set_state" &&
+        command["payload"]["on"].is<bool>()
+    ) {
+      setLight(command["payload"]["on"].as<bool>());
+      acknowledge(id, true, "iluminacao atualizada", lightRelayOn);
+    }
     else {
 
       acknowledge(
           id,
           false,
-          "canal ou comando nao suportado"
+          "canal ou comando nao suportado",
+          false
       );
     }
   }
@@ -961,133 +1003,67 @@ void fetchConfiguration() {
 // ============================================================
 
 void runOfflineAutomation() {
-
-  if (
-      pumpStopAt ||
-      cachedConfiguration.length() < 3
-  ) {
-
-    return;
-  }
-
-
-  time_t now =
-      time(nullptr);
-
-
-  if (now < MIN_VALID_EPOCH) {
-
-    return;
-  }
-
-
+  if (cachedConfiguration.length() < 3 || time(nullptr) < MIN_VALID_EPOCH) return;
+  time_t now = time(nullptr);
   struct tm local;
-
-  localtime_r(
-      &now,
-      &local
-  );
-
-
+  localtime_r(&now, &local);
   char current[6];
-
   char bucket[18];
-
-
-  strftime(
-      current,
-      sizeof(current),
-      "%H:%M",
-      &local
-  );
-
-
-  strftime(
-      bucket,
-      sizeof(bucket),
-      "%Y%m%d-%H:%M",
-      &local
-  );
-
+  strftime(current, sizeof(current), "%H:%M", &local);
+  strftime(bucket, sizeof(bucket), "%Y%m%d-%H:%M", &local);
+  int weekday = (local.tm_wday + 6) % 7;
 
   JsonDocument doc;
+  if (deserializeJson(doc, cachedConfiguration)) return;
 
-
-  if (
-      deserializeJson(
-          doc,
-          cachedConfiguration
-      )
-  ) {
-
-    return;
-  }
-
-
-  JsonObject irrigation =
-      doc["irrigation"];
-
-
-  if (
-      !(irrigation["enabled"] | false)
-  ) {
-
-    return;
-  }
-
-
-  for (
-      JsonVariant value :
-      irrigation["times"]
-          .as<JsonArray>()
-  ) {
-
-    if (
-        value.as<String>()
-            == current &&
-        lastIrrigationBucket
-            != bucket
-    ) {
-
-      uint32_t duration =
-          irrigation[
-              "duration_seconds"
-          ]
-          | (
-              SAFE_PUMP_DURATION_MS
-              / 1000UL
-            );
-
-
-      duration =
-          constrain(
-              duration,
-              1UL,
-              300UL
-          );
-
-
-      setRelay(true);
-
-
-      pumpStopAt =
-          millis()
-          + duration * 1000UL;
-
-
-      lastIrrigationBucket =
-          bucket;
-
-
-      Serial.println(
-          F(
-              "Irrigacao iniciada pela configuracao local"
-          )
-      );
-
-
-      break;
+  JsonObject irrigation = doc["irrigation"];
+  if (!pumpStopAt && (irrigation["enabled"] | false)) {
+    bool started = false;
+    for (JsonObject schedule : irrigation["schedules"].as<JsonArray>()) {
+      bool validDay = false;
+      for (JsonVariant day : schedule["days"].as<JsonArray>()) validDay = validDay || day.as<int>() == weekday;
+      if ((schedule["enabled"] | true) && validDay && schedule["time"].as<String>() == current && lastIrrigationBucket != bucket) {
+        uint32_t duration = constrain(schedule["duration_seconds"] | 10UL, 1UL, 300UL);
+        setRelay(true);
+        pumpStopAt = millis() + duration * 1000UL;
+        lastIrrigationBucket = bucket;
+        started = true;
+        break;
+      }
     }
+    // Compatibilidade com configurações antigas baseadas em times + duration_seconds.
+    if (!started) for (JsonVariant value : irrigation["times"].as<JsonArray>()) {
+      if (value.as<String>() == current && lastIrrigationBucket != bucket) {
+        uint32_t duration = constrain(irrigation["duration_seconds"] | 10UL, 1UL, 300UL);
+        setRelay(true);
+        pumpStopAt = millis() + duration * 1000UL;
+        lastIrrigationBucket = bucket;
+        break;
+      }
+    }
+  }
+
+  JsonObject lighting = doc["lighting"];
+  if ((lighting["enabled"] | false) && lastLightingBucket != bucket) {
+    int minutesNow = local.tm_hour * 60 + local.tm_min;
+    bool shouldBeOn = false;
+    for (JsonObject schedule : lighting["schedules"].as<JsonArray>()) {
+      if (!(schedule["enabled"] | true)) continue;
+      String start = schedule["start"] | "00:00";
+      String end = schedule["end"] | "00:00";
+      int startMinutes = start.substring(0, 2).toInt() * 60 + start.substring(3).toInt();
+      int endMinutes = end.substring(0, 2).toInt() * 60 + end.substring(3).toInt();
+      bool today = false, previous = false;
+      for (JsonVariant day : schedule["days"].as<JsonArray>()) {
+        today = today || day.as<int>() == weekday;
+        previous = previous || day.as<int>() == ((weekday + 6) % 7);
+      }
+      shouldBeOn = shouldBeOn || (startMinutes <= endMinutes
+        ? today && minutesNow >= startMinutes && minutesNow < endMinutes
+        : (today && minutesNow >= startMinutes) || (previous && minutesNow < endMinutes));
+    }
+    setLight(shouldBeOn);
+    lastLightingBucket = bucket;
   }
 }
 
@@ -1123,9 +1099,11 @@ void setup() {
       RELAY_PIN,
       OUTPUT
   );
+  pinMode(LIGHT_RELAY_PIN, OUTPUT);
 
 
   setRelay(false);
+  setLight(false);
 
 
   // SDA = D2

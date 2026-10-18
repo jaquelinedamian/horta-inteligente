@@ -66,5 +66,46 @@ def effective_garden_configuration(garden):
         config.get("camera") if isinstance(config.get("camera"), Mapping) else {},
     )
     config["camera"]["photos_per_day"] = safe_photos_per_day(config["camera"].get("photos_per_day"))
+    from devices.models import Device
+    from devices.selectors import devices_for_garden
+
+    controller = devices_for_garden(garden).filter(kind=Device.Kind.CONTROLLER).prefetch_related(
+        "channels__irrigation_schedules", "channels__lighting_schedules"
+    ).first()
+    if controller:
+        soil = controller.channels.filter(metric="soil_moisture", is_enabled=True).first()
+        if soil:
+            config["soil_moisture"] = {
+                "dry_raw": int(soil.configuration.get("dry_raw", 850)),
+                "wet_raw": int(soil.configuration.get("wet_raw", 350)),
+            }
+        pump = controller.channels.filter(metric="pump_state", is_enabled=True).first()
+        if pump:
+            schedules = [
+                {
+                    "id": str(item.id), "time": item.start_time.strftime("%H:%M"),
+                    "duration_seconds": item.duration_seconds, "days": item.days_of_week,
+                    "enabled": item.enabled,
+                }
+                for item in pump.irrigation_schedules.all().order_by("start_time")
+            ]
+            irrigation = config.setdefault("irrigation", {})
+            irrigation["schedules"] = schedules
+            irrigation["enabled"] = any(item["enabled"] for item in schedules) if schedules else irrigation.get("enabled", False)
+            if schedules:
+                irrigation["times"] = [item["time"] for item in schedules if item["enabled"]]
+        light = controller.channels.filter(metric="light_state", is_enabled=True).first()
+        if light:
+            schedules = [
+                {
+                    "id": str(item.id), "start": item.start_time.strftime("%H:%M"),
+                    "end": item.end_time.strftime("%H:%M"), "days": item.days_of_week,
+                    "enabled": item.enabled,
+                }
+                for item in light.lighting_schedules.all().order_by("start_time")
+            ]
+            lighting = config.setdefault("lighting", {})
+            lighting["schedules"] = schedules
+            lighting["enabled"] = any(item["enabled"] for item in schedules)
     config["configuration_version"] = garden.updated_at.isoformat()
     return config

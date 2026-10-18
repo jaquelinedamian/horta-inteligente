@@ -3,7 +3,7 @@ from django.contrib.auth.forms import UserCreationForm
 from django.utils import timezone
 
 from accounts.models import Address, User
-from devices.models import LightingSchedule
+from devices.models import IrrigationSchedule, LightingSchedule
 from operations.models import SupportTicket, WorkOrder
 
 
@@ -35,10 +35,44 @@ class SupportTicketForm(StyledFormMixin, forms.ModelForm):
 
 
 class LightingScheduleForm(StyledFormMixin, forms.ModelForm):
+    days_of_week = forms.TypedMultipleChoiceField(
+        label="Dias", choices=tuple(enumerate(("Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"))),
+        coerce=int, widget=forms.CheckboxSelectMultiple,
+    )
+
     class Meta:
         model = LightingSchedule
-        fields = ("start_time", "end_time", "enabled")
+        fields = ("start_time", "end_time", "days_of_week", "enabled")
         widgets = {"start_time": forms.TimeInput(attrs={"type": "time"}), "end_time": forms.TimeInput(attrs={"type": "time"})}
+
+
+class IrrigationScheduleForm(StyledFormMixin, forms.ModelForm):
+    days_of_week = forms.TypedMultipleChoiceField(
+        label="Dias", choices=tuple(enumerate(("Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"))),
+        coerce=int, widget=forms.CheckboxSelectMultiple,
+    )
+
+    class Meta:
+        model = IrrigationSchedule
+        fields = ("start_time", "duration_seconds", "days_of_week", "enabled")
+        widgets = {"start_time": forms.TimeInput(attrs={"type": "time"})}
+
+    def clean_duration_seconds(self):
+        value = self.cleaned_data["duration_seconds"]
+        if not 1 <= value <= 300:
+            raise forms.ValidationError("Use uma duração entre 1 e 300 segundos.")
+        return value
+
+
+class SoilCalibrationForm(StyledFormMixin, forms.Form):
+    dry_raw = forms.IntegerField(label="Valor seco (RAW)", min_value=0, max_value=1023)
+    wet_raw = forms.IntegerField(label="Valor molhado (RAW)", min_value=0, max_value=1023)
+
+    def clean(self):
+        data = super().clean()
+        if data.get("dry_raw") == data.get("wet_raw"):
+            raise forms.ValidationError("Os valores seco e molhado devem ser diferentes.")
+        return data
 
 
 class GardenOperationalConfigurationForm(StyledFormMixin, forms.Form):

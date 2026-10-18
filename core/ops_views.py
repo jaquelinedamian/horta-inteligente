@@ -574,7 +574,6 @@ def client_module_install(request, user_id, module_id):
 @require_POST
 def credential_issue(request, device_id):
     device = get_object_or_404(Device, pk=device_id)
-    DeviceCredential.objects.filter(device=device, is_active=True).update(is_active=False)
     credential, token = DeviceCredential.issue(device, name=request.POST.get("name", "principal"))
     return render(request, "admin_portal/credential_created.html", {"device": device, "credential": credential, "token": token})
 

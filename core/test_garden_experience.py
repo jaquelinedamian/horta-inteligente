@@ -1,6 +1,6 @@
 from datetime import timedelta
 
-from django.test import TestCase
+from django.test import Client, TestCase
 from django.urls import reverse
 from django.utils import timezone
 
@@ -32,6 +32,40 @@ class GardenExperienceTests(TestCase):
         data = {"light_hours": "10", "irrigation_frequency_count": "3", "irrigation_frequency_period": "day", "pump_duration_seconds": "25", "photos_per_day": "4", "monitoring_interval_minutes": "60"}
         data.update(overrides)
         return data
+
+    def test_admin_issues_credential_once_without_revoking_previous(self):
+        old, old_token = DeviceCredential.issue(self.device, name="anterior")
+        self.client.force_login(self.admin)
+        response = self.client.post(reverse("garden-credential-issue", args=[self.garden.pk, self.device.pk]), {"name": "nova"})
+        self.assertEqual(response.status_code, 200)
+        old.refresh_from_db()
+        self.assertTrue(old.is_active)
+        self.assertContains(response, "não poderá ser exibido novamente")
+        self.assertContains(response, '#define DEVICE_ID')
+        self.assertNotContains(response, old_token)
+        self.assertEqual(self.device.credentials.filter(is_active=True).count(), 2)
+
+    def test_owner_cannot_issue_or_revoke_device_credentials(self):
+        credential, _ = DeviceCredential.issue(self.device)
+        self.client.force_login(self.owner)
+        issue = self.client.post(reverse("garden-credential-issue", args=[self.garden.pk, self.device.pk]))
+        revoke = self.client.post(reverse("garden-credential-revoke", args=[self.garden.pk, credential.pk]))
+        self.assertEqual(issue.status_code, 403)
+        self.assertEqual(revoke.status_code, 403)
+        credential.refresh_from_db()
+        self.assertTrue(credential.is_active)
+
+    def test_credential_mutations_require_csrf(self):
+        client = Client(enforce_csrf_checks=True)
+        client.force_login(self.admin)
+        response = client.post(reverse("garden-credential-issue", args=[self.garden.pk, self.device.pk]))
+        self.assertEqual(response.status_code, 403)
+
+    def test_offline_controller_does_not_queue_manual_command(self):
+        self.client.force_login(self.owner)
+        response = self.client.post(reverse("device-action"), {"channel": self.pump.pk, "action": "on", "next": reverse("garden-detail", args=[self.garden.pk])})
+        self.assertEqual(response.status_code, 302)
+        self.assertFalse(DeviceCommand.objects.filter(channel=self.pump).exists())
 
     def test_gallery_without_photos_is_friendly(self):
         self.client.force_login(self.owner)

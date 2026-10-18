@@ -8,7 +8,7 @@ from django.utils import timezone
 from accounts.models import Organization
 from crops.models import Crop, CropCultivationProfile, Cultivar, PlantingCycle
 from gardens.models import Garden, GardenModule, ModuleInstallation, ModuleType
-from devices.models import Channel, Device, DeviceCommand, DeviceCredential, DeviceModel, GardenPhoto, TelemetryReading
+from devices.models import Channel, Device, DeviceCommand, DeviceCredential, DeviceModel, GardenPhoto, IrrigationSchedule, TelemetryReading
 
 
 class DeviceApiTests(TestCase):
@@ -182,7 +182,33 @@ class DeviceApiTests(TestCase):
         self.garden.save(update_fields=["automation_overrides"])
         response = self.client.get(reverse("device_api:configuration"), HTTP_X_DEVICE_ID=str(self.device.id), **self.headers)
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["irrigation"], {"enabled": True, "times": ["08:00"], "duration_seconds": 45})
+        self.assertTrue(response.json()["irrigation"]["enabled"])
+        self.assertEqual(response.json()["irrigation"]["times"], ["08:00"])
+        self.assertEqual(response.json()["irrigation"]["duration_seconds"], 45)
+        self.assertEqual(response.json()["irrigation"]["schedules"], [])
+
+    def test_soil_moisture_telemetry_keeps_percent_and_raw(self):
+        payload = {"readings": [{
+            "channel": "soil-moisture", "value": 64,
+            "recorded_at": timezone.now().isoformat(), "idempotency_key": "soil-1",
+            "raw": {"raw": 712},
+        }]}
+        response = self.client.post(reverse("devices:telemetry"), json.dumps(payload), content_type="application/json", **self.headers)
+        self.assertEqual(response.status_code, 202)
+        reading = TelemetryReading.objects.get(channel__key="soil-moisture")
+        self.assertEqual(reading.decimal_value, 64)
+        self.assertEqual(reading.raw["raw"], 712)
+
+    def test_configuration_contains_calibration_and_schedules(self):
+        pump = self.device.channels.get(key="pump")
+        IrrigationSchedule.objects.create(
+            actuator=pump, start_time="07:00", duration_seconds=10,
+            days_of_week=[0, 1, 2, 3, 4, 5, 6], enabled=True,
+        )
+        response = self.client.get(reverse("device_api:configuration"), HTTP_X_DEVICE_ID=str(self.device.id), **self.headers)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["soil_moisture"], {"dry_raw": 850, "wet_raw": 350})
+        self.assertEqual(response.json()["irrigation"]["schedules"][0]["duration_seconds"], 10)
 
     def test_configuration_api_never_returns_more_than_four_photos(self):
         self.garden.automation_overrides = {"camera": {"photos_per_day": 24}}
@@ -209,7 +235,7 @@ class ControllerChannelProvisioningTests(TestCase):
         )
         self.assertEqual(
             set(device.channels.values_list("key", flat=True)),
-            {"air-temperature", "air-pressure", "pump"},
+            {"air-temperature", "air-pressure", "soil-moisture", "pump", "grow-light"},
         )
         self.assertEqual(device.channels.get(key="air-temperature").metric, "air_temperature")
         self.assertEqual(device.channels.get(key="air-pressure").kind, Channel.Kind.SENSOR)
@@ -222,17 +248,14 @@ class ControllerChannelProvisioningTests(TestCase):
             organization=self.organization, model=self.model,
             serial_number="ESP-CUSTOM", name="Controlador",
         )
-        custom = Channel.objects.create(
-            device=device, key="soil-moisture", name="Solo",
-            kind=Channel.Kind.SENSOR, metric="soil_moisture",
-        )
+        custom = Channel.objects.create(device=device, key="custom-soil", name="Solo customizado", kind=Channel.Kind.SENSOR, metric="custom_soil")
         temperature = device.channels.get(key="air-temperature")
         temperature.name = "Sensor personalizado"
         temperature.is_enabled = False
         temperature.save(update_fields=["name", "is_enabled", "updated_at"])
 
         self.assertEqual(ensure_controller_default_channels(device), [])
-        self.assertEqual(device.channels.count(), 4)
+        self.assertEqual(device.channels.count(), 6)
         temperature.refresh_from_db()
         self.assertEqual(temperature.name, "Sensor personalizado")
         self.assertFalse(temperature.is_enabled)

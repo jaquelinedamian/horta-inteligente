@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import (Alert, AlertRule, Channel, Device, DeviceCommand, DeviceCredential,
+from .models import (Alert, AlertRule, Channel, Device, DeviceCommand, DeviceCredential, IrrigationSchedule,
                      DeviceHeartbeat, DeviceModel, LightingSchedule, SensorCalibration,
                      TelemetryMetric, TelemetryReading)
 
@@ -28,7 +28,8 @@ class DeviceCredentialAdmin(admin.ModelAdmin):
     list_display = ("device", "name", "key_prefix", "is_active", "last_used_at", "expires_at")
     list_filter = ("is_active",)
     search_fields = ("device__name", "key_prefix")
-    readonly_fields = ("key_prefix", "secret_hash", "last_used_at", "created_at", "updated_at")
+    readonly_fields = ("key_prefix", "last_used_at", "created_at", "updated_at")
+    exclude = ("secret_hash",)
 
 @admin.register(Alert)
 class AlertAdmin(admin.ModelAdmin):
@@ -36,5 +37,5 @@ class AlertAdmin(admin.ModelAdmin):
     list_filter = ("status", "rule__severity")
     search_fields = ("rule__name", "message", "rule__organization__name")
 
-admin.site.register([DeviceModel, DeviceHeartbeat, DeviceCommand, AlertRule, LightingSchedule,
+admin.site.register([DeviceModel, DeviceHeartbeat, DeviceCommand, AlertRule, LightingSchedule, IrrigationSchedule,
                      TelemetryMetric, SensorCalibration])

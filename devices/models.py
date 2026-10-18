@@ -271,3 +271,28 @@ class LightingSchedule(BaseModel):
     start_time = models.TimeField()
     end_time = models.TimeField()
     enabled = models.BooleanField(default=True)
+
+
+class IrrigationSchedule(BaseModel):
+    actuator = models.ForeignKey(Channel, on_delete=models.CASCADE, related_name="irrigation_schedules")
+    name = models.CharField(max_length=100, default="Irrigação")
+    timezone = models.CharField(max_length=64, default="America/Sao_Paulo")
+    days_of_week = models.JSONField(default=list, help_text="0=segunda-feira, 6=domingo")
+    start_time = models.TimeField()
+    duration_seconds = models.PositiveSmallIntegerField(default=10)
+    enabled = models.BooleanField(default=True)
+
+    def clean(self):
+        from django.core.exceptions import ValidationError
+
+        errors = {}
+        if self.actuator_id and (
+            self.actuator.kind != Channel.Kind.ACTUATOR or self.actuator.metric != "pump_state"
+        ):
+            errors["actuator"] = "Selecione um canal de bomba."
+        if not self.days_of_week or any(day not in range(7) for day in self.days_of_week):
+            errors["days_of_week"] = "Selecione pelo menos um dia válido."
+        if not 1 <= self.duration_seconds <= 300:
+            errors["duration_seconds"] = "A duração deve estar entre 1 e 300 segundos."
+        if errors:
+            raise ValidationError(errors)

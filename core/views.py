@@ -18,8 +18,9 @@ from django.views.decorators.http import require_POST
 
 from accounts.models import Address, Membership, Organization, User
 from crops.models import Crop, Cultivar, PlantingCycle
-from devices.models import Alert, Channel, Device, DeviceCommand, GardenPhoto, LightingSchedule, TelemetryReading
-from devices.selectors import garden_snapshot
+from devices.models import (Alert, Channel, Device, DeviceCommand, DeviceCredential, GardenPhoto,
+                            IrrigationSchedule, LightingSchedule, TelemetryReading)
+from devices.selectors import devices_for_garden, garden_snapshot
 from gardens.access import gardens_for_user
 from gardens.models import Garden, GardenModule, ModuleInstallation
 from operations.models import ChecklistExecution, InventoryItem, SupportTicket, Visit, WorkOrder
@@ -29,7 +30,9 @@ from crops.selectors import get_available_crops, get_customer_cycles, get_public
 from gardens.selectors import get_customer_devices, get_customer_gardens
 from gardens.services import install_module
 from operations.selectors import get_customer_visits, get_technician_orders, get_technician_visits
-from .forms import CheckoutAddressForm, GardenOperationalConfigurationForm, InstallationDateForm, InstallationSurveyForm, LightingScheduleForm, ProfileForm, SignupForm, SupportTicketForm, WorkOrderForm
+from .forms import (CheckoutAddressForm, GardenOperationalConfigurationForm, InstallationDateForm,
+                    InstallationSurveyForm, IrrigationScheduleForm, LightingScheduleForm, ProfileForm,
+                    SignupForm, SoilCalibrationForm, SupportTicketForm, WorkOrderForm)
 from .garden_experience import garden_report, restore_garden_configuration, update_garden_configuration
 from gardens.configuration import effective_garden_configuration
 from .permissions import customer_required, operations_required, technician_required
@@ -314,9 +317,12 @@ def device_action(request):
     channel = get_object_or_404(Channel.objects.select_related("device__garden"), id=request.POST.get("channel"))
     try:
         queue_actuator_command(user=request.user, channel=channel, action=request.POST.get("action"))
+    except ConnectionError as exc:
+        messages.error(request, str(exc))
+        return redirect(request.POST.get("next") or "customer-dashboard")
     except ValueError:
         raise Http404
-    messages.success(request, "Comando enviado ao controlador.")
+    messages.info(request, "Enviando comando… A alteração será confirmada após o acknowledgement do controlador.")
     return redirect(request.POST.get("next") or "customer-dashboard")
 
 
@@ -357,7 +363,108 @@ def tech_visits(request):
 def garden_detail(request, garden_id):
     garden = get_object_or_404(gardens_for_user(request.user).select_related("organization", "address", "primary_technician"), id=garden_id)
     config = effective_garden_configuration(garden)
-    return render(request, "shared/garden_detail.html", {"snapshot": garden_snapshot(garden), "configuration": config, "has_overrides": bool(garden.automation_overrides), "technical": request.user.is_hortaviva_admin or request.user.employee_role == User.EmployeeRole.TECHNICIAN or request.user.memberships.filter(role=Membership.Role.TECHNICIAN, is_active=True).exists()})
+    snapshot = garden_snapshot(garden)
+    can_manage_credentials = request.user.is_hortaviva_admin
+    return render(request, "shared/garden_detail.html", {"snapshot": snapshot, "configuration": config, "has_overrides": bool(garden.automation_overrides), "technical": request.user.is_hortaviva_admin or request.user.employee_role == User.EmployeeRole.TECHNICIAN or request.user.memberships.filter(role=Membership.Role.TECHNICIAN, is_active=True).exists(), "can_manage_credentials": can_manage_credentials})
+
+
+def _admin_garden(request, garden_id):
+    if not request.user.is_hortaviva_admin:
+        from django.core.exceptions import PermissionDenied
+        raise PermissionDenied
+    return get_object_or_404(gardens_for_user(request.user), pk=garden_id)
+
+
+@login_required
+@require_POST
+def garden_credential_issue(request, garden_id, device_id):
+    garden = _admin_garden(request, garden_id)
+    device = get_object_or_404(devices_for_garden(garden), pk=device_id)
+    credential, token = DeviceCredential.issue(device, name=(request.POST.get("name") or "principal")[:80])
+    firmware_config = f'#define API_BASE_URL "{request.build_absolute_uri("/").rstrip("/")}\"\n#define DEVICE_ID "{device.id}"\n#define DEVICE_API_TOKEN "{token}"'
+    return render(request, "admin_portal/credential_created.html", {"device": device, "credential": credential, "token": token, "garden": garden, "firmware_config": firmware_config})
+
+
+@login_required
+@require_POST
+def garden_credential_revoke(request, garden_id, credential_id):
+    garden = _admin_garden(request, garden_id)
+    credential = get_object_or_404(DeviceCredential, pk=credential_id, device__in=devices_for_garden(garden))
+    if credential.is_active:
+        credential.is_active = False
+        credential.save(update_fields=["is_active", "updated_at"])
+        messages.success(request, "Credencial revogada. Ela não foi apagada.")
+    else:
+        messages.info(request, "A credencial já estava inativa.")
+    return redirect("garden-detail", garden_id=garden.pk)
+
+
+@login_required
+@require_POST
+def garden_automation_update(request, garden_id):
+    garden = get_object_or_404(gardens_for_user(request.user), pk=garden_id)
+    if not (request.user.is_hortaviva_admin or request.user.employee_role == User.EmployeeRole.TECHNICIAN or request.user.memberships.filter(organization=garden.organization, is_active=True, role__in=[Membership.Role.OWNER, Membership.Role.MANAGER]).exists()):
+        from django.core.exceptions import PermissionDenied
+        raise PermissionDenied
+    controller = devices_for_garden(garden).filter(kind=Device.Kind.CONTROLLER).first()
+    if not controller:
+        messages.error(request, "Nenhum controlador associado a esta horta.")
+        return redirect("garden-configuration", garden_id=garden.pk)
+    action = request.POST.get("action")
+    if action == "calibration":
+        channel = get_object_or_404(controller.channels, metric="soil_moisture")
+        form = SoilCalibrationForm(request.POST)
+        if form.is_valid():
+            channel.configuration = {**channel.configuration, **form.cleaned_data}
+            channel.save(update_fields=["configuration", "updated_at"])
+            messages.success(request, "Calibração da umidade do solo atualizada.")
+        else:
+            messages.error(request, "Revise os valores de calibração.")
+    elif action == "irrigation_add":
+        channel = get_object_or_404(controller.channels, metric="pump_state")
+        form = IrrigationScheduleForm(request.POST)
+        if form.is_valid():
+            item = form.save(commit=False); item.actuator = channel; item.full_clean(); item.save()
+            messages.success(request, "Horário de irrigação adicionado.")
+        else:
+            messages.error(request, "Não foi possível adicionar o horário de irrigação.")
+    elif action == "lighting_save":
+        channel = get_object_or_404(controller.channels, metric="light_state")
+        item = channel.lighting_schedules.first() or LightingSchedule(actuator=channel, name="Fotoperíodo")
+        form = LightingScheduleForm(request.POST, instance=item)
+        if form.is_valid(): form.save(); messages.success(request, "Programação da iluminação atualizada.")
+        else: messages.error(request, "Revise a programação da iluminação.")
+    elif action in {"irrigation_toggle", "irrigation_delete"}:
+        item = get_object_or_404(IrrigationSchedule, pk=request.POST.get("schedule_id"), actuator__device=controller)
+        if action == "irrigation_delete": item.delete(); messages.success(request, "Horário removido.")
+        else:
+            item.enabled = not item.enabled; item.save(update_fields=["enabled", "updated_at"]); messages.success(request, "Horário atualizado.")
+    return redirect("garden-configuration", garden_id=garden.pk)
+
+
+@login_required
+def garden_irrigation_schedule(request, garden_id, schedule_id):
+    garden = get_object_or_404(gardens_for_user(request.user), pk=garden_id)
+    can_manage = (
+        request.user.is_hortaviva_admin
+        or request.user.employee_role == User.EmployeeRole.TECHNICIAN
+        or request.user.memberships.filter(
+            organization=garden.organization, is_active=True,
+            role__in=[Membership.Role.OWNER, Membership.Role.MANAGER],
+        ).exists()
+    )
+    if not can_manage:
+        from django.core.exceptions import PermissionDenied
+        raise PermissionDenied
+    schedule = get_object_or_404(
+        IrrigationSchedule, pk=schedule_id, actuator__device__in=devices_for_garden(garden)
+    )
+    form = IrrigationScheduleForm(request.POST or None, instance=schedule)
+    if request.method == "POST" and form.is_valid():
+        form.save()
+        messages.success(request, "Horário de irrigação atualizado.")
+        return redirect("garden-configuration", garden_id=garden.pk)
+    return render(request, "customer/form.html", {"title": "Editar irrigação", "form": form})
 
 
 @login_required
@@ -379,6 +486,16 @@ def garden_gallery(request, garden_id):
 @login_required
 def garden_configuration(request, garden_id):
     garden = get_object_or_404(gardens_for_user(request.user), pk=garden_id)
+    if request.method == "POST" and not (
+        request.user.is_hortaviva_admin
+        or request.user.employee_role == User.EmployeeRole.TECHNICIAN
+        or request.user.memberships.filter(
+            organization=garden.organization, is_active=True,
+            role__in=[Membership.Role.OWNER, Membership.Role.MANAGER],
+        ).exists()
+    ):
+        from django.core.exceptions import PermissionDenied
+        raise PermissionDenied
     effective = effective_garden_configuration(garden)
     irrigation = effective.get("irrigation") if isinstance(effective.get("irrigation"), dict) else {}
     initial = {
@@ -394,7 +511,26 @@ def garden_configuration(request, garden_id):
         update_garden_configuration(garden=garden, user=request.user, cleaned_data=form.cleaned_data)
         messages.success(request, "Configurações operacionais atualizadas.")
         return redirect("garden-detail", garden_id=garden.pk)
-    return render(request, "shared/garden_configuration.html", {"garden": garden, "form": form, "has_overrides": bool(garden.automation_overrides)})
+    controller = devices_for_garden(garden).filter(kind=Device.Kind.CONTROLLER).prefetch_related(
+        "channels__irrigation_schedules", "channels__lighting_schedules"
+    ).first()
+    soil_channel = controller.channels.filter(metric="soil_moisture").first() if controller else None
+    pump_channel = controller.channels.filter(metric="pump_state").first() if controller else None
+    light_channel = controller.channels.filter(metric="light_state").first() if controller else None
+    calibration = soil_channel.configuration if soil_channel else {}
+    lighting_schedule = light_channel.lighting_schedules.first() if light_channel else None
+    lighting_hours = None
+    if lighting_schedule:
+        start = lighting_schedule.start_time.hour * 60 + lighting_schedule.start_time.minute
+        end = lighting_schedule.end_time.hour * 60 + lighting_schedule.end_time.minute
+        lighting_hours = ((end - start) % (24 * 60)) / 60
+    return render(request, "shared/garden_configuration.html", {
+        "garden": garden, "form": form, "has_overrides": bool(garden.automation_overrides),
+        "controller": controller, "soil_channel": soil_channel, "pump_channel": pump_channel,
+        "light_channel": light_channel, "irrigation_form": IrrigationScheduleForm(),
+        "lighting_form": LightingScheduleForm(instance=lighting_schedule), "lighting_hours": lighting_hours,
+        "calibration_form": SoilCalibrationForm(initial={"dry_raw": calibration.get("dry_raw", 850), "wet_raw": calibration.get("wet_raw", 350)}),
+    })
 
 
 @login_required
