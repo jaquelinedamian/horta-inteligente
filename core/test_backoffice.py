@@ -136,7 +136,7 @@ class BackofficeTests(TestCase):
         device = Device.objects.first()
         response = self.client.post(reverse("ops-credential-issue", args=[device.pk]))
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "não poderá ser consultado novamente")
+        self.assertContains(response, "não poderá ser exibido novamente")
         self.assertContains(response, str(device.id))
         module = GardenModule.objects.first()
         response = self.client.get(reverse("ops-module-qr", args=[module.pk]))

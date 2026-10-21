@@ -24,7 +24,11 @@ class ProductSimplificationTests(TestCase):
         self.model = GardenModel.objects.create(name="HortaViva P", code="hv-p", capacity=4, photos_per_day=4)
         self.garden = Garden.objects.create(organization=self.org, name="Horta", code="horta", garden_model=self.model, primary_technician=self.tech)
         device_model = DeviceModel.objects.create(name="ESP8266", code="esp-test")
-        self.device = Device.objects.create(organization=self.org, garden=self.garden, model=device_model, serial_number="ESP-1", name="Controlador")
+        self.device = Device.objects.create(
+            organization=self.org, garden=self.garden, model=device_model,
+            serial_number="ESP-1", name="Controlador", status=Device.Status.ONLINE,
+            last_seen_at=timezone.now(),
+        )
         self.pump = Channel.objects.create(device=self.device, key="pump-test", name="Bomba", kind=Channel.Kind.ACTUATOR, metric="pump_state", value_type=Channel.ValueType.BOOLEAN)
         self.light = Channel.objects.create(device=self.device, key="light-test", name="Luz", kind=Channel.Kind.ACTUATOR, metric="light_state", value_type=Channel.ValueType.BOOLEAN)
 

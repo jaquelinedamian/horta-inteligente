@@ -1,6 +1,6 @@
 <aside class="sidebar" id="sidebar">
   <a class="brand brand-light" href="{% url 'home' %}"><span class="brand-mark"><i class="bi bi-flower1"></i></span><span>Horta<span>Viva</span></span></a>
-  {% if '/gestao/' in request.path %}
+  {% if navigation_mode == 'admin' %}
     <nav class="backoffice-nav" aria-label="Navegação administrativa">
       <a class="sidebar-dashboard" href="{% url 'ops-dashboard' %}" data-nav-path="{% url 'ops-dashboard' %}"><i class="bi bi-grid"></i> Dashboard</a>
       <div class="sidebar-main-links">
@@ -22,7 +22,7 @@
       </div>
     </nav>
     <div class="sidebar-user"><span class="sidebar-avatar">{{ request.user.full_name|default:request.user.email|slice:':1' }}</span><div><strong>{{ request.user.full_name|default:request.user.email }}</strong><small>Administrador</small></div></div>
-  {% elif '/operacao/' in request.path %}<small>ÁREA DO TÉCNICO</small><nav><a href="{% url 'tech-dashboard' %}">Visão geral</a><a href="{% url 'tech-visits' %}">Visitas e agenda</a><a href="{% url 'customer-profile' %}">Perfil</a></nav>
-  {% else %}<small>MINHA HORTA</small><nav><a href="{% url 'customer-dashboard' %}">Dashboard</a><a href="{% url 'customer-section' 'garden' %}">Minha horta</a><a href="{% url 'customer-dashboard' %}#automacao">Automação</a><a href="{% url 'customer-history' %}">Histórico</a><a href="{% url 'customer-development' %}">Monitoramento</a><a href="{% url 'customer-section' 'garden' %}">Dispositivos</a><a href="{% url 'customer-profile' %}">Configurações</a><a href="{% url 'customer-section' 'subscription' %}">Assinatura</a><a href="{% url 'customer-support' %}">Suporte</a></nav>{% endif %}
+  {% elif navigation_mode == 'technician' %}<small>ÁREA DO TÉCNICO</small><nav><a href="{% url 'tech-dashboard' %}">Visão geral</a><a href="{% url 'tech-visits' %}">Visitas e agenda</a><a href="{% url 'customer-profile' %}">Perfil</a></nav>
+  {% else %}<small>MINHA HORTA</small><nav><a href="{% url 'customer-dashboard' %}">Dashboard</a><a href="{% url 'customer-section' 'garden' %}">Minha horta</a><a href="{% url 'customer-dashboard' %}#automacao">Automação</a><a href="{% url 'customer-history' %}">Histórico</a><a href="{% url 'customer-development' %}">Monitoramento</a><a href="{% url 'customer-section' 'devices' %}">Dispositivos</a><a href="{% url 'customer-profile' %}">Configurações</a><a href="{% url 'customer-section' 'subscription' %}">Assinatura</a><a href="{% url 'customer-support' %}">Suporte</a></nav>{% endif %}
   <form method="post" action="{% url 'logout' %}" class="sidebar-logout">{% csrf_token %}<button><i class="bi bi-box-arrow-left"></i> Sair</button></form>
 </aside><div class="sidebar-backdrop" data-sidebar-toggle></div>

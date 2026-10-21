@@ -1,0 +1,9 @@
+{% extends 'base.html' %}
+{% block title %}Dispositivos{% endblock %}
+{% block area_name %}Área do cliente{% endblock %}
+{% block content %}
+<div class="page-header"><div><span class="eyebrow">Equipamentos da sua horta</span><h1>Dispositivos</h1><p class="text-muted">Acompanhe conectividade e versão do controlador sem expor credenciais.</p></div></div>
+<div class="row g-4">
+{% for device in objects %}<div class="col-md-6"><article class="content-card h-100"><div class="d-flex justify-content-between gap-3"><div><span class="eyebrow">{{ device.get_kind_display }}</span><h2 class="h4 mt-2">{{ device.name }}</h2></div><span class="badge-soft">{% if device.is_online %}Online{% else %}Offline{% endif %}</span></div><dl class="row small mt-4 mb-0"><dt class="col-5">Horta</dt><dd class="col-7">{{ device.assigned_garden.name|default:'Não vinculada' }}</dd><dt class="col-5">Última comunicação</dt><dd class="col-7">{% if device.last_seen_at %}{{ device.last_seen_at|date:'d/m/Y H:i' }}{% else %}Sem comunicação{% endif %}</dd><dt class="col-5">Firmware</dt><dd class="col-7">{{ device.firmware_version|default:'Não informado' }}</dd></dl></article></div>{% empty %}<div class="col-12"><section class="content-card empty-state"><h2 class="h4">Nenhum dispositivo vinculado</h2><p class="text-muted">Os equipamentos aparecerão aqui depois da instalação.</p></section></div>{% endfor %}
+</div>
+{% endblock %}

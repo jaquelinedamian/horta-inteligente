@@ -1,4 +1,22 @@
+from accounts.models import Membership
+
 from .backoffice import BACKOFFICE_AREAS, SECTION_AREA
+
+
+def navigation_mode(request):
+    """Select the portal navigation from identity, never from a shared URL."""
+    user = request.user
+    if not user.is_authenticated:
+        return {"navigation_mode": None}
+    if user.is_hortaviva_admin:
+        mode = "admin"
+    elif user.employee_role == user.EmployeeRole.TECHNICIAN or user.memberships.filter(
+        is_active=True, role=Membership.Role.TECHNICIAN
+    ).exists():
+        mode = "technician"
+    else:
+        mode = "customer"
+    return {"navigation_mode": mode}
 
 
 def backoffice_navigation(request):

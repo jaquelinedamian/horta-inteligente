@@ -221,6 +221,7 @@ def _customer_context(request):
 @customer_required
 def customer_dashboard(request):
     org, gardens, devices = _customer_context(request); garden = gardens.order_by("name").first()
+    can_manage = request.membership.role in {Membership.Role.OWNER, Membership.Role.MANAGER}
     snapshot = garden_snapshot(garden) if garden else None
     device = next((item for item in (snapshot["devices"] if snapshot else []) if item.kind == Device.Kind.CONTROLLER), None)
     metrics = snapshot["metrics"] if snapshot else {}; schedule = None
@@ -239,16 +240,16 @@ def customer_dashboard(request):
     recent_photos = GardenPhoto.objects.filter(garden=garden)[:7] if garden else []
     overrides = garden.automation_overrides if garden and isinstance(garden.automation_overrides, dict) else {}
     configuration_origins = {section: "Personalizado" if section in overrides else "Padrão HortaViva" for section in ("irrigation", "lighting", "camera", "monitoring")}
-    return render(request, "customer/dashboard.html", {"organization": org, "gardens": gardens, "garden": garden, "snapshot": snapshot, "configuration": configuration, "configuration_origins": configuration_origins, "recent_photos": recent_photos, "has_overrides": bool(overrides), "has_garden": bool(garden), "active_subscription": active_subscription, "device": device, "has_telemetry": has_telemetry, "metrics": metrics, "schedule": schedule, "cycles": get_customer_cycles(org).filter(status=PlantingCycle.Status.ACTIVE)[:6], "next_visit": get_customer_visits(org).filter(scheduled_start__gte=timezone.now()).order_by("scheduled_start").first()})
+    return render(request, "customer/dashboard.html", {"organization": org, "gardens": gardens, "garden": garden, "snapshot": snapshot, "configuration": configuration, "configuration_origins": configuration_origins, "recent_photos": recent_photos, "has_overrides": bool(overrides), "has_garden": bool(garden), "active_subscription": active_subscription, "device": device, "has_telemetry": has_telemetry, "metrics": metrics, "schedule": schedule, "can_manage": can_manage, "cycles": get_customer_cycles(org).filter(status=PlantingCycle.Status.ACTIVE)[:6], "next_visit": get_customer_visits(org).filter(scheduled_start__gte=timezone.now()).order_by("scheduled_start").first()})
 
 
 @customer_required
 def customer_section(request, section):
     org, gardens, devices = _customer_context(request)
-    sections = {"garden": ("Minha horta", gardens), "crops": ("Minhas culturas", get_customer_cycles(org)), "alerts": ("Alertas", Alert.objects.filter(rule__organization=org).select_related("rule", "reading__channel")), "visits": ("Visitas", get_customer_visits(org)), "subscription": ("Assinatura", Subscription.objects.filter(organization=org).select_related("plan_version__plan").prefetch_related("plan_version__entitlements")), "payments": ("Pagamentos", Payment.objects.filter(subscription__organization=org).select_related("subscription__plan_version__plan"))}
+    sections = {"garden": ("Minha horta", gardens), "devices": ("Dispositivos", devices.select_related("garden", "model")), "crops": ("Minhas culturas", get_customer_cycles(org)), "alerts": ("Alertas", Alert.objects.filter(rule__organization=org).select_related("rule", "reading__channel")), "visits": ("Visitas", get_customer_visits(org)), "subscription": ("Assinatura", Subscription.objects.filter(organization=org).select_related("plan_version__plan").prefetch_related("plan_version__entitlements")), "payments": ("Pagamentos", Payment.objects.filter(subscription__organization=org).select_related("subscription__plan_version__plan"))}
     if section not in sections: raise Http404
     title, objects = sections[section]
-    context = {"title": title, "objects": objects, "organization": org}
+    context = {"title": title, "objects": objects, "organization": org, "can_manage": request.membership.role in {Membership.Role.OWNER, Membership.Role.MANAGER}}
     if section == "garden":
         panels = []
         for garden in gardens.select_related("garden_model", "address", "primary_technician"):
@@ -320,6 +321,11 @@ def customer_development(request):
 def device_action(request):
     from devices.services import queue_actuator_command
     channel = get_object_or_404(Channel.objects.select_related("device__garden"), id=request.POST.get("channel"))
+    next_url = request.POST.get("next", "")
+    if not url_has_allowed_host_and_scheme(
+        next_url, allowed_hosts={request.get_host()}, require_https=request.is_secure()
+    ):
+        next_url = reverse("post-login")
     try:
         queue_actuator_command(
             user=request.user, channel=channel, action=request.POST.get("action"),
@@ -327,12 +333,12 @@ def device_action(request):
         )
     except ConnectionError as exc:
         messages.error(request, str(exc))
-        return redirect(request.POST.get("next") or "customer-dashboard")
+        return redirect(next_url)
     except (ValueError, TypeError) as exc:
         messages.error(request, str(exc))
-        return redirect(request.POST.get("next") or "customer-dashboard")
+        return redirect(next_url)
     messages.info(request, "Enviando comando… A alteração será confirmada após o acknowledgement do controlador.")
-    return redirect(request.POST.get("next") or "customer-dashboard")
+    return redirect(next_url)
 
 
 @operations_required
