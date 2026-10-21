@@ -80,6 +80,21 @@ def garden_snapshot(garden):
                     candidates.append((candidate, schedule))
                     break
         next_irrigation = min(candidates, key=lambda item: item[0]) if candidates else None
+    next_lighting = None
+    if light_channel:
+        now = timezone.now()
+        candidates = []
+        for schedule in light_channel.lighting_schedules.filter(enabled=True):
+            local_now = now.astimezone(ZoneInfo(schedule.timezone))
+            for offset in range(8):
+                day = local_now.date() + timedelta(days=offset)
+                if day.weekday() not in schedule.days_of_week:
+                    continue
+                candidate = timezone.make_aware(datetime.combine(day, schedule.start_time), ZoneInfo(schedule.timezone))
+                if candidate > now:
+                    candidates.append((candidate, schedule))
+                    break
+        next_lighting = min(candidates, key=lambda item: item[0]) if candidates else None
     commands = {}
     for channel in actuator_channels:
         commands[channel.metric] = channel.commands.filter(status="succeeded").order_by("-acknowledged_at").first()
@@ -95,6 +110,7 @@ def garden_snapshot(garden):
         "pump_channel": pump_channel,
         "light_channel": light_channel,
         "next_irrigation": next_irrigation,
+        "next_lighting": next_lighting,
         "actuator_states": commands,
         "next_visit": garden.visits.filter(scheduled_start__gte=timezone.now(), status="scheduled").order_by("scheduled_start").first(),
         "latest_photo": GardenPhoto.objects.filter(garden=garden).first(),

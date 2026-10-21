@@ -1,5 +1,7 @@
 from django import forms
 from django.contrib.auth.forms import UserCreationForm
+from datetime import datetime, timedelta
+
 from django.utils import timezone
 
 from accounts.models import Address, User
@@ -35,6 +37,10 @@ class SupportTicketForm(StyledFormMixin, forms.ModelForm):
 
 
 class LightingScheduleForm(StyledFormMixin, forms.ModelForm):
+    duration_minutes = forms.IntegerField(
+        label="Tempo ligada (minutos)", min_value=1, max_value=1440,
+        help_text="De 1 minuto a 24 horas.",
+    )
     days_of_week = forms.TypedMultipleChoiceField(
         label="Dias", choices=tuple(enumerate(("Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"))),
         coerce=int, widget=forms.CheckboxSelectMultiple,
@@ -42,8 +48,23 @@ class LightingScheduleForm(StyledFormMixin, forms.ModelForm):
 
     class Meta:
         model = LightingSchedule
-        fields = ("start_time", "end_time", "days_of_week", "enabled")
-        widgets = {"start_time": forms.TimeInput(attrs={"type": "time"}), "end_time": forms.TimeInput(attrs={"type": "time"})}
+        fields = ("start_time", "duration_minutes", "days_of_week", "enabled")
+        widgets = {"start_time": forms.TimeInput(attrs={"type": "time"})}
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if self.instance and self.instance.pk and self.instance.start_time and self.instance.end_time:
+            start = self.instance.start_time.hour * 60 + self.instance.start_time.minute
+            end = self.instance.end_time.hour * 60 + self.instance.end_time.minute
+            self.initial.setdefault("duration_minutes", (end - start) % 1440 or 1440)
+
+    def save(self, commit=True):
+        item = super().save(commit=False)
+        base = datetime.combine(timezone.localdate(), self.cleaned_data["start_time"])
+        item.end_time = (base + timedelta(minutes=self.cleaned_data["duration_minutes"])).time()
+        if commit:
+            item.save()
+        return item
 
 
 class IrrigationScheduleForm(StyledFormMixin, forms.ModelForm):

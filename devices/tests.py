@@ -1,5 +1,5 @@
 import json
-from datetime import timedelta
+from datetime import time, timedelta
 
 from django.test import TestCase
 from django.urls import reverse
@@ -8,7 +8,7 @@ from django.utils import timezone
 from accounts.models import Organization
 from crops.models import Crop, CropCultivationProfile, Cultivar, PlantingCycle
 from gardens.models import Garden, GardenModule, ModuleInstallation, ModuleType
-from devices.models import Channel, Device, DeviceCommand, DeviceCredential, DeviceModel, GardenPhoto, IrrigationSchedule, TelemetryReading
+from devices.models import Channel, Device, DeviceCommand, DeviceCredential, DeviceModel, GardenPhoto, IrrigationSchedule, LightingSchedule, TelemetryReading
 
 
 class DeviceApiTests(TestCase):
@@ -209,6 +209,29 @@ class DeviceApiTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["soil_moisture"], {"dry_raw": 850, "wet_raw": 350})
         self.assertEqual(response.json()["irrigation"]["schedules"][0]["duration_seconds"], 10)
+
+    def test_configuration_rejects_device_id_from_another_controller(self):
+        response = self.client.get(
+            reverse("device_api:configuration"), HTTP_X_DEVICE_ID="00000000-0000-0000-0000-000000000000",
+            **self.headers,
+        )
+        self.assertEqual(response.status_code, 403)
+
+    def test_configuration_serializes_lighting_summary_and_overnight_duration(self):
+        light = self.device.channels.get(metric="light_state")
+        LightingSchedule.objects.create(
+            actuator=light, name="Noite", start_time=time(18), end_time=time(6),
+            days_of_week=[0, 2, 4], enabled=True,
+        )
+        response = self.client.get(
+            reverse("device_api:configuration"), HTTP_X_DEVICE_ID=str(self.device.id), **self.headers,
+        )
+        self.assertEqual(response.status_code, 200)
+        lighting = response.json()["lighting"]
+        self.assertEqual(lighting["times"], ["18:00"])
+        self.assertEqual(lighting["duration_seconds"], 43200)
+        self.assertEqual(lighting["duration_hours"], 12)
+        self.assertEqual(lighting["schedules"][0]["days"], [0, 2, 4])
 
     def test_configuration_api_never_returns_more_than_four_photos(self):
         self.garden.automation_overrides = {"camera": {"photos_per_day": 24}}

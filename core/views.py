@@ -227,7 +227,12 @@ def customer_dashboard(request):
     active_subscription = get_customer_subscription(org)
     if device:
         for channel in device.channels.filter(kind=Channel.Kind.SENSOR):
-            reading = channel.readings.order_by("-recorded_at").first(); metrics[channel.metric] = {"value": reading.decimal_value if reading else None, "unit": channel.unit}
+            reading = channel.readings.order_by("-recorded_at").first()
+            metrics[channel.metric] = {
+                "value": reading.decimal_value if reading else None,
+                "unit": channel.unit,
+                "recorded_at": reading.recorded_at if reading else None,
+            }
         schedule = LightingSchedule.objects.filter(actuator__device=device, enabled=True).first()
     has_telemetry = any(item.get("value") is not None for item in metrics.values())
     configuration = effective_garden_configuration(garden) if garden else {}
@@ -316,12 +321,16 @@ def device_action(request):
     from devices.services import queue_actuator_command
     channel = get_object_or_404(Channel.objects.select_related("device__garden"), id=request.POST.get("channel"))
     try:
-        queue_actuator_command(user=request.user, channel=channel, action=request.POST.get("action"))
+        queue_actuator_command(
+            user=request.user, channel=channel, action=request.POST.get("action"),
+            duration_seconds=request.POST.get("duration_seconds") or None,
+        )
     except ConnectionError as exc:
         messages.error(request, str(exc))
         return redirect(request.POST.get("next") or "customer-dashboard")
-    except ValueError:
-        raise Http404
+    except (ValueError, TypeError) as exc:
+        messages.error(request, str(exc))
+        return redirect(request.POST.get("next") or "customer-dashboard")
     messages.info(request, "Enviando comando… A alteração será confirmada após o acknowledgement do controlador.")
     return redirect(request.POST.get("next") or "customer-dashboard")
 
@@ -428,12 +437,19 @@ def garden_automation_update(request, garden_id):
             messages.success(request, "Horário de irrigação adicionado.")
         else:
             messages.error(request, "Não foi possível adicionar o horário de irrigação.")
-    elif action == "lighting_save":
+    elif action == "lighting_add":
         channel = get_object_or_404(controller.channels, metric="light_state")
-        item = channel.lighting_schedules.first() or LightingSchedule(actuator=channel, name="Fotoperíodo")
+        item = LightingSchedule(actuator=channel, name="Iluminação")
         form = LightingScheduleForm(request.POST, instance=item)
         if form.is_valid(): form.save(); messages.success(request, "Programação da iluminação atualizada.")
         else: messages.error(request, "Revise a programação da iluminação.")
+    elif action in {"lighting_toggle", "lighting_delete"}:
+        item = get_object_or_404(LightingSchedule, pk=request.POST.get("schedule_id"), actuator__device=controller)
+        if action == "lighting_delete": item.delete(); messages.success(request, "Programação removida.")
+        else:
+            item.enabled = not item.enabled
+            item.save(update_fields=["enabled", "updated_at"])
+            messages.success(request, "Programação atualizada.")
     elif action in {"irrigation_toggle", "irrigation_delete"}:
         item = get_object_or_404(IrrigationSchedule, pk=request.POST.get("schedule_id"), actuator__device=controller)
         if action == "irrigation_delete": item.delete(); messages.success(request, "Horário removido.")
@@ -465,6 +481,27 @@ def garden_irrigation_schedule(request, garden_id, schedule_id):
         messages.success(request, "Horário de irrigação atualizado.")
         return redirect("garden-configuration", garden_id=garden.pk)
     return render(request, "customer/form.html", {"title": "Editar irrigação", "form": form})
+
+
+@login_required
+def garden_lighting_schedule(request, garden_id, schedule_id):
+    garden = get_object_or_404(gardens_for_user(request.user), pk=garden_id)
+    can_manage = request.user.is_hortaviva_admin or request.user.employee_role == User.EmployeeRole.TECHNICIAN or request.user.memberships.filter(
+        organization=garden.organization, is_active=True,
+        role__in=[Membership.Role.OWNER, Membership.Role.MANAGER],
+    ).exists()
+    if not can_manage:
+        from django.core.exceptions import PermissionDenied
+        raise PermissionDenied
+    schedule = get_object_or_404(
+        LightingSchedule, pk=schedule_id, actuator__device__in=devices_for_garden(garden)
+    )
+    form = LightingScheduleForm(request.POST or None, instance=schedule)
+    if request.method == "POST" and form.is_valid():
+        form.save()
+        messages.success(request, "Programação da iluminação atualizada.")
+        return redirect("garden-configuration", garden_id=garden.pk)
+    return render(request, "customer/form.html", {"title": "Editar iluminação", "form": form})
 
 
 @login_required
@@ -528,7 +565,7 @@ def garden_configuration(request, garden_id):
         "garden": garden, "form": form, "has_overrides": bool(garden.automation_overrides),
         "controller": controller, "soil_channel": soil_channel, "pump_channel": pump_channel,
         "light_channel": light_channel, "irrigation_form": IrrigationScheduleForm(),
-        "lighting_form": LightingScheduleForm(instance=lighting_schedule), "lighting_hours": lighting_hours,
+        "lighting_form": LightingScheduleForm(), "lighting_hours": lighting_hours,
         "calibration_form": SoilCalibrationForm(initial={"dry_raw": calibration.get("dry_raw", 850), "wet_raw": calibration.get("wet_raw", 350)}),
     })
 

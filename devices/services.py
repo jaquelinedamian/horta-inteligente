@@ -157,7 +157,7 @@ def pending_commands(device, limit=20):
 
 
 @transaction.atomic
-def queue_actuator_command(*, user, channel, action):
+def queue_actuator_command(*, user, channel, action, duration_seconds=None):
     """Fila única e autorizada para comandos humanos de bomba e iluminação."""
     if channel.kind != Channel.Kind.ACTUATOR or channel.metric not in {"pump_state", "light_state"}:
         raise ValueError("canal de atuador inválido")
@@ -183,7 +183,9 @@ def queue_actuator_command(*, user, channel, action):
         if action not in {"on", "off", "irrigate"}:
             raise ValueError("ação inválida para a bomba")
         irrigation = effective_garden_configuration(garden).get("irrigation", {})
-        duration = int(irrigation.get("pump_duration_seconds") or irrigation.get("duration_seconds") or 10)
+        duration = int(duration_seconds or irrigation.get("pump_duration_seconds") or irrigation.get("duration_seconds") or 10)
+        if not 1 <= duration <= 300:
+            raise ValueError("o tempo de irrigação deve estar entre 1 e 300 segundos")
         turn_on = action in {"on", "irrigate"}
         payload = {
             "on": turn_on,
@@ -193,7 +195,13 @@ def queue_actuator_command(*, user, channel, action):
     else:
         if action not in {"on", "off"}:
             raise ValueError("a iluminação aceita ligar ou desligar")
-        payload = {"on": action == "on", "mode": "manual"}
+        turn_on = action == "on"
+        payload = {"on": turn_on, "mode": "manual"}
+        if turn_on and duration_seconds is not None:
+            duration = int(duration_seconds)
+            if not 60 <= duration <= 86400:
+                raise ValueError("o tempo de iluminação deve estar entre 1 minuto e 24 horas")
+            payload["duration_seconds"] = duration
     return DeviceCommand.objects.create(
         device=channel.device, channel=channel, command_type="set_state", payload=payload,
         idempotency_key=f"web:{user.pk}:{timezone.now().timestamp()}",

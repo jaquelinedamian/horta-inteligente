@@ -4,6 +4,12 @@ from collections.abc import Mapping
 from crops.models import PlantingCycle
 
 
+def lighting_duration_seconds(start_time, end_time):
+    start = start_time.hour * 3600 + start_time.minute * 60 + start_time.second
+    end = end_time.hour * 3600 + end_time.minute * 60 + end_time.second
+    return (end - start) % 86400 or 86400
+
+
 def safe_photos_per_day(value):
     if isinstance(value, bool):
         return 4
@@ -89,11 +95,15 @@ def effective_garden_configuration(garden):
                 }
                 for item in pump.irrigation_schedules.all().order_by("start_time")
             ]
-            irrigation = config.setdefault("irrigation", {})
-            irrigation["schedules"] = schedules
-            irrigation["enabled"] = any(item["enabled"] for item in schedules) if schedules else irrigation.get("enabled", False)
-            if schedules:
-                irrigation["times"] = [item["time"] for item in schedules if item["enabled"]]
+            if schedules or "irrigation" in config:
+                irrigation = config.setdefault("irrigation", {})
+                irrigation["schedules"] = schedules
+                irrigation["enabled"] = any(item["enabled"] for item in schedules) if schedules else irrigation.get("enabled", False)
+                if schedules:
+                    irrigation["times"] = [item["time"] for item in schedules if item["enabled"]]
+                    active = [item for item in schedules if item["enabled"]]
+                    if active:
+                        irrigation["duration_seconds"] = active[0]["duration_seconds"]
         light = controller.channels.filter(metric="light_state", is_enabled=True).first()
         if light:
             schedules = [
@@ -101,11 +111,18 @@ def effective_garden_configuration(garden):
                     "id": str(item.id), "start": item.start_time.strftime("%H:%M"),
                     "end": item.end_time.strftime("%H:%M"), "days": item.days_of_week,
                     "enabled": item.enabled,
+                    "duration_seconds": lighting_duration_seconds(item.start_time, item.end_time),
                 }
                 for item in light.lighting_schedules.all().order_by("start_time")
             ]
-            lighting = config.setdefault("lighting", {})
-            lighting["schedules"] = schedules
-            lighting["enabled"] = any(item["enabled"] for item in schedules)
+            if schedules or "lighting" in config:
+                lighting = config.setdefault("lighting", {})
+                lighting["schedules"] = schedules
+                lighting["enabled"] = any(item["enabled"] for item in schedules)
+                active = [item for item in schedules if item["enabled"]]
+                lighting["times"] = [item["start"] for item in active]
+                if active:
+                    lighting["duration_seconds"] = active[0]["duration_seconds"]
+                    lighting["duration_hours"] = active[0]["duration_seconds"] / 3600
     config["configuration_version"] = garden.updated_at.isoformat()
     return config
