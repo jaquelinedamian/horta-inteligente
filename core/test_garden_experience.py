@@ -6,6 +6,7 @@ from django.utils import timezone
 
 from accounts.models import Membership, Organization, User
 from devices.models import Channel, Device, DeviceCommand, DeviceCredential, DeviceModel, GardenPhoto, TelemetryReading
+from devices.selectors import garden_snapshot
 from gardens.configuration import effective_garden_configuration
 from gardens.models import Garden, GardenConfigurationEvent, GardenModel
 
@@ -169,13 +170,15 @@ class GardenExperienceTests(TestCase):
         for period in ("24h", "7d", "30d"):
             response = self.client.get(reverse("garden-reports", args=[legacy.pk]) + f"?period={period}")
             self.assertEqual(response.status_code, 200)
-            self.assertContains(response, "Sensor de umidade não configurado")
+            self.assertContains(response, "Sensor de umidade do solo não configurado")
 
-    def test_reports_temperature_humidity_irrigation_and_photos(self):
-        humidity = Channel.objects.create(device=self.device, key="humidity", name="Umidade", kind=Channel.Kind.SENSOR, metric="air_humidity", unit="%")
+    def test_reports_temperature_soil_moisture_pressure_irrigation_and_photos(self):
+        soil = self.device.channels.get(metric="soil_moisture")
+        pressure = self.device.channels.get(metric="air_pressure")
         now = timezone.now()
         TelemetryReading.objects.create(channel=self.temperature, recorded_at=now, decimal_value=25, idempotency_key="temp-report")
-        TelemetryReading.objects.create(channel=humidity, recorded_at=now, decimal_value=70, idempotency_key="humidity-report")
+        TelemetryReading.objects.create(channel=soil, recorded_at=now, decimal_value=70, idempotency_key="soil-report")
+        TelemetryReading.objects.create(channel=pressure, recorded_at=now, decimal_value=934.5, idempotency_key="pressure-report")
         DeviceCommand.objects.create(device=self.device, channel=self.pump, command_type="set_state", payload={"duration_seconds": 20}, idempotency_key="irrigation-report")
         GardenPhoto.objects.create(garden=self.garden, device=self.device, captured_at=now, image_data=b"x", byte_size=1)
         self.client.force_login(self.owner)
@@ -184,7 +187,23 @@ class GardenExperienceTests(TestCase):
         self.assertEqual(response.context["report"]["irrigation_count"], 1)
         self.assertEqual(response.context["report"]["photo_count"], 1)
         self.assertEqual(response.context["report"]["sensors"]["air_temperature"]["average"], 25)
-        self.assertEqual(response.context["report"]["sensors"]["air_humidity"]["average"], 70)
+        self.assertEqual(response.context["report"]["sensors"]["soil_moisture"]["average"], 70)
+        self.assertEqual(response.context["report"]["sensors"]["air_pressure"]["average"], 934.5)
+        self.assertNotIn("air_humidity", response.context["report"]["sensors"])
+
+    def test_snapshot_exposes_controller_sensor_metrics(self):
+        now = timezone.now()
+        soil = self.device.channels.get(metric="soil_moisture")
+        pressure = self.device.channels.get(metric="air_pressure")
+        TelemetryReading.objects.create(channel=self.temperature, recorded_at=now, decimal_value=24.3, idempotency_key="snapshot-temp")
+        TelemetryReading.objects.create(channel=soil, recorded_at=now, decimal_value=68, idempotency_key="snapshot-soil")
+        TelemetryReading.objects.create(channel=pressure, recorded_at=now, decimal_value=934.5, idempotency_key="snapshot-pressure")
+
+        metrics = garden_snapshot(self.garden)["metrics"]
+
+        self.assertEqual(float(metrics["air_temperature"]["value"]), 24.3)
+        self.assertEqual(float(metrics["soil_moisture"]["value"]), 68)
+        self.assertEqual(float(metrics["air_pressure"]["value"]), 934.5)
 
     def test_report_permission_is_scoped_and_admin_can_view_any(self):
         self.client.force_login(self.other)
@@ -221,10 +240,12 @@ class GardenExperienceTests(TestCase):
         self.device.last_seen_at = now
         self.device.status = Device.Status.ONLINE
         self.device.save(update_fields=["last_seen_at", "status", "updated_at"])
-        humidity = Channel.objects.create(device=self.device, key="humidity-ui", name="Umidade", kind=Channel.Kind.SENSOR, metric="air_humidity", unit="%")
+        soil = self.device.channels.get(metric="soil_moisture")
+        pressure = self.device.channels.get(metric="air_pressure")
         Channel.objects.create(device=self.device, key="light-ui", name="Luz", kind=Channel.Kind.ACTUATOR, metric="light_state")
         TelemetryReading.objects.create(channel=self.temperature, recorded_at=now, decimal_value=24, idempotency_key="temp-ui")
-        TelemetryReading.objects.create(channel=humidity, recorded_at=now, decimal_value=68, idempotency_key="humidity-ui")
+        TelemetryReading.objects.create(channel=soil, recorded_at=now, decimal_value=68, idempotency_key="soil-ui")
+        TelemetryReading.objects.create(channel=pressure, recorded_at=now, decimal_value=934.5, idempotency_key="pressure-ui")
         camera = Device.objects.create(organization=self.org, garden=self.garden, model=self.device.model, serial_number="EXPERIENCE-CAM", name="Câmera", kind=Device.Kind.CAMERA, status=Device.Status.ONLINE, last_seen_at=now)
         GardenPhoto.objects.create(garden=self.garden, device=camera, captured_at=now, image_data=b"photo", byte_size=5)
 

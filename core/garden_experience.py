@@ -62,7 +62,7 @@ def garden_report(garden, period):
     readings = TelemetryReading.objects.filter(channel__device__garden=garden, recorded_at__gte=since)
     trunc = TruncDay("recorded_at") if days == 30 else TruncHour("recorded_at")
     sensor_data = {}
-    for metric in ("air_temperature", "air_humidity"):
+    for metric in ("air_temperature", "soil_moisture", "air_pressure"):
         qs = readings.filter(channel__metric=metric)
         stats = qs.aggregate(average=Avg("decimal_value"), minimum=Min("decimal_value"), maximum=Max("decimal_value"))
         points = list(qs.annotate(bucket=trunc).values("bucket").annotate(value=Avg("decimal_value")).order_by("bucket"))

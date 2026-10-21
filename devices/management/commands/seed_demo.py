@@ -55,7 +55,7 @@ class Command(BaseCommand):
     def device_channels(self, device):
         specs = [
             ("air-temperature", "Temperatura do ar", Channel.Kind.SENSOR, "air_temperature", "°C", Channel.ValueType.DECIMAL, "I2C", {"component": "BME280"}),
-            ("air-humidity", "Umidade do ar", Channel.Kind.SENSOR, "air_humidity", "%RH", Channel.ValueType.DECIMAL, "I2C", {"component": "BME280"}),
+            ("soil-moisture", "Umidade do solo", Channel.Kind.SENSOR, "soil_moisture", "%", Channel.ValueType.DECIMAL, "A0", {"component": "analog_soil_sensor", "dry_raw": 850, "wet_raw": 350}),
             ("air-pressure", "Pressão atmosférica", Channel.Kind.SENSOR, "air_pressure", "hPa", Channel.ValueType.DECIMAL, "I2C", {"component": "BME280"}),
             ("water-level", "Nível do reservatório", Channel.Kind.SENSOR, "water_level", "%", Channel.ValueType.DECIMAL, "A0", {"component": "FD10", "adc_min": 0, "adc_max": 1023}),
             ("pump", "Bomba", Channel.Kind.ACTUATOR, "pump_state", "", Channel.ValueType.BOOLEAN, "D5", {"component": "relay_1ch", "active_low": True}),
@@ -123,10 +123,10 @@ class Command(BaseCommand):
             recorded_at = now - timedelta(hours=(points - 1 - point) * 2)
             day_fraction = (point % 12) / 12
             temperature = 24.5 + 3.5 * math.sin(day_fraction * math.tau)
-            humidity = 62 - 8 * math.sin(day_fraction * math.tau)
+            soil_moisture = 62 - 8 * math.sin(day_fraction * math.tau)
             pressure = 1010 + 8 * math.sin(point / 10)
             water = 100 - (point % 36) * 0.9
-            values = {"air-temperature": temperature, "air-humidity": humidity, "air-pressure": pressure, "water-level": water}
+            values = {"air-temperature": temperature, "soil-moisture": soil_moisture, "air-pressure": pressure, "water-level": water}
             for key, value in values.items():
                 TelemetryReading.objects.update_or_create(channel=channels[key], idempotency_key=f"demo-7d-{key}-{point}", defaults={"recorded_at": recorded_at, "decimal_value": round(value, 2), "quality": "good"})
 
