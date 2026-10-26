@@ -1,4 +1,5 @@
 import json
+from unittest.mock import patch
 from datetime import time, timedelta
 
 from django.test import TestCase
@@ -115,6 +116,31 @@ class DeviceApiTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 403)
+
+    def test_authentication_logs_safe_reason_for_existing_prefix_with_wrong_secret(self):
+        prefix = self.token.split(".", 1)[0]
+
+        with patch("devices.authentication.logger.warning") as warning:
+            response = self.client.get(
+                reverse("devices:commands"),
+                HTTP_AUTHORIZATION=f"Device {prefix}.segredo-incorreto",
+                HTTP_X_DEVICE_ID=str(self.device.id),
+            )
+
+        self.assertEqual(response.status_code, 401)
+        self.assertIn("secret_hash_mismatch", warning.call_args.args)
+        logged = " ".join(str(value) for value in warning.call_args.args)
+        self.assertIn(prefix, logged)
+        self.assertNotIn("segredo-incorreto", logged)
+
+    def test_authorization_scheme_is_case_insensitive(self):
+        response = self.client.get(
+            reverse("devices:commands"),
+            HTTP_AUTHORIZATION=f"device {self.token}",
+            HTTP_X_DEVICE_ID=str(self.device.id),
+        )
+
+        self.assertEqual(response.status_code, 200)
 
     def test_simplified_telemetry_validates_device_id(self):
         response = self.client.post(
