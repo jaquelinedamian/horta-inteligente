@@ -42,7 +42,7 @@ X4XSQRjbgbMEHMUfpIBvFSDJ3gyICh3WZlXi/EjJKSZp4A==
 
 #define TELEMETRY_INTERVAL_MS 60000UL
 #define HEARTBEAT_INTERVAL_MS 300000UL
-#define COMMAND_POLL_INTERVAL_MS 5000UL
+#define COMMAND_POLL_INTERVAL_MS 2000UL
 #define SAFE_PUMP_DURATION_MS 10000UL
 #define CONFIG_POLL_INTERVAL_MS 30000UL
 
@@ -182,9 +182,9 @@ void writeRelay(
 
   digitalWrite(
       pin,
-      (on == RELAY_ACTIVE_LOW)
-          ? LOW
-          : HIGH
+      RELAY_ACTIVE_LOW
+          ? (on ? LOW : HIGH)
+          : (on ? HIGH : LOW)
   );
 }
 
@@ -208,7 +208,10 @@ void setPump(bool on) {
   );
 }
 
-void setLamp(bool on) {
+void setLamp(
+    bool on,
+    const char* origin = "sistema"
+) {
 
   lampOn = on;
 
@@ -217,15 +220,14 @@ void setLamp(bool on) {
       on
   );
 
-  Serial.print(
-      F("Lampada: ")
-  );
-
-  Serial.println(
-      on
-          ? F("LIGADA")
-          : F("DESLIGADA")
-  );
+  Serial.println();
+  Serial.print(F("Lampada: "));
+  Serial.println(on ? F("LIGADA") : F("DESLIGADA"));
+  Serial.println(F("Pino: D6"));
+  Serial.print(F("Nivel GPIO: "));
+  Serial.println(on ? F("LOW") : F("HIGH"));
+  Serial.print(F("Origem: "));
+  Serial.println(origin);
 }
 
 // ============================================================
@@ -1064,20 +1066,15 @@ void pollCommands() {
           response
       );
 
+  Serial.printf(
+      "commands: HTTP %d\n",
+      status
+  );
+
   if (
       status
       != HTTP_CODE_OK
   ) {
-
-    if (
-        status >= 0
-    ) {
-
-      Serial.printf(
-          "commands: HTTP %d\n",
-          status
-      );
-    }
 
     return;
   }
@@ -1139,6 +1136,20 @@ void pollCommands() {
     uint32_t durationSeconds =
         command["payload"]["duration_seconds"]
         | 0UL;
+
+    Serial.println();
+    Serial.println(F("===== COMANDO RECEBIDO ====="));
+    Serial.print(F("ID: "));
+    Serial.println(id);
+    Serial.print(F("Canal: "));
+    Serial.println(channel);
+    Serial.print(F("Tipo: "));
+    Serial.println(type);
+    Serial.print(F("Estado solicitado: "));
+    Serial.println(on ? F("LIGAR") : F("DESLIGAR"));
+    Serial.print(F("Duracao: "));
+    Serial.println(durationSeconds);
+    Serial.println(F("============================"));
 
     // ----------------------------------------------------------
     // BOMBA
@@ -1210,8 +1221,28 @@ void pollCommands() {
     ) {
 
       setLamp(
-          on
+          on,
+          "plataforma"
       );
+
+      // Um comando manual recebido durante um minuto programado
+      // prevalece nesse minuto e nao e revertido pela automacao.
+      if (isTimeSynchronized()) {
+
+        time_t commandTime = time(nullptr);
+        struct tm commandLocal;
+        localtime_r(&commandTime, &commandLocal);
+
+        char commandBucket[18];
+        strftime(
+            commandBucket,
+            sizeof(commandBucket),
+            "%Y%m%d-%H:%M",
+            &commandLocal
+        );
+
+        lastLightingBucket = commandBucket;
+      }
 
       if (!on) {
 
@@ -1757,7 +1788,8 @@ void runOfflineAutomation() {
         );
 
     setLamp(
-        true
+        true,
+        "automacao"
     );
 
     lampStopAt =
@@ -1819,6 +1851,10 @@ void setup() {
       OUTPUT
   );
 
+  setPump(
+      false
+  );
+
   pinMode(
       LAMP_RELAY_PIN,
       OUTPUT
@@ -1826,12 +1862,9 @@ void setup() {
 
   // Os dois relés iniciam desligados.
   // A plataforma ou a programação salva decide quando ligar.
-  setPump(
-      false
-  );
-
   setLamp(
-      false
+      false,
+      "boot"
   );
 
   // SDA = D2
@@ -2012,7 +2045,8 @@ void loop() {
   ) {
 
     setLamp(
-        false
+        false,
+        "temporizador"
     );
 
     lampStopAt =
