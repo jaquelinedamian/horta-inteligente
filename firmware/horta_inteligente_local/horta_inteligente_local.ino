@@ -1285,6 +1285,8 @@ void pollCommands() {
 
     } else if (
         channel == "lamp"
+        ||
+        channel == "grow-light"
     ) {
 
       Serial.println(F("Executando comando da LAMPADA recebido pela plataforma..."));

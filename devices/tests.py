@@ -1,4 +1,6 @@
 import json
+import re
+from pathlib import Path
 from unittest.mock import patch
 from datetime import time, timedelta
 
@@ -10,6 +12,30 @@ from accounts.models import Organization
 from crops.models import Crop, CropCultivationProfile, Cultivar, PlantingCycle
 from gardens.models import Garden, GardenModule, ModuleInstallation, ModuleType
 from devices.models import Channel, Device, DeviceCommand, DeviceCredential, DeviceModel, GardenPhoto, IrrigationSchedule, LightingSchedule, TelemetryReading
+
+
+class FirmwareLightingCommandContractTests(TestCase):
+    def test_grow_light_set_state_on_is_accepted_and_acknowledged(self):
+        firmware = (
+            Path(__file__).resolve().parents[1]
+            / "firmware"
+            / "horta_inteligente_local"
+            / "horta_inteligente_local.ino"
+        ).read_text(encoding="utf-8")
+
+        self.assertRegex(
+            firmware,
+            re.compile(
+                r'channel\s*==\s*"lamp"\s*\|\|\s*channel\s*==\s*"grow-light"'
+            ),
+        )
+        self.assertRegex(
+            firmware,
+            re.compile(
+                r'setLamp\s*\(\s*on\s*\).*?acknowledge\s*\(\s*id\s*,\s*true',
+                re.DOTALL,
+            ),
+        )
 
 
 class DeviceApiTests(TestCase):
