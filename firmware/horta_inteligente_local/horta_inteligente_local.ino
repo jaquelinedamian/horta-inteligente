@@ -513,6 +513,11 @@ bool beginHttp(
       "application/json"
   );
 
+  http.addHeader(
+      "X-Device-ID",
+      DEVICE_ID
+  );
+
   return true;
 }
 
@@ -1044,7 +1049,7 @@ void acknowledge(
       );
 
   Serial.printf(
-      "ack: HTTP %d\n",
+      "ACK HTTP: %d\n",
       status
   );
 }
@@ -1054,6 +1059,9 @@ void acknowledge(
 // ============================================================
 
 void pollCommands() {
+
+  Serial.println();
+  Serial.println(F("===== POLL COMMANDS ====="));
 
   String response;
 
@@ -1067,9 +1075,12 @@ void pollCommands() {
       );
 
   Serial.printf(
-      "commands: HTTP %d\n",
+      "HTTP status: %d\n",
       status
   );
+
+  Serial.print(F("Resposta: "));
+  Serial.println(response);
 
   if (
       status
@@ -1081,20 +1092,29 @@ void pollCommands() {
 
   JsonDocument doc;
 
-  if (
+  DeserializationError jsonError =
       deserializeJson(
           doc,
           response
-      )
-  ) {
+      );
+
+  if (jsonError) {
+
+    Serial.print(F("JSON invalido: "));
+    Serial.println(jsonError.c_str());
 
     return;
   }
 
+  JsonArray commands =
+      doc["commands"].as<JsonArray>();
+
+  Serial.print(F("Quantidade de comandos: "));
+  Serial.println(commands.size());
+
   for (
       JsonObject command :
-      doc["commands"]
-          .as<JsonArray>()
+      commands
   ) {
 
     String id =
@@ -1141,13 +1161,15 @@ void pollCommands() {
     Serial.println(F("===== COMANDO RECEBIDO ====="));
     Serial.print(F("ID: "));
     Serial.println(id);
-    Serial.print(F("Canal: "));
+    Serial.print(F("channel: "));
     Serial.println(channel);
-    Serial.print(F("Tipo: "));
+    Serial.print(F("type: "));
     Serial.println(type);
-    Serial.print(F("Estado solicitado: "));
+    Serial.print(F("payload.on: "));
+    Serial.println(on ? F("true") : F("false"));
+    Serial.print(F("Estado: "));
     Serial.println(on ? F("LIGAR") : F("DESLIGAR"));
-    Serial.print(F("Duracao: "));
+    Serial.print(F("duration_seconds: "));
     Serial.println(durationSeconds);
     Serial.println(F("============================"));
 
@@ -1219,6 +1241,8 @@ void pollCommands() {
         ||
         channel == "grow-light"
     ) {
+
+      Serial.println(F("Executando comando da plataforma..."));
 
       setLamp(
           on,

@@ -22,6 +22,10 @@ class DeviceApiTests(TestCase):
         self.actuator = self.device.channels.get(key="pump")
         _, self.token = DeviceCredential.issue(self.device)
         self.headers = {"HTTP_AUTHORIZATION": f"Device {self.token}"}
+        self.command_headers = {
+            **self.headers,
+            "HTTP_X_DEVICE_ID": str(self.device.id),
+        }
 
     def test_credentials_are_required(self):
         response = self.client.get(reverse("devices:commands"))
@@ -66,17 +70,51 @@ class DeviceApiTests(TestCase):
             device=self.device, channel=self.actuator, command_type="set_state",
             payload={"on": True}, idempotency_key="pump-on-1", expires_at=timezone.now() + timedelta(minutes=5),
         )
-        response = self.client.get(reverse("devices:commands"), **self.headers)
+        response = self.client.get(reverse("devices:commands"), **self.command_headers)
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["commands"][0]["id"], str(command.id))
         response = self.client.post(
             reverse("devices:acknowledge-command", args=[command.id]),
             json.dumps({"status": "succeeded", "result": {"relay": True}}),
-            content_type="application/json", **self.headers,
+            content_type="application/json", **self.command_headers,
         )
         self.assertEqual(response.status_code, 200)
         command.refresh_from_db()
         self.assertEqual(command.status, DeviceCommand.Status.SUCCEEDED)
+
+    def test_light_command_uses_firmware_contract_and_acknowledges_lamp_state(self):
+        light = self.device.channels.get(metric="light_state")
+        command = DeviceCommand.objects.create(
+            device=self.device, channel=light, command_type="set_state",
+            payload={"on": False}, idempotency_key="lamp-off-1",
+            expires_at=timezone.now() + timedelta(minutes=5),
+        )
+
+        response = self.client.get(reverse("devices:commands"), **self.command_headers)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["commands"][0]["channel"], "lamp")
+        self.assertEqual(response.json()["commands"][0]["type"], "set_state")
+        self.assertFalse(response.json()["commands"][0]["payload"]["on"])
+
+        response = self.client.post(
+            reverse("devices:acknowledge-command", args=[command.id]),
+            json.dumps({"status": "succeeded", "result": {"lamp": False}}),
+            content_type="application/json", **self.command_headers,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        command.refresh_from_db()
+        self.assertEqual(command.result["lamp"], False)
+
+    def test_commands_reject_token_and_device_id_mismatch(self):
+        response = self.client.get(
+            reverse("devices:commands"),
+            HTTP_AUTHORIZATION=f"Device {self.token}",
+            HTTP_X_DEVICE_ID="00000000-0000-0000-0000-000000000000",
+        )
+
+        self.assertEqual(response.status_code, 403)
 
     def test_simplified_telemetry_validates_device_id(self):
         response = self.client.post(

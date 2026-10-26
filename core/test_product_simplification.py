@@ -5,7 +5,7 @@ from django.utils import timezone
 
 from accounts.models import Membership, Organization, User
 from crops.models import Crop, Cultivar, PlantingCycle
-from devices.models import Channel, Device, DeviceModel
+from devices.models import Channel, Device, DeviceCommand, DeviceModel
 from devices.services import queue_actuator_command
 from gardens.configuration import effective_garden_configuration
 from gardens.models import Garden, GardenModel, GardenModule, ModuleType
@@ -42,6 +42,26 @@ class ProductSimplificationTests(TestCase):
         self.assertFalse(queue_actuator_command(user=self.admin, channel=self.light, action="off").payload["on"])
         with self.assertRaises(PermissionDenied):
             queue_actuator_command(user=self.other, channel=self.pump, action="irrigate")
+
+    def test_light_buttons_persist_set_state_commands(self):
+        self.client.force_login(self.owner)
+        url = reverse("device-action")
+
+        response = self.client.post(url, {
+            "channel": str(self.light.id), "action": "on", "next": reverse("customer-dashboard"),
+        })
+        self.assertEqual(response.status_code, 302)
+        command = DeviceCommand.objects.get(channel=self.light)
+        self.assertEqual(command.command_type, "set_state")
+        self.assertEqual(command.payload["on"], True)
+
+        response = self.client.post(url, {
+            "channel": str(self.light.id), "action": "off", "next": reverse("customer-dashboard"),
+        })
+        self.assertEqual(response.status_code, 302)
+        command = DeviceCommand.objects.filter(channel=self.light).latest("created_at")
+        self.assertEqual(command.command_type, "set_state")
+        self.assertEqual(command.payload["on"], False)
 
     def test_employee_admin_has_global_advanced_access(self):
         self.client.force_login(self.admin)

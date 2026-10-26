@@ -85,16 +85,26 @@ def heartbeat(request):
 @require_GET
 @device_required
 def commands(request):
-    items = pending_commands(request.device)
-    return JsonResponse({"commands": [
-        {
-            "id": str(command.id),
-            "channel": command.channel.key if command.channel else None,
-            "type": command.command_type,
-            "payload": command.payload,
-            "expires_at": command.expires_at.isoformat() if command.expires_at else None,
-        } for command in items
-    ]})
+    try:
+        validate_device_id(request)
+        items = pending_commands(request.device)
+        return JsonResponse({"commands": [
+            {
+                "id": str(command.id),
+                "channel": (
+                    "lamp" if command.channel and command.channel.metric == "light_state"
+                    else "pump" if command.channel and command.channel.metric == "pump_state"
+                    else command.channel.key if command.channel else None
+                ),
+                "type": command.command_type,
+                "payload": command.payload,
+                "expires_at": command.expires_at.isoformat() if command.expires_at else None,
+            } for command in items
+        ]})
+    except PermissionError as exc:
+        return JsonResponse({"error": "device_mismatch", "detail": str(exc)}, status=403)
+    except ValueError as exc:
+        return api_error(exc)
 
 
 @csrf_exempt
@@ -103,6 +113,7 @@ def commands(request):
 @transaction.atomic
 def acknowledge_command(request, command_id):
     try:
+        validate_device_id(request)
         payload = json_body(request)
         status = payload.get("status")
         allowed = {DeviceCommand.Status.SUCCEEDED, DeviceCommand.Status.FAILED}
@@ -118,6 +129,8 @@ def acknowledge_command(request, command_id):
         command.acknowledged_at = timezone.now()
         command.save(update_fields=["status", "result", "acknowledged_at", "updated_at"])
         return JsonResponse({"id": str(command.id), "status": command.status})
+    except PermissionError as exc:
+        return JsonResponse({"error": "device_mismatch", "detail": str(exc)}, status=403)
     except ValueError as exc:
         return api_error(exc)
 
