@@ -417,6 +417,94 @@ void printRequestError(
   );
 }
 
+String normalizedDeviceToken() {
+  String token = String(DEVICE_API_TOKEN);
+  token.trim();
+  return token;
+}
+
+bool hasValidTokenFormat(const String& token) {
+  int dotIndex = token.indexOf('.');
+
+  if (
+      dotIndex <= 0
+      || dotIndex != token.lastIndexOf('.')
+      || dotIndex == token.length() - 1
+  ) {
+    return false;
+  }
+
+  for (unsigned int index = 0; index < token.length(); index++) {
+    char value = token.charAt(index);
+    bool allowed =
+        isAlphaNumeric(value)
+        || value == '-'
+        || value == '_'
+        || value == '.';
+
+    if (!allowed) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+void printAuthDiagnostics(
+    const String& token,
+    const String& endpoint
+) {
+  int dotIndex = token.indexOf('.');
+  String prefix =
+      dotIndex > 0
+          ? token.substring(0, dotIndex)
+          : String("invalido");
+
+  Serial.println();
+  Serial.println(F("===== AUTH DIAGNOSTICS ====="));
+  Serial.println(F("AUTH SCHEME: Device"));
+  Serial.print(F("TOKEN PREFIX: "));
+  Serial.println(prefix);
+  Serial.print(F("TOKEN LENGTH: "));
+  Serial.println(token.length());
+  Serial.print(F("TOKEN HAS DOT: "));
+  Serial.println(dotIndex > 0 ? F("SIM") : F("NAO"));
+  Serial.print(F("TOKEN FORMAT: "));
+  Serial.println(hasValidTokenFormat(token) ? F("VALIDO") : F("INVALIDO"));
+  Serial.print(F("DEVICE ID: "));
+  Serial.println(DEVICE_ID);
+  Serial.print(F("ENDPOINT: "));
+  Serial.println(endpoint);
+  Serial.print(F("AUTH HEADER LENGTH: "));
+  Serial.println(token.length() + strlen("Device "));
+  Serial.println(F("============================"));
+}
+
+bool addDeviceHeaders(
+    HTTPClient& http,
+    const String& endpoint
+) {
+  String token = normalizedDeviceToken();
+
+  printAuthDiagnostics(token, endpoint);
+
+  if (!hasValidTokenFormat(token)) {
+    Serial.println(
+        F("Requisicao cancelada: formato da credencial invalido")
+    );
+    return false;
+  }
+
+  String authorization = String("Device ") + token;
+
+  http.addHeader("Authorization", authorization);
+  http.addHeader("Content-Type", "application/json");
+  http.addHeader("Accept", "application/json");
+  http.addHeader("X-Device-ID", DEVICE_ID);
+
+  return true;
+}
+
 bool beginHttp(
     HTTPClient& http,
     WiFiClient& plain,
@@ -500,18 +588,7 @@ bool beginHttp(
       70000
   );
 
-  http.addHeader(
-      "Authorization",
-      String("Device ")
-          + DEVICE_API_TOKEN
-  );
-
-  http.addHeader(
-      "Content-Type",
-      "application/json"
-  );
-
-  return true;
+  return addDeviceHeaders(http, url);
 }
 
 int apiRequest(
@@ -1467,16 +1544,10 @@ void fetchConfiguration() {
       70000
   );
 
-  http.addHeader(
-      "Authorization",
-      String("Device ")
-          + DEVICE_API_TOKEN
-  );
-
-  http.addHeader(
-      "X-Device-ID",
-      DEVICE_ID
-  );
+  if (!addDeviceHeaders(http, url)) {
+    http.end();
+    return;
+  }
 
   int status =
       http.GET();
