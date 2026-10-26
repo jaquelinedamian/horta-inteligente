@@ -1,3 +1,4 @@
+import json
 import secrets
 from datetime import timedelta
 
@@ -8,7 +9,7 @@ from django.utils import timezone
 
 from accounts.models import Membership, Organization, User
 from crops.models import Crop
-from devices.models import Channel, Device, DeviceModel
+from devices.models import Channel, Device, DeviceCredential, DeviceModel
 from gardens.models import Garden, GardenModule, ModuleType
 from operations.models import Visit, WorkOrder
 from subscriptions.models import Plan, PlanVersion, Subscription
@@ -144,3 +145,61 @@ class BackofficeTests(TestCase):
         self.assertContains(response, f"hortaviva:module:{module.pk}")
         download = self.client.get(reverse("ops-module-qr", args=[module.pk]) + "?download=1")
         self.assertEqual(download["Content-Type"], "image/png")
+
+    def test_admin_issued_controller_credential_authenticates_device_apis(self):
+        organization = Organization.objects.first()
+        garden = Garden.objects.create(
+            organization=organization,
+            name="Horta credencial integrada",
+            code="credential-integration",
+        )
+        device = Device.objects.create(
+            organization=organization,
+            garden=garden,
+            model=DeviceModel.objects.first(),
+            serial_number="CREDENTIAL-INTEGRATION",
+            name="Modulo P",
+            kind=Device.Kind.CONTROLLER,
+        )
+
+        issue_response = self.client.post(
+            reverse("ops-credential-issue", args=[device.pk]),
+            {"name": "teste integrado"},
+        )
+
+        self.assertEqual(issue_response.status_code, 200)
+        token = issue_response.context["token"]
+        credential = issue_response.context["credential"]
+        prefix, secret = token.split(".", 1)
+
+        self.assertEqual(prefix, credential.key_prefix)
+        self.assertEqual(
+            credential.secret_hash,
+            DeviceCredential.hash_secret(secret),
+        )
+        self.assertTrue(credential.is_active)
+        self.assertEqual(credential.device_id, device.id)
+
+        headers = {
+            "HTTP_AUTHORIZATION": f"Device {token}",
+            "HTTP_X_DEVICE_ID": str(device.id),
+        }
+
+        commands = self.client.get(reverse("devices:commands"), **headers)
+        self.assertEqual(commands.status_code, 200)
+
+        config = self.client.get(reverse("device_api:configuration"), **headers)
+        self.assertEqual(config.status_code, 200)
+
+        telemetry = self.client.post(
+            reverse("devices:telemetry"),
+            json.dumps({"readings": [{
+                "channel": "air-temperature",
+                "value": 23.5,
+                "recorded_at": timezone.now().isoformat(),
+                "idempotency_key": "admin-issued-credential-test",
+            }]}),
+            content_type="application/json",
+            **headers,
+        )
+        self.assertEqual(telemetry.status_code, 202)
