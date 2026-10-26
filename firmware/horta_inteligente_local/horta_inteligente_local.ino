@@ -16,8 +16,8 @@
 // ============================================================
 
 #define API_BASE_URL "https://horta-inteligente.onrender.com"
-#define DEVICE_API_TOKEN "de31af7b5509.8kKmDGjGf89_nTnHj3nYGsBq_lUuuSLeNySVV1rkEU4"
-#define DEVICE_ID "9e14eed7-85aa-4173-b3a8-e0aa55bfdbe2"
+#define DEVICE_API_TOKEN "feede620f1a8.EWgxQhHqUibzv3yt6_mrQ5od0Mj4NoYaoKUzHXdA59Q"
+#define DEVICE_ID "9e14eed7-85aa-4173-b3a8-e0ad5bfdbe2e"
 
 static const char HTTPS_ROOT_CA[] = R"PEM(
 -----BEGIN CERTIFICATE-----
@@ -62,7 +62,7 @@ constexpr uint8_t SOIL_MOISTURE_PIN = A0;
 constexpr bool RELAY_ACTIVE_LOW = true;
 
 constexpr char FIRMWARE_VERSION[] =
-    "horta-esp8266-1.3.0";
+    "horta-esp8266-1.3.1-platform-lamp";
 
 // ============================================================
 // SENSOR / ESTADO
@@ -182,9 +182,9 @@ void writeRelay(
 
   digitalWrite(
       pin,
-      RELAY_ACTIVE_LOW
-          ? (on ? LOW : HIGH)
-          : (on ? HIGH : LOW)
+      (on == RELAY_ACTIVE_LOW)
+          ? LOW
+          : HIGH
   );
 }
 
@@ -208,10 +208,7 @@ void setPump(bool on) {
   );
 }
 
-void setLamp(
-    bool on,
-    const char* origin = "sistema"
-) {
+void setLamp(bool on) {
 
   lampOn = on;
 
@@ -220,14 +217,15 @@ void setLamp(
       on
   );
 
-  Serial.println();
-  Serial.print(F("Lampada: "));
-  Serial.println(on ? F("LIGADA") : F("DESLIGADA"));
-  Serial.println(F("Pino: D6"));
-  Serial.print(F("Nivel GPIO: "));
-  Serial.println(on ? F("LOW") : F("HIGH"));
-  Serial.print(F("Origem: "));
-  Serial.println(origin);
+  Serial.print(
+      F("Lampada: ")
+  );
+
+  Serial.println(
+      on
+          ? F("LIGADA")
+          : F("DESLIGADA")
+  );
 }
 
 // ============================================================
@@ -511,11 +509,6 @@ bool beginHttp(
   http.addHeader(
       "Content-Type",
       "application/json"
-  );
-
-  http.addHeader(
-      "X-Device-ID",
-      DEVICE_ID
   );
 
   return true;
@@ -963,9 +956,6 @@ void sendHeartbeat() {
   doc["diagnostics"]["lamp_on"] =
       lampOn;
 
-  doc["diagnostics"]["local_ip"] =
-      WiFi.localIP().toString();
-
   // NOVO
   doc["diagnostics"]["soil_moisture_raw"] =
       soilMoistureRaw;
@@ -1049,7 +1039,7 @@ void acknowledge(
       );
 
   Serial.printf(
-      "ACK HTTP: %d\n",
+      "ack: HTTP %d\n",
       status
   );
 }
@@ -1059,9 +1049,6 @@ void acknowledge(
 // ============================================================
 
 void pollCommands() {
-
-  Serial.println();
-  Serial.println(F("===== POLL COMMANDS ====="));
 
   String response;
 
@@ -1074,47 +1061,40 @@ void pollCommands() {
           response
       );
 
-  Serial.printf(
-      "HTTP status: %d\n",
-      status
-  );
-
-  Serial.print(F("Resposta: "));
-  Serial.println(response);
-
   if (
       status
       != HTTP_CODE_OK
   ) {
+
+    if (
+        status >= 0
+    ) {
+
+      Serial.printf(
+          "commands: HTTP %d\n",
+          status
+      );
+    }
 
     return;
   }
 
   JsonDocument doc;
 
-  DeserializationError jsonError =
+  if (
       deserializeJson(
           doc,
           response
-      );
-
-  if (jsonError) {
-
-    Serial.print(F("JSON invalido: "));
-    Serial.println(jsonError.c_str());
+      )
+  ) {
 
     return;
   }
 
-  JsonArray commands =
-      doc["commands"].as<JsonArray>();
-
-  Serial.print(F("Quantidade de comandos: "));
-  Serial.println(commands.size());
-
   for (
       JsonObject command :
-      commands
+      doc["commands"]
+          .as<JsonArray>()
   ) {
 
     String id =
@@ -1149,6 +1129,12 @@ void pollCommands() {
         command["payload"]["on"]
             .as<bool>();
 
+    // Diagnostico: mostra no Serial todo comando recebido da plataforma.
+    Serial.print(F("Comando da plataforma | canal: "));
+    Serial.print(channel);
+    Serial.print(F(" | estado: "));
+    Serial.println(on ? F("LIGAR") : F("DESLIGAR"));
+
     String mode =
         command["payload"]["mode"]
         | "";
@@ -1156,22 +1142,6 @@ void pollCommands() {
     uint32_t durationSeconds =
         command["payload"]["duration_seconds"]
         | 0UL;
-
-    Serial.println();
-    Serial.println(F("===== COMANDO RECEBIDO ====="));
-    Serial.print(F("ID: "));
-    Serial.println(id);
-    Serial.print(F("channel: "));
-    Serial.println(channel);
-    Serial.print(F("type: "));
-    Serial.println(type);
-    Serial.print(F("payload.on: "));
-    Serial.println(on ? F("true") : F("false"));
-    Serial.print(F("Estado: "));
-    Serial.println(on ? F("LIGAR") : F("DESLIGAR"));
-    Serial.print(F("duration_seconds: "));
-    Serial.println(durationSeconds);
-    Serial.println(F("============================"));
 
     // ----------------------------------------------------------
     // BOMBA
@@ -1238,35 +1208,16 @@ void pollCommands() {
 
     } else if (
         channel == "lamp"
-        ||
-        channel == "grow-light"
     ) {
 
-      Serial.println(F("Executando comando da plataforma..."));
+      Serial.println(F("Executando comando da LAMPADA recebido pela plataforma..."));
 
       setLamp(
-          on,
-          "plataforma"
+          on
       );
 
-      // Um comando manual recebido durante um minuto programado
-      // prevalece nesse minuto e nao e revertido pela automacao.
-      if (isTimeSynchronized()) {
-
-        time_t commandTime = time(nullptr);
-        struct tm commandLocal;
-        localtime_r(&commandTime, &commandLocal);
-
-        char commandBucket[18];
-        strftime(
-            commandBucket,
-            sizeof(commandBucket),
-            "%Y%m%d-%H:%M",
-            &commandLocal
-        );
-
-        lastLightingBucket = commandBucket;
-      }
+      Serial.print(F("Estado fisico solicitado para a lampada no D6: "));
+      Serial.println(on ? F("LIGADA") : F("DESLIGADA"));
 
       if (!on) {
 
@@ -1812,8 +1763,7 @@ void runOfflineAutomation() {
         );
 
     setLamp(
-        true,
-        "automacao"
+        true
     );
 
     lampStopAt =
@@ -1875,10 +1825,6 @@ void setup() {
       OUTPUT
   );
 
-  setPump(
-      false
-  );
-
   pinMode(
       LAMP_RELAY_PIN,
       OUTPUT
@@ -1886,9 +1832,12 @@ void setup() {
 
   // Os dois relés iniciam desligados.
   // A plataforma ou a programação salva decide quando ligar.
+  setPump(
+      false
+  );
+
   setLamp(
-      false,
-      "boot"
+      false
   );
 
   // SDA = D2
@@ -2016,6 +1965,12 @@ void setup() {
   Serial.println(
       F("Telemetria dos sensores: envio a cada 60 segundos")
   );
+  Serial.println(
+      F("Controle da lampada: plataforma -> canal lamp -> D6")
+  );
+  Serial.println(
+      F("Comandos da plataforma: consulta a cada 2 segundos")
+  );
 }
 
 // ============================================================
@@ -2069,8 +2024,7 @@ void loop() {
   ) {
 
     setLamp(
-        false,
-        "temporizador"
+        false
     );
 
     lampStopAt =
