@@ -28,6 +28,8 @@
     catch (_) { return false; }
   }).forEach((form) => form.addEventListener('submit', async (event) => {
     event.preventDefault();
+    if (form.dataset.commandPending === 'true') return;
+    form.dataset.commandPending = 'true';
     const data = new FormData(form);
     data.set('client_clicked_at', new Date().toISOString());
     if (event.submitter?.name) data.set(event.submitter.name, event.submitter.value);
@@ -56,6 +58,7 @@
       message.classList.remove('text-muted');
       message.classList.add('text-danger');
       buttons.forEach((button) => { button.disabled = false; });
+      form.dataset.commandPending = 'false';
     }
   }));
 })();

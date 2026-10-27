@@ -210,6 +210,21 @@ def queue_actuator_command(*, user, channel, action, duration_seconds=None):
             if not 60 <= duration <= 86400:
                 raise ValueError("o tempo de iluminação deve estar entre 1 minuto e 24 horas")
             payload["duration_seconds"] = duration
+    # Bloqueia o canal durante a verificação para impedir duplicatas mesmo
+    # quando dois requests chegam simultaneamente a processos diferentes.
+    channel = Channel.objects.select_for_update().get(pk=channel.pk)
+    existing = DeviceCommand.objects.filter(
+        device=channel.device, channel=channel, command_type="set_state",
+        status__in=[DeviceCommand.Status.PENDING, DeviceCommand.Status.DELIVERED],
+        payload__on=bool(payload.get("on")),
+    ).order_by("created_at").first()
+    if existing:
+        logger.info(
+            "manual_command_deduplicated command_id=%s device_id=%s channel=%s state=%s",
+            existing.id, channel.device_id, channel.key, bool(payload.get("on")),
+        )
+        return existing
+
     command = DeviceCommand.objects.create(
         device=channel.device, channel=channel, command_type="set_state", payload=payload,
         idempotency_key=f"web:{user.pk}:{timezone.now().timestamp()}",

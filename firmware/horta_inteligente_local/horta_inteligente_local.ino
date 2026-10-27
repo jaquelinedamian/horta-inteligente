@@ -562,8 +562,16 @@ bool beginHttp(
             HTTPS_ROOT_CA
         );
 
+    // Reaproveita os parâmetros da sessão TLS entre requests. A validação
+    // do certificado permanece ativa, mas handshakes seguintes ficam menores.
+    static BearSSL::Session tlsSession;
+
     secure.setTrustAnchors(
         &trustAnchor
+    );
+
+    secure.setSession(
+        &tlsSession
     );
 
     if (
@@ -644,7 +652,12 @@ int apiRequest(
     return -2;
   }
 
+  const uint32_t httpsSetupFinishedAt = millis();
+
   http.setTimeout(requestTimeoutMs(channel));
+
+  const char* responseHeaders[] = {"Server-Timing"};
+  http.collectHeaders(responseHeaders, 1);
 
   int status;
 
@@ -667,6 +680,8 @@ int apiRequest(
         );
   }
 
+  const uint32_t responseHeadersAt = millis();
+
   if (
       status > 0
   ) {
@@ -684,6 +699,10 @@ int apiRequest(
     );
   }
 
+  const uint32_t responseBodyAt = millis();
+
+  String serverTiming = http.header("Server-Timing");
+
   http.end();
 
   Serial.printf(
@@ -691,6 +710,15 @@ int apiRequest(
       channel,
       static_cast<unsigned long>(millis() - requestStartedAt)
   );
+  Serial.printf(
+      "HTTP %s fases | setup HTTPS: %lu ms | transporte/TLS + headers: %lu ms | body: %lu ms\n",
+      channel,
+      static_cast<unsigned long>(httpsSetupFinishedAt - requestStartedAt),
+      static_cast<unsigned long>(responseHeadersAt - httpsSetupFinishedAt),
+      static_cast<unsigned long>(responseBodyAt - responseHeadersAt)
+  );
+  Serial.print(F("HTTP backend Server-Timing: "));
+  Serial.println(serverTiming.length() ? serverTiming : F("indisponivel"));
 
   return status;
 }
@@ -1550,8 +1578,14 @@ void fetchConfiguration() {
             HTTPS_ROOT_CA
         );
 
+    static BearSSL::Session tlsSession;
+
     secure.setTrustAnchors(
         &trustAnchor
+    );
+
+    secure.setSession(
+        &tlsSession
     );
 
     started =
@@ -1583,13 +1617,20 @@ void fetchConfiguration() {
 
   http.setTimeout(CONFIG_HTTP_TIMEOUT_MS);
 
+  const char* responseHeaders[] = {"Server-Timing"};
+  http.collectHeaders(responseHeaders, 1);
+
   if (!addDeviceHeaders(http, url)) {
     http.end();
     return;
   }
 
+  const uint32_t httpsSetupFinishedAt = millis();
+
   int status =
       http.GET();
+
+  const uint32_t responseHeadersAt = millis();
 
   if (
       status < 0
@@ -1613,6 +1654,9 @@ void fetchConfiguration() {
     );
   }
 
+  const uint32_t responseBodyAt = millis();
+  String serverTiming = http.header("Server-Timing");
+
   if (
       status >= 0
   ) {
@@ -1629,6 +1673,14 @@ void fetchConfiguration() {
       "HTTP config: %lu ms\n",
       static_cast<unsigned long>(millis() - requestStartedAt)
   );
+  Serial.printf(
+      "HTTP config fases | setup HTTPS: %lu ms | transporte/TLS + headers: %lu ms | body: %lu ms\n",
+      static_cast<unsigned long>(httpsSetupFinishedAt - requestStartedAt),
+      static_cast<unsigned long>(responseHeadersAt - httpsSetupFinishedAt),
+      static_cast<unsigned long>(responseBodyAt - responseHeadersAt)
+  );
+  Serial.print(F("HTTP backend Server-Timing: "));
+  Serial.println(serverTiming.length() ? serverTiming : F("indisponivel"));
 }
 
 // ============================================================

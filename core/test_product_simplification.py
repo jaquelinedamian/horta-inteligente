@@ -85,6 +85,34 @@ class ProductSimplificationTests(TestCase):
         self.assertEqual(status.json()["status"], "succeeded")
         self.assertIs(status.json()["state"], True)
 
+    def test_identical_pending_manual_command_is_deduplicated(self):
+        self.client.force_login(self.owner)
+        request_data = {
+            "channel": str(self.light.id), "action": "on",
+            "next": reverse("customer-dashboard"),
+        }
+        headers = {"HTTP_X_REQUESTED_WITH": "XMLHttpRequest", "HTTP_ACCEPT": "application/json"}
+        first = self.client.post(reverse("device-action"), request_data, **headers)
+        second = self.client.post(reverse("device-action"), request_data, **headers)
+
+        self.assertEqual(first.status_code, 201)
+        self.assertEqual(second.status_code, 201)
+        self.assertEqual(first.json()["id"], second.json()["id"])
+        self.assertEqual(
+            DeviceCommand.objects.filter(
+                channel=self.light,
+                status__in=[DeviceCommand.Status.PENDING, DeviceCommand.Status.DELIVERED],
+                payload__on=True,
+            ).count(),
+            1,
+        )
+        self.assertIn("app;dur=", second.headers["Server-Timing"])
+
+    def test_opposite_state_is_not_deduplicated(self):
+        first = queue_actuator_command(user=self.owner, channel=self.light, action="on")
+        second = queue_actuator_command(user=self.owner, channel=self.light, action="off")
+        self.assertNotEqual(first.id, second.id)
+
     def test_ack_status_supports_light_and_pump_on_and_off(self):
         self.client.force_login(self.owner)
         for channel in (self.light, self.pump):

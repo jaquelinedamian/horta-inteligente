@@ -46,6 +46,9 @@ class FirmwareLightingCommandContractTests(TestCase):
         self.assertNotIn("http.setTimeout(\n      70000", firmware)
         self.assertIn('"HTTP %s: %lu ms\\n"', firmware)
         self.assertIn('F("COMMAND LATENCY")', firmware)
+        self.assertIn('secure.setSession(', firmware)
+        self.assertIn('http.collectHeaders(responseHeaders, 1)', firmware)
+        self.assertIn('"HTTP backend Server-Timing: "', firmware)
         loop = firmware[firmware.index("void loop()") :]
         self.assertLess(loop.index("pollCommands();"), loop.index("sendTelemetry();"))
 
