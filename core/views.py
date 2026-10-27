@@ -16,6 +16,7 @@ from django.urls import reverse
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.utils.text import slugify
 from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 from django.views.decorators.http import require_GET, require_POST
 
 from accounts.models import Address, Membership, Organization, User
@@ -245,7 +246,8 @@ def customer_dashboard(request):
     recent_photos = GardenPhoto.objects.filter(garden=garden)[:7] if garden else []
     overrides = garden.automation_overrides if garden and isinstance(garden.automation_overrides, dict) else {}
     configuration_origins = {section: "Personalizado" if section in overrides else "Padrão HortaViva" for section in ("irrigation", "lighting", "camera", "monitoring")}
-    return render(request, "customer/dashboard.html", {"organization": org, "gardens": gardens, "garden": garden, "snapshot": snapshot, "automation_summary": automation_summary, "configuration": configuration, "configuration_origins": configuration_origins, "recent_photos": recent_photos, "has_overrides": bool(overrides), "has_garden": bool(garden), "active_subscription": active_subscription, "device": device, "has_telemetry": has_telemetry, "metrics": metrics, "schedule": schedule, "can_manage": can_manage, "cycles": get_customer_cycles(org).filter(status=PlantingCycle.Status.ACTIVE)[:6], "next_visit": get_customer_visits(org).filter(scheduled_start__gte=timezone.now()).order_by("scheduled_start").first()})
+    monitoring = garden_report(garden, "24h") if garden else None
+    return render(request, "customer/dashboard.html", {"organization": org, "gardens": gardens, "garden": garden, "snapshot": snapshot, "automation_summary": automation_summary, "monitoring": monitoring, "configuration": configuration, "configuration_origins": configuration_origins, "recent_photos": recent_photos, "has_overrides": bool(overrides), "has_garden": bool(garden), "active_subscription": active_subscription, "device": device, "has_telemetry": has_telemetry, "metrics": metrics, "schedule": schedule, "can_manage": can_manage, "cycles": get_customer_cycles(org).filter(status=PlantingCycle.Status.ACTIVE)[:6], "next_visit": get_customer_visits(org).filter(scheduled_start__gte=timezone.now()).order_by("scheduled_start").first()})
 
 
 @customer_required
@@ -662,9 +664,75 @@ def garden_configuration_restore(request, garden_id):
 def garden_reports(request, garden_id):
     garden = get_object_or_404(gardens_for_user(request.user), pk=garden_id)
     period = request.GET.get("period", "7d")
-    if period not in {"today", "24h", "7d", "30d"}:
+    if period not in {"today", "24h", "7d", "30d", "custom"}:
         period = "7d"
-    return render(request, "shared/garden_reports.html", {"garden": garden, "report": garden_report(garden, period)})
+    start, end = _custom_report_dates(request) if period == "custom" else (None, None)
+    if period == "custom" and not (start and end and start < end):
+        period = "7d"
+        start = end = None
+    return render(request, "shared/garden_reports.html", {
+        "garden": garden, "report": garden_report(garden, period, start, end),
+        "custom_start": request.GET.get("start", ""), "custom_end": request.GET.get("end", ""),
+    })
+
+
+def _custom_report_dates(request):
+    def value(name):
+        parsed = parse_datetime(request.GET.get(name, ""))
+        if parsed and timezone.is_naive(parsed):
+            parsed = timezone.make_aware(parsed)
+        return parsed
+    return value("start"), value("end")
+
+
+def _report_json(report):
+    def number(value):
+        return float(value) if value is not None else None
+    sensors = {}
+    for metric, item in report["sensors"].items():
+        sensors[metric] = {
+            "label": item["label"], "unit": item["unit"], "configured": item["configured"],
+            "current": number(item["current"]), "recorded_at": item["recorded_at"].isoformat() if item["recorded_at"] else None,
+            "delta": number(item["delta"]), "minimum": number(item["minimum"]),
+            "average": number(item["average"]), "maximum": number(item["maximum"]),
+            "classification": item["classification"],
+            "limits": ({**item["limits"], "minimum": number(item["limits"]["minimum"]), "maximum": number(item["limits"]["maximum"])} if item["limits"] else None),
+            "points": [{"at": point["bucket"].isoformat(), "value": number(point["value"])} for point in item["points"]],
+        }
+    return {
+        "period": report["period"], "start": report["start"].isoformat(), "end": report["end"].isoformat(),
+        "aggregation": report["aggregation"], "monitoring_interval_minutes": report["monitoring_interval"],
+        "last_measurement_at": report["last_measurement_at"].isoformat() if report["last_measurement_at"] else None,
+        "is_stale": report["is_stale"], "sensors": sensors,
+        "events": [{"at": event.acknowledged_at.isoformat(), "metric": event.channel.metric, "on": bool((event.payload or {}).get("on"))} for event in report["events"]],
+    }
+
+
+@login_required
+@require_GET
+def garden_measurements_api(request, garden_id):
+    garden = get_object_or_404(gardens_for_user(request.user), pk=garden_id)
+    period = request.GET.get("period", "24h")
+    if period not in {"today", "24h", "7d", "30d", "custom"}:
+        period = "24h"
+    start, end = _custom_report_dates(request) if period == "custom" else (None, None)
+    if period == "custom" and not (start and end and start < end):
+        return JsonResponse({"error": "invalid_period", "detail": "Informe start e end válidos."}, status=400)
+    return JsonResponse(_report_json(garden_report(garden, period, start, end)))
+
+
+@login_required
+@require_GET
+def garden_measurements_latest_api(request, garden_id):
+    payload = _report_json(garden_report(get_object_or_404(gardens_for_user(request.user), pk=garden_id), "24h"))
+    return JsonResponse({key: payload[key] for key in ("last_measurement_at", "is_stale", "monitoring_interval_minutes", "sensors")})
+
+
+@login_required
+@require_GET
+def garden_measurements_summary_api(request, garden_id):
+    payload = _report_json(garden_report(get_object_or_404(gardens_for_user(request.user), pk=garden_id), request.GET.get("period", "7d")))
+    return JsonResponse({key: payload[key] for key in ("period", "start", "end", "aggregation", "sensors", "events")})
 
 
 @login_required

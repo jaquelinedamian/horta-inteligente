@@ -3,6 +3,9 @@ from django.urls import path, reverse_lazy
 from . import views
 
 urlpatterns = [
+    path("api/v1/gardens/<uuid:garden_id>/measurements/", views.garden_measurements_api, name="garden-measurements-api"),
+    path("api/v1/gardens/<uuid:garden_id>/measurements/latest/", views.garden_measurements_latest_api, name="garden-measurements-latest-api"),
+    path("api/v1/gardens/<uuid:garden_id>/measurements/summary/", views.garden_measurements_summary_api, name="garden-measurements-summary-api"),
     path("", views.home, name="home"), path("como-funciona/", views.public_page, {"page": "how-it-works"}, name="how-it-works"), path("sobre/", views.public_page, {"page": "about"}, name="about"), path("faq/", views.public_page, {"page": "faq"}, name="faq"), path("contato/", views.public_page, {"page": "contact"}, name="contact"),
     path("planos/", views.plans, name="plans"), path("planos/<slug:code>/", views.plan_detail, name="plan-detail"), path("plano/<slug:code>/", views.plan_detail), path("culturas/", views.crop_catalog, name="crop-catalog"), path("culturas/<slug:code>/", views.crop_detail, name="crop-detail"),
     path("conta/cadastro/", views.signup, name="signup"), path("conta/entrar/", auth_views.LoginView.as_view(template_name="registration/login.html"), name="login"), path("conta/sair/", auth_views.LogoutView.as_view(), name="logout"),
