@@ -37,6 +37,18 @@ class FirmwareLightingCommandContractTests(TestCase):
             ),
         )
 
+    def test_manual_command_polling_has_priority_and_bounded_timeouts(self):
+        firmware = (
+            Path(__file__).resolve().parents[1]
+            / "firmware" / "horta_inteligente_local" / "horta_inteligente_local.ino"
+        ).read_text(encoding="utf-8")
+        self.assertIn("#define COMMAND_POLL_INTERVAL_MS 1000UL", firmware)
+        self.assertNotIn("http.setTimeout(\n      70000", firmware)
+        self.assertIn('"HTTP %s: %lu ms\\n"', firmware)
+        self.assertIn('F("COMMAND LATENCY")', firmware)
+        loop = firmware[firmware.index("void loop()") :]
+        self.assertLess(loop.index("pollCommands();"), loop.index("sendTelemetry();"))
+
 
 class DeviceApiTests(TestCase):
     def setUp(self):
@@ -133,6 +145,23 @@ class DeviceApiTests(TestCase):
         self.assertEqual(response.status_code, 200)
         command.refresh_from_db()
         self.assertEqual(command.result["lamp"], False)
+        self.assertEqual(command.result["relay"], False)
+
+    def test_pump_ack_normalizes_physical_state_for_the_ui(self):
+        command = DeviceCommand.objects.create(
+            device=self.device, channel=self.actuator, command_type="set_state",
+            payload={"on": True}, idempotency_key="pump-normalized-1",
+            status=DeviceCommand.Status.DELIVERED,
+            delivered_at=timezone.now(), expires_at=timezone.now() + timedelta(minutes=5),
+        )
+        response = self.client.post(
+            reverse("devices:acknowledge-command", args=[command.id]),
+            json.dumps({"status": "succeeded", "result": {"pump": True}}),
+            content_type="application/json", **self.command_headers,
+        )
+        self.assertEqual(response.status_code, 200)
+        command.refresh_from_db()
+        self.assertIs(command.result["relay"], True)
 
     def test_commands_reject_token_and_device_id_mismatch(self):
         response = self.client.get(

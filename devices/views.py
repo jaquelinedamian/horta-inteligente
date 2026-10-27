@@ -1,4 +1,5 @@
 import json
+import logging
 
 from django.db import transaction
 from django.conf import settings
@@ -11,6 +12,8 @@ from .authentication import device_required
 from gardens.configuration import effective_garden_configuration
 from .models import Channel, DeviceCommand, DeviceHeartbeat, GardenPhoto
 from .services import ingest_readings, parsed_datetime, pending_commands
+
+logger = logging.getLogger(__name__)
 
 
 def json_body(request):
@@ -125,9 +128,25 @@ def acknowledge_command(request, command_id):
         if command.status not in {DeviceCommand.Status.DELIVERED, *allowed}:
             return api_error("comando não está aguardando confirmação", 409)
         command.status = status
-        command.result = payload.get("result", {})
+        result = payload.get("result", {})
+        if not isinstance(result, dict):
+            raise ValueError("result deve ser um objeto")
+        if command.channel and "relay" not in result:
+            if command.channel.metric == "light_state" and "lamp" in result:
+                result["relay"] = bool(result["lamp"])
+            elif command.channel.metric == "pump_state" and "pump" in result:
+                result["relay"] = bool(result["pump"])
+        command.result = result
         command.acknowledged_at = timezone.now()
         command.save(update_fields=["status", "result", "acknowledged_at", "updated_at"])
+        logger.info(
+            "manual_command_acknowledged command_id=%s device_id=%s status=%s "
+            "created_to_ack_ms=%d delivered_to_ack_ms=%d",
+            command.id, request.device.id, command.status,
+            max(0, int((command.acknowledged_at - command.created_at).total_seconds() * 1000)),
+            max(0, int((command.acknowledged_at - command.delivered_at).total_seconds() * 1000))
+            if command.delivered_at else -1,
+        )
         return JsonResponse({"id": str(command.id), "status": command.status})
     except PermissionError as exc:
         return JsonResponse({"error": "device_mismatch", "detail": str(exc)}, status=403)

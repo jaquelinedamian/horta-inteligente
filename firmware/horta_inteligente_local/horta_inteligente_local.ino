@@ -42,9 +42,14 @@ X4XSQRjbgbMEHMUfpIBvFSDJ3gyICh3WZlXi/EjJKSZp4A==
 
 #define TELEMETRY_INTERVAL_MS 60000UL
 #define HEARTBEAT_INTERVAL_MS 300000UL
-#define COMMAND_POLL_INTERVAL_MS 2000UL
+#define COMMAND_POLL_INTERVAL_MS 1000UL
 #define SAFE_PUMP_DURATION_MS 10000UL
 #define CONFIG_POLL_INTERVAL_MS 30000UL
+#define COMMAND_HTTP_TIMEOUT_MS 5000UL
+#define ACK_HTTP_TIMEOUT_MS 6000UL
+#define TELEMETRY_HTTP_TIMEOUT_MS 12000UL
+#define HEARTBEAT_HTTP_TIMEOUT_MS 8000UL
+#define CONFIG_HTTP_TIMEOUT_MS 12000UL
 
 
 namespace {
@@ -584,11 +589,15 @@ bool beginHttp(
     }
   }
 
-  http.setTimeout(
-      70000
-  );
-
   return addDeviceHeaders(http, url);
+}
+
+uint32_t requestTimeoutMs(const char* channel) {
+  if (strcmp(channel, "commands") == 0) return COMMAND_HTTP_TIMEOUT_MS;
+  if (strcmp(channel, "ack") == 0) return ACK_HTTP_TIMEOUT_MS;
+  if (strcmp(channel, "telemetry") == 0) return TELEMETRY_HTTP_TIMEOUT_MS;
+  if (strcmp(channel, "heartbeat") == 0) return HEARTBEAT_HTTP_TIMEOUT_MS;
+  return CONFIG_HTTP_TIMEOUT_MS;
 }
 
 int apiRequest(
@@ -598,6 +607,8 @@ int apiRequest(
     const String& body,
     String& response
 ) {
+
+  const uint32_t requestStartedAt = millis();
 
   if (
       WiFi.status()
@@ -632,6 +643,8 @@ int apiRequest(
 
     return -2;
   }
+
+  http.setTimeout(requestTimeoutMs(channel));
 
   int status;
 
@@ -672,6 +685,12 @@ int apiRequest(
   }
 
   http.end();
+
+  Serial.printf(
+      "HTTP %s: %lu ms\n",
+      channel,
+      static_cast<unsigned long>(millis() - requestStartedAt)
+  );
 
   return status;
 }
@@ -1073,11 +1092,13 @@ void sendHeartbeat() {
 // ACK DE COMANDOS
 // ============================================================
 
-void acknowledge(
+uint32_t acknowledge(
     const String& id,
     bool succeeded,
     const String& detail
 ) {
+
+  const uint32_t ackStartedAt = millis();
 
   JsonDocument doc;
 
@@ -1107,7 +1128,7 @@ void acknowledge(
   int status =
       apiRequest(
           "POST",
-          "commands",
+          "ack",
           "commands/"
               + id
               + "/ack/",
@@ -1119,6 +1140,8 @@ void acknowledge(
       "ack: HTTP %d\n",
       status
   );
+
+  return millis() - ackStartedAt;
 }
 
 // ============================================================
@@ -1173,6 +1196,8 @@ void pollCommands() {
       doc["commands"]
           .as<JsonArray>()
   ) {
+
+    const uint32_t commandReceivedAt = millis();
 
     String id =
         command["id"]
@@ -1232,6 +1257,8 @@ void pollCommands() {
           on
       );
 
+      const uint32_t relayActuatedAt = millis();
+
       if (!on) {
 
         pumpStopAt =
@@ -1279,6 +1306,10 @@ void pollCommands() {
               : "bomba desligada"
       );
 
+      Serial.println(F("COMMAND LATENCY"));
+      Serial.printf("recebido -> rele acionado: %lu ms\n", relayActuatedAt - commandReceivedAt);
+      Serial.printf("rele acionado -> ACK concluido: %lu ms\n", millis() - relayActuatedAt);
+
     // ----------------------------------------------------------
     // LAMPADA
     // ----------------------------------------------------------
@@ -1294,6 +1325,8 @@ void pollCommands() {
       setLamp(
           on
       );
+
+      const uint32_t relayActuatedAt = millis();
 
       Serial.print(F("Estado fisico solicitado para a lampada no D6: "));
       Serial.println(on ? F("LIGADA") : F("DESLIGADA"));
@@ -1335,6 +1368,10 @@ void pollCommands() {
               ? "lampada ligada"
               : "lampada desligada"
       );
+
+      Serial.println(F("COMMAND LATENCY"));
+      Serial.printf("recebido -> rele acionado: %lu ms\n", relayActuatedAt - commandReceivedAt);
+      Serial.printf("rele acionado -> ACK concluido: %lu ms\n", millis() - relayActuatedAt);
 
     } else {
 
@@ -1447,6 +1484,8 @@ void loadConfiguration() {
 
 void fetchConfiguration() {
 
+  const uint32_t requestStartedAt = millis();
+
   if (
       WiFi.status()
       != WL_CONNECTED
@@ -1542,9 +1581,7 @@ void fetchConfiguration() {
     return;
   }
 
-  http.setTimeout(
-      70000
-  );
+  http.setTimeout(CONFIG_HTTP_TIMEOUT_MS);
 
   if (!addDeviceHeaders(http, url)) {
     http.end();
@@ -1587,6 +1624,11 @@ void fetchConfiguration() {
   }
 
   http.end();
+
+  Serial.printf(
+      "HTTP config: %lu ms\n",
+      static_cast<unsigned long>(millis() - requestStartedAt)
+  );
 }
 
 // ============================================================
@@ -2140,6 +2182,21 @@ void loop() {
   uint32_t now =
       millis();
 
+  // Comandos manuais têm prioridade sobre tarefas periódicas de fundo.
+  if (
+      !lastCommandPollAt
+      ||
+      now
+          - lastCommandPollAt
+          >= COMMAND_POLL_INTERVAL_MS
+  ) {
+
+    lastCommandPollAt =
+        now;
+
+    pollCommands();
+  }
+
   // ==========================================================
   // TELEMETRIA
   // ==========================================================
@@ -2174,24 +2231,6 @@ void loop() {
         now;
 
     sendHeartbeat();
-  }
-
-  // ==========================================================
-  // COMANDOS
-  // ==========================================================
-
-  if (
-      !lastCommandPollAt
-      ||
-      now
-          - lastCommandPollAt
-          >= COMMAND_POLL_INTERVAL_MS
-  ) {
-
-    lastCommandPollAt =
-        now;
-
-    pollCommands();
   }
 
   // ==========================================================

@@ -1,4 +1,6 @@
 from datetime import timedelta
+import logging
+from time import monotonic
 from uuid import uuid4
 
 from django.contrib import messages
@@ -14,7 +16,7 @@ from django.urls import reverse
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.utils.text import slugify
 from django.utils import timezone
-from django.views.decorators.http import require_POST
+from django.views.decorators.http import require_GET, require_POST
 
 from accounts.models import Address, Membership, Organization, User
 from crops.models import Crop, Cultivar, PlantingCycle
@@ -36,6 +38,8 @@ from .forms import (CheckoutAddressForm, GardenOperationalConfigurationForm, Ins
 from .garden_experience import garden_report, restore_garden_configuration, update_garden_configuration
 from gardens.configuration import effective_garden_configuration
 from .permissions import customer_required, operations_required, technician_required
+
+logger = logging.getLogger(__name__)
 
 
 def home(request):
@@ -320,6 +324,9 @@ def customer_development(request):
 @require_POST
 def device_action(request):
     from devices.services import queue_actuator_command
+    request_started_at = timezone.now()
+    request_started = monotonic()
+    wants_json = request.headers.get("X-Requested-With") == "XMLHttpRequest"
     channel = get_object_or_404(Channel.objects.select_related("device__garden"), id=request.POST.get("channel"))
     next_url = request.POST.get("next", "")
     if not url_has_allowed_host_and_scheme(
@@ -327,18 +334,66 @@ def device_action(request):
     ):
         next_url = reverse("post-login")
     try:
-        queue_actuator_command(
+        command = queue_actuator_command(
             user=request.user, channel=channel, action=request.POST.get("action"),
             duration_seconds=request.POST.get("duration_seconds") or None,
         )
     except ConnectionError as exc:
+        if wants_json:
+            return JsonResponse({"error": str(exc)}, status=409)
         messages.error(request, str(exc))
         return redirect(next_url)
     except (ValueError, TypeError) as exc:
+        if wants_json:
+            return JsonResponse({"error": str(exc)}, status=400)
         messages.error(request, str(exc))
         return redirect(next_url)
+    logger.info(
+        "manual_command_request command_id=%s device_id=%s client_clicked_at=%s "
+        "request_received_at=%s request_to_create_ms=%d",
+        command.id, channel.device_id, request.POST.get("client_clicked_at", "unavailable"),
+        request_started_at.isoformat(),
+        int((monotonic() - request_started) * 1000),
+    )
+    if wants_json:
+        return JsonResponse({
+            "id": str(command.id), "status": command.status,
+            "created_at": command.created_at.isoformat(),
+            "status_url": reverse("device-command-status", args=[command.id]),
+        }, status=201)
     messages.info(request, "Enviando comando… A alteração será confirmada após o acknowledgement do controlador.")
     return redirect(next_url)
+
+
+@login_required
+@require_GET
+def device_command_status(request, command_id):
+    command = get_object_or_404(
+        DeviceCommand.objects.select_related("channel", "device__garden").filter(
+            device__garden__in=gardens_for_user(request.user)
+        ), id=command_id,
+    )
+    result = command.result if isinstance(command.result, dict) else {}
+    relay = result.get("relay")
+    if relay is None and command.channel:
+        relay = result.get("lamp" if command.channel.metric == "light_state" else "pump")
+    if relay is None and command.status == DeviceCommand.Status.SUCCEEDED:
+        relay = command.payload.get("on")
+    if command.status in {DeviceCommand.Status.SUCCEEDED, DeviceCommand.Status.FAILED}:
+        now = timezone.now()
+        logger.info(
+            "manual_command_ui_reflected command_id=%s device_id=%s status=%s created_to_ui_ms=%d ack_to_ui_ms=%d",
+            command.id, command.device_id, command.status,
+            max(0, int((now - command.created_at).total_seconds() * 1000)),
+            max(0, int((now - command.acknowledged_at).total_seconds() * 1000))
+            if command.acknowledged_at else -1,
+        )
+    return JsonResponse({
+        "id": str(command.id), "status": command.status, "state": relay,
+        "created_at": command.created_at.isoformat(),
+        "delivered_at": command.delivered_at.isoformat() if command.delivered_at else None,
+        "acknowledged_at": command.acknowledged_at.isoformat() if command.acknowledged_at else None,
+    })
 
 
 @operations_required

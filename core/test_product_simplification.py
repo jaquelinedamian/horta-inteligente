@@ -63,6 +63,42 @@ class ProductSimplificationTests(TestCase):
         self.assertEqual(command.command_type, "set_state")
         self.assertEqual(command.payload["on"], False)
 
+    def test_ajax_manual_command_is_immediately_available_and_reports_ack_state(self):
+        self.client.force_login(self.owner)
+        response = self.client.post(
+            reverse("device-action"),
+            {"channel": str(self.light.id), "action": "on", "next": reverse("customer-dashboard")},
+            HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+            HTTP_ACCEPT="application/json",
+        )
+        self.assertEqual(response.status_code, 201)
+        command = DeviceCommand.objects.get(id=response.json()["id"])
+        self.assertEqual(command.status, DeviceCommand.Status.PENDING)
+        self.assertEqual(response.json()["status_url"], reverse("device-command-status", args=[command.id]))
+
+        command.status = DeviceCommand.Status.SUCCEEDED
+        command.result = {"relay": True}
+        command.acknowledged_at = timezone.now()
+        command.save(update_fields=["status", "result", "acknowledged_at"])
+        status = self.client.get(response.json()["status_url"])
+        self.assertEqual(status.status_code, 200)
+        self.assertEqual(status.json()["status"], "succeeded")
+        self.assertIs(status.json()["state"], True)
+
+    def test_ack_status_supports_light_and_pump_on_and_off(self):
+        self.client.force_login(self.owner)
+        for channel in (self.light, self.pump):
+            for state in (True, False):
+                command = DeviceCommand.objects.create(
+                    device=self.device, channel=channel, command_type="set_state",
+                    payload={"on": state}, idempotency_key=f"ui:{channel.id}:{state}",
+                    status=DeviceCommand.Status.SUCCEEDED, result={"relay": state},
+                    acknowledged_at=timezone.now(),
+                )
+                response = self.client.get(reverse("device-command-status", args=[command.id]))
+                self.assertEqual(response.status_code, 200)
+                self.assertIs(response.json()["state"], state)
+
     def test_employee_admin_has_global_advanced_access(self):
         self.client.force_login(self.admin)
         self.assertEqual(self.client.get(reverse("ops-collection", args=["telemetry"])).status_code, 200)

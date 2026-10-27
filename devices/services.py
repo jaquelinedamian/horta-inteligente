@@ -1,5 +1,6 @@
 from datetime import timedelta, timezone as dt_timezone
 from decimal import Decimal, InvalidOperation
+import logging
 from zoneinfo import ZoneInfo
 
 from django.db import transaction
@@ -10,6 +11,8 @@ from django.utils.dateparse import parse_datetime
 from .models import Alert, AlertRule, Channel, Device, DeviceCommand, TelemetryReading
 from gardens.access import user_can_access_garden
 from gardens.configuration import effective_garden_configuration
+
+logger = logging.getLogger(__name__)
 
 
 CONTROLLER_DEFAULT_CHANNELS = (
@@ -153,6 +156,11 @@ def pending_commands(device, limit=20):
         command.status = DeviceCommand.Status.DELIVERED
         command.delivered_at = now
         command.save(update_fields=["status", "delivered_at", "updated_at"])
+        logger.info(
+            "manual_command_delivered command_id=%s device_id=%s channel=%s queue_latency_ms=%d",
+            command.id, device.id, command.channel.key if command.channel else "none",
+            max(0, int((now - command.created_at).total_seconds() * 1000)),
+        )
     return commands
 
 
@@ -202,11 +210,16 @@ def queue_actuator_command(*, user, channel, action, duration_seconds=None):
             if not 60 <= duration <= 86400:
                 raise ValueError("o tempo de iluminação deve estar entre 1 minuto e 24 horas")
             payload["duration_seconds"] = duration
-    return DeviceCommand.objects.create(
+    command = DeviceCommand.objects.create(
         device=channel.device, channel=channel, command_type="set_state", payload=payload,
         idempotency_key=f"web:{user.pk}:{timezone.now().timestamp()}",
         expires_at=timezone.now() + timedelta(minutes=5),
     )
+    logger.info(
+        "manual_command_created command_id=%s device_id=%s channel=%s action=%s created_at=%s",
+        command.id, channel.device_id, channel.key, action, command.created_at.isoformat(),
+    )
+    return command
 
 
 def schedule_lighting(now=None):
