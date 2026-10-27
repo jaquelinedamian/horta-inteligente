@@ -22,7 +22,7 @@ from accounts.models import Address, Membership, Organization, User
 from crops.models import Crop, Cultivar, PlantingCycle
 from devices.models import (Alert, Channel, Device, DeviceCommand, DeviceCredential, GardenPhoto,
                             IrrigationSchedule, LightingSchedule, TelemetryReading)
-from devices.selectors import devices_for_garden, garden_snapshot
+from devices.selectors import actuator_automation_summary, devices_for_garden, garden_snapshot
 from gardens.access import gardens_for_user
 from gardens.models import Garden, GardenModule, ModuleInstallation
 from operations.models import ChecklistExecution, InventoryItem, SupportTicket, Visit, WorkOrder
@@ -227,6 +227,7 @@ def customer_dashboard(request):
     org, gardens, devices = _customer_context(request); garden = gardens.order_by("name").first()
     can_manage = request.membership.role in {Membership.Role.OWNER, Membership.Role.MANAGER}
     snapshot = garden_snapshot(garden) if garden else None
+    automation_summary = actuator_automation_summary(snapshot) if snapshot else None
     device = next((item for item in (snapshot["devices"] if snapshot else []) if item.kind == Device.Kind.CONTROLLER), None)
     metrics = snapshot["metrics"] if snapshot else {}; schedule = None
     active_subscription = get_customer_subscription(org)
@@ -244,7 +245,7 @@ def customer_dashboard(request):
     recent_photos = GardenPhoto.objects.filter(garden=garden)[:7] if garden else []
     overrides = garden.automation_overrides if garden and isinstance(garden.automation_overrides, dict) else {}
     configuration_origins = {section: "Personalizado" if section in overrides else "Padrão HortaViva" for section in ("irrigation", "lighting", "camera", "monitoring")}
-    return render(request, "customer/dashboard.html", {"organization": org, "gardens": gardens, "garden": garden, "snapshot": snapshot, "configuration": configuration, "configuration_origins": configuration_origins, "recent_photos": recent_photos, "has_overrides": bool(overrides), "has_garden": bool(garden), "active_subscription": active_subscription, "device": device, "has_telemetry": has_telemetry, "metrics": metrics, "schedule": schedule, "can_manage": can_manage, "cycles": get_customer_cycles(org).filter(status=PlantingCycle.Status.ACTIVE)[:6], "next_visit": get_customer_visits(org).filter(scheduled_start__gte=timezone.now()).order_by("scheduled_start").first()})
+    return render(request, "customer/dashboard.html", {"organization": org, "gardens": gardens, "garden": garden, "snapshot": snapshot, "automation_summary": automation_summary, "configuration": configuration, "configuration_origins": configuration_origins, "recent_photos": recent_photos, "has_overrides": bool(overrides), "has_garden": bool(garden), "active_subscription": active_subscription, "device": device, "has_telemetry": has_telemetry, "metrics": metrics, "schedule": schedule, "can_manage": can_manage, "cycles": get_customer_cycles(org).filter(status=PlantingCycle.Status.ACTIVE)[:6], "next_visit": get_customer_visits(org).filter(scheduled_start__gte=timezone.now()).order_by("scheduled_start").first()})
 
 
 @customer_required
@@ -355,13 +356,29 @@ def device_action(request):
         request_started_at.isoformat(),
         int((monotonic() - request_started) * 1000),
     )
+    action = request.POST.get("action")
+    duration = command.payload.get("duration_seconds")
+    if action in {"on", "irrigate"}:
+        equipment = "Irrigação" if channel.metric == "pump_state" else "Iluminação"
+        manual_notice = f"{equipment} acionada manualmente"
+        if duration:
+            manual_notice += f" por até {duration} segundos"
+        manual_notice += "."
+        live_summary = actuator_automation_summary(garden_snapshot(channel.device.assigned_garden()))
+        section = live_summary["irrigation" if channel.metric == "pump_state" else "lighting"]
+        if section.get("next_at"):
+            local_next = timezone.localtime(section["next_at"])
+            manual_notice += f" A programação automática será retomada em {local_next:%d/%m/%Y às %H:%M}."
+    else:
+        manual_notice = "Desligado manualmente. A programação automática permanece ativa para a próxima ação agendada."
     if wants_json:
         return JsonResponse({
             "id": str(command.id), "status": command.status,
             "created_at": command.created_at.isoformat(),
             "status_url": reverse("device-command-status", args=[command.id]),
+            "manual_notice": manual_notice,
         }, status=201)
-    messages.info(request, "Enviando comando… A alteração será confirmada após o acknowledgement do controlador.")
+    messages.info(request, manual_notice + " A alteração será confirmada após o controlador responder.")
     return redirect(next_url)
 
 

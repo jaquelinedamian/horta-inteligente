@@ -7,7 +7,107 @@ from django.utils import timezone
 
 from crops.models import PlantingCycle
 from subscriptions.models import CheckoutRequest
-from .models import Alert, Device, GardenPhoto
+from .models import Alert, Device, DeviceCommand, GardenPhoto
+
+
+def _command_state(command, metric):
+    if not command:
+        return False
+    result = command.result if isinstance(command.result, dict) else {}
+    key = "pump" if metric == "pump_state" else "lamp"
+    return bool(result.get("relay", result.get(key, command.payload.get("on", False))))
+
+
+def _command_origin(command):
+    if not command:
+        return None
+    source = command.payload.get("source", "")
+    automatic = source.endswith("schedule") or command.idempotency_key.startswith(("lighting:", "irrigation:"))
+    return "Automática" if automatic else "Manual"
+
+
+def _next_lighting_action(schedules, now):
+    candidates = []
+    for schedule in schedules:
+        zone = ZoneInfo(schedule.timezone)
+        local_now = now.astimezone(zone)
+        for offset in range(8):
+            day = local_now.date() + timedelta(days=offset)
+            if day.weekday() not in schedule.days_of_week:
+                continue
+            start = timezone.make_aware(datetime.combine(day, schedule.start_time), zone)
+            end_day = day if schedule.end_time > schedule.start_time else day + timedelta(days=1)
+            end = timezone.make_aware(datetime.combine(end_day, schedule.end_time), zone)
+            if start > now:
+                candidates.append((start, "Ligar"))
+            if end > now:
+                candidates.append((end, "Desligar"))
+            if start > now and end > now:
+                break
+    return min(candidates, key=lambda item: item[0]) if candidates else None
+
+
+def actuator_automation_summary(snapshot):
+    """Resumo factual dos atuadores; não infere eventos offline não reportados."""
+    now = timezone.now()
+    controller = snapshot.get("controller")
+    diagnostics = (
+        controller.latest_heartbeat.diagnostics
+        if controller and controller.latest_heartbeat and isinstance(controller.latest_heartbeat.diagnostics, dict)
+        else {}
+    )
+    pump = snapshot.get("pump_channel")
+    light = snapshot.get("light_channel")
+    pump_schedules = list(pump.irrigation_schedules.filter(enabled=True).order_by("start_time")) if pump else []
+    light_schedules = list(light.lighting_schedules.filter(enabled=True).order_by("start_time")) if light else []
+    last_pump_on = pump.commands.filter(status=DeviceCommand.Status.SUCCEEDED, payload__on=True).order_by("-acknowledged_at").first() if pump else None
+    last_light_on = light.commands.filter(status=DeviceCommand.Status.SUCCEEDED, payload__on=True).order_by("-acknowledged_at").first() if light else None
+    last_light_off = light.commands.filter(status=DeviceCommand.Status.SUCCEEDED, payload__on=False).order_by("-acknowledged_at").first() if light else None
+    pump_state = bool(diagnostics.get("pump_on", _command_state(snapshot["actuator_states"].get("pump_state"), "pump_state")))
+    light_state = bool(diagnostics.get("lamp_on", _command_state(snapshot["actuator_states"].get("light_state"), "light_state")))
+    pump_duration = last_pump_on.payload.get("duration_seconds") if last_pump_on else None
+    pump_end = last_pump_on.acknowledged_at + timedelta(seconds=pump_duration) if pump_state and last_pump_on and last_pump_on.acknowledged_at and pump_duration else None
+    if pump_end and pump_end <= now:
+        pump_end = None
+    light_cycle = None
+    if last_light_off and last_light_off.acknowledged_at:
+        cycle_start = light.commands.filter(
+            status=DeviceCommand.Status.SUCCEEDED, payload__on=True,
+            acknowledged_at__lt=last_light_off.acknowledged_at,
+        ).order_by("-acknowledged_at").first()
+        if cycle_start and cycle_start.acknowledged_at:
+            light_cycle = {
+                "started_at": cycle_start.acknowledged_at, "ended_at": last_light_off.acknowledged_at,
+                "duration_seconds": max(0, int((last_light_off.acknowledged_at - cycle_start.acknowledged_at).total_seconds())),
+                "origin": _command_origin(cycle_start),
+            }
+    max_irrigations = max((sum(day in item.days_of_week for item in pump_schedules) for day in range(7)), default=0)
+    max_light_seconds = max((sum(
+        ((datetime.combine(now.date(), item.end_time) - datetime.combine(now.date(), item.start_time)).seconds or 86400)
+        for item in light_schedules if day in item.days_of_week
+    ) for day in range(7)), default=0)
+    next_light = _next_lighting_action(light_schedules, now)
+    next_irrigation = snapshot.get("next_irrigation")
+    soil = snapshot.get("metrics", {}).get("soil_moisture")
+    return {
+        "irrigation": {
+            "configured": bool(pump_schedules), "active": pump_state,
+            "mode": _command_origin(last_pump_on) if pump_state and last_pump_on else ("Automático" if pump_schedules else "Manual"),
+            "schedules": pump_schedules, "daily_count": max_irrigations,
+            "next_at": next_irrigation[0] if next_irrigation else None,
+            "last_at": last_pump_on.acknowledged_at if last_pump_on else None,
+            "last_duration_seconds": pump_duration, "last_origin": _command_origin(last_pump_on),
+            "remaining_until": pump_end, "soil": soil,
+        },
+        "lighting": {
+            "configured": bool(light_schedules), "active": light_state,
+            "mode": _command_origin(last_light_on) if light_state and last_light_on else ("Automático" if light_schedules else "Manual"),
+            "schedules": light_schedules, "hours_per_day": max_light_seconds / 3600 if max_light_seconds else None,
+            "next_at": next_light[0] if next_light else None, "next_action": next_light[1] if next_light else None,
+            "current_started_at": last_light_on.acknowledged_at if light_state and last_light_on else None,
+            "last_cycle": light_cycle,
+        },
+    }
 
 
 def devices_for_garden(garden):

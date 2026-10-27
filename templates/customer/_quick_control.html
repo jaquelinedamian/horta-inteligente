@@ -1,0 +1,48 @@
+<section class="mb-4" id="automacao" aria-labelledby="quick-control-title" data-controller-online="{{ snapshot.online|yesno:'true,false' }}">
+  {% if not automation_summary.lighting.configured %}<span class="visually-hidden">Iluminação não configurada</span>{% endif %}
+  <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+    <div><span class="eyebrow">Automação</span><h2 class="h4 mt-2 mb-0" id="quick-control-title">Controle rápido</h2></div>
+    {% if can_manage %}<a class="btn btn-outline-brand" href="{% url 'garden-configuration' garden.pk %}">Editar programações</a>{% endif %}
+  </div>
+  <div class="row g-4">
+    <div class="col-xl-6">
+      <article class="content-card automation-card h-100 {% if automation_summary.irrigation.active %}is-active{% endif %}">
+        <header class="automation-card__header">
+          <div><span class="automation-card__icon"><i class="bi bi-droplet-fill"></i></span><div><h3 class="h5 mb-1">Irrigação</h3><small class="text-muted">{% if automation_summary.irrigation.configured %}Programada{% else %}Não programada{% endif %}</small></div></div>
+          <strong class="actuator-state {% if automation_summary.irrigation.active %}is-on{% endif %}">{% if automation_summary.irrigation.active %}Irrigando agora{% else %}Desligada{% endif %}</strong>
+        </header>
+        {% if automation_summary.irrigation.active and automation_summary.irrigation.remaining_until %}<div class="automation-countdown" data-countdown-until="{{ automation_summary.irrigation.remaining_until|date:'c' }}">Tempo restante: calculando…</div>{% endif %}
+        <dl class="automation-facts">
+          <div><dt>Modo</dt><dd>{{ automation_summary.irrigation.mode }}</dd></div>
+          <div><dt>Horários</dt><dd>{% for item in automation_summary.irrigation.schedules %}{{ item.start_time|time:'H:i' }}{% if not forloop.last %}, {% endif %}{% empty %}Sem programação{% endfor %}</dd></div>
+          <div><dt>Irrigações por dia</dt><dd>{% if automation_summary.irrigation.daily_count %}Até {{ automation_summary.irrigation.daily_count }}{% else %}—{% endif %}</dd></div>
+          <div><dt>Duração programada</dt><dd>{% if automation_summary.irrigation.schedules %}{{ automation_summary.irrigation.schedules.0.duration_seconds }} s{% else %}—{% endif %}</dd></div>
+          <div class="is-wide"><dt>Próxima irrigação</dt><dd>{% if automation_summary.irrigation.next_at %}{{ automation_summary.irrigation.next_at|date:'d/m/Y \à\s H:i' }}{% else %}Nenhuma execução programada{% endif %}</dd></div>
+          <div class="is-wide"><dt>Última irrigação registrada</dt><dd>{% if automation_summary.irrigation.last_at %}{{ automation_summary.irrigation.last_at|date:'d/m/Y H:i' }} · {{ automation_summary.irrigation.last_duration_seconds|default:'Duração não informada' }}{% if automation_summary.irrigation.last_duration_seconds %} s{% endif %} · {{ automation_summary.irrigation.last_origin }}{% else %}Nenhuma execução reportada pelo controlador{% endif %}</dd></div>
+          <div class="is-wide"><dt>Umidade do solo</dt><dd>{% if automation_summary.irrigation.soil.value != None %}{{ automation_summary.irrigation.soil.value|floatformat:0 }}% <small class="text-muted">({{ automation_summary.irrigation.soil.recorded_at|timesince }} atrás)</small>{% else %}Sensor indisponível{% endif %}</dd></div>
+        </dl>
+        {% if can_manage and snapshot.pump_channel %}<form method="post" action="{% url 'device-action' %}" class="automation-actions">{% csrf_token %}<input type="hidden" name="channel" value="{{ snapshot.pump_channel.id }}"><input type="hidden" name="next" value="{{ request.path }}"><div><label class="form-label" for="pump-duration">Duração manual</label><div class="input-group"><input class="form-control" id="pump-duration" type="number" name="duration_seconds" min="1" max="300" value="10"><span class="input-group-text">s</span></div></div><button class="btn btn-brand" name="action" value="irrigate"><i class="bi bi-droplet"></i> Irrigar agora <span class="visually-hidden">manualmente</span></button>{% if automation_summary.irrigation.active %}<button class="btn btn-outline-danger" name="action" value="off">Parar</button>{% endif %}</form><p class="manual-impact">Ação manual com desligamento pelo temporizador. {% if automation_summary.irrigation.next_at %}A programação automática será retomada em {{ automation_summary.irrigation.next_at|date:'d/m/Y \à\s H:i' }}.{% endif %}</p>{% endif %}
+      </article>
+    </div>
+    <div class="col-xl-6">
+      <article class="content-card automation-card h-100 {% if automation_summary.lighting.active %}is-active{% endif %}">
+        <header class="automation-card__header">
+          <div><span class="automation-card__icon"><i class="bi bi-lightbulb-fill"></i></span><div><h3 class="h5 mb-1">Iluminação</h3><small class="text-muted">{% if automation_summary.lighting.configured %}Programada{% else %}Não programada{% endif %}</small></div></div>
+          <strong class="actuator-state {% if automation_summary.lighting.active %}is-on{% endif %}">{% if automation_summary.lighting.active %}Ligada{% else %}Desligada{% endif %}</strong>
+        </header>
+        <dl class="automation-facts">
+          <div><dt>Modo</dt><dd>{{ automation_summary.lighting.mode }}</dd></div>
+          <div><dt>Horas por dia</dt><dd>{% if automation_summary.lighting.hours_per_day %}{{ automation_summary.lighting.hours_per_day|floatformat:1 }} h{% else %}—{% endif %}</dd></div>
+          <div><dt>Ligar</dt><dd>{% for item in automation_summary.lighting.schedules %}{{ item.start_time|time:'H:i' }}{% if not forloop.last %}, {% endif %}{% empty %}—{% endfor %}</dd></div>
+          <div><dt>Desligar</dt><dd>{% for item in automation_summary.lighting.schedules %}{{ item.end_time|time:'H:i' }}{% if not forloop.last %}, {% endif %}{% empty %}—{% endfor %}</dd></div>
+          <div class="is-wide"><dt>Próxima ação</dt><dd>{% if automation_summary.lighting.next_at %}{{ automation_summary.lighting.next_action }} em {{ automation_summary.lighting.next_at|date:'d/m/Y \à\s H:i' }}{% else %}Nenhuma ação programada{% endif %}</dd></div>
+          <div class="is-wide"><dt>Ligada desde</dt><dd>{% if automation_summary.lighting.current_started_at %}{{ automation_summary.lighting.current_started_at|date:'d/m/Y H:i' }}{% elif automation_summary.lighting.active %}Horário não reportado pelo controlador{% else %}—{% endif %}</dd></div>
+          <div class="is-wide"><dt>Último ciclo registrado</dt><dd>{% if automation_summary.lighting.last_cycle %}{{ automation_summary.lighting.last_cycle.started_at|date:'d/m/Y H:i' }}–{{ automation_summary.lighting.last_cycle.ended_at|date:'H:i' }} · {{ automation_summary.lighting.last_cycle.duration_seconds|floatformat:0 }} s · {{ automation_summary.lighting.last_cycle.origin }}{% else %}Nenhum ciclo completo reportado{% endif %}</dd></div>
+        </dl>
+        {% if can_manage and snapshot.light_channel %}<form method="post" action="{% url 'device-action' %}" class="automation-actions">{% csrf_token %}<input type="hidden" name="channel" value="{{ snapshot.light_channel.id }}"><input type="hidden" name="next" value="{{ request.path }}"><div><label class="form-label" for="light-duration">Limite manual</label><select class="form-select" id="light-duration" name="duration_seconds"><option value="1800">30 min</option><option value="3600">1 h</option><option value="7200">2 h</option><option value="14400">4 h</option><option value="28800" selected>8 h</option></select></div><button class="btn btn-brand" name="action" value="on">Ligar</button><button class="btn btn-outline-danger" name="action" value="off">Desligar</button></form><p class="manual-impact">O limite evita que a luz permaneça ligada por engano. {% if automation_summary.lighting.next_at %}Próxima ação automática: {{ automation_summary.lighting.next_action|lower }} em {{ automation_summary.lighting.next_at|date:'d/m/Y \à\s H:i' }}.{% endif %}</p>{% endif %}
+      </article>
+    </div>
+  </div>
+  {% if not can_manage %}<p class="text-muted small mt-3 mb-0">Você possui acesso somente para consulta.</p>{% endif %}
+  {% if not snapshot.online %}<p class="alert alert-warning small mt-3 mb-0" role="status">Controlador offline. Os estados exibidos são os últimos recebidos e as ações manuais ficam indisponíveis até a reconexão.</p>{% endif %}
+</section>

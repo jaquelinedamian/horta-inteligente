@@ -3,6 +3,23 @@
   const POLL_DEADLINE_MS = 30000;
   const wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
+  document.querySelectorAll('[data-controller-online="false"] form[action$="/app/dispositivo/acao/"] button').forEach((button) => {
+    button.disabled = true;
+  });
+
+  document.querySelectorAll('[data-countdown-until]').forEach((element) => {
+    const deadline = new Date(element.dataset.countdownUntil).getTime();
+    const update = () => {
+      const remaining = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
+      const minutes = Math.floor(remaining / 60);
+      const seconds = String(remaining % 60).padStart(2, '0');
+      element.textContent = remaining ? `Tempo restante: ${minutes}:${seconds}` : 'Finalizando irrigação…';
+      if (!remaining) clearInterval(timer);
+    };
+    const timer = setInterval(update, 1000);
+    update();
+  });
+
   async function pollCommand(statusUrl, startedAt, message) {
     while (Date.now() - startedAt < POLL_DEADLINE_MS) {
       const response = await fetch(statusUrl, {
@@ -52,6 +69,7 @@
       });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || 'Não foi possível enviar o comando.');
+      if (payload.manual_notice) message.textContent = `${payload.manual_notice} Aguardando confirmação…`;
       await pollCommand(payload.status_url, Date.now(), message);
     } catch (error) {
       message.textContent = error.message;

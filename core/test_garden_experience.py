@@ -1,12 +1,13 @@
-from datetime import timedelta
+from datetime import time, timedelta
 
 from django.test import Client, TestCase
 from django.urls import reverse
 from django.utils import timezone
 
 from accounts.models import Membership, Organization, User
-from devices.models import Channel, Device, DeviceCommand, DeviceCredential, DeviceModel, GardenPhoto, TelemetryReading
-from devices.selectors import garden_snapshot
+from devices.models import (Channel, Device, DeviceCommand, DeviceCredential, DeviceHeartbeat,
+                            DeviceModel, GardenPhoto, IrrigationSchedule, LightingSchedule, TelemetryReading)
+from devices.selectors import actuator_automation_summary, garden_snapshot
 from gardens.configuration import effective_garden_configuration
 from gardens.models import Garden, GardenConfigurationEvent, GardenModel
 
@@ -204,6 +205,43 @@ class GardenExperienceTests(TestCase):
         self.assertEqual(float(metrics["air_temperature"]["value"]), 24.3)
         self.assertEqual(float(metrics["soil_moisture"]["value"]), 68)
         self.assertEqual(float(metrics["air_pressure"]["value"]), 934.5)
+
+    def test_quick_control_summary_uses_real_schedules_heartbeat_and_history(self):
+        now = timezone.now()
+        light = self.device.channels.get(metric="light_state")
+        IrrigationSchedule.objects.create(
+            actuator=self.pump, name="Manhã", days_of_week=list(range(7)),
+            start_time=time(7, 0), duration_seconds=20,
+        )
+        LightingSchedule.objects.create(
+            actuator=light, name="Ciclo diário", days_of_week=list(range(7)),
+            start_time=time(6, 0), end_time=time(18, 0),
+        )
+        DeviceHeartbeat.objects.create(
+            device=self.device, recorded_at=now, diagnostics={"pump_on": True, "lamp_on": True},
+        )
+        DeviceCommand.objects.create(
+            device=self.device, channel=self.pump, command_type="set_state",
+            payload={"on": True, "duration_seconds": 20, "mode": "manual_safe"},
+            status=DeviceCommand.Status.SUCCEEDED, acknowledged_at=now,
+            result={"pump": True, "relay": True}, idempotency_key="summary-pump",
+        )
+        DeviceCommand.objects.create(
+            device=self.device, channel=light, command_type="set_state",
+            payload={"on": True, "duration_seconds": 3600, "mode": "manual"},
+            status=DeviceCommand.Status.SUCCEEDED, acknowledged_at=now,
+            result={"lamp": True, "relay": True}, idempotency_key="summary-light",
+        )
+
+        summary = actuator_automation_summary(garden_snapshot(self.garden))
+
+        self.assertTrue(summary["irrigation"]["active"])
+        self.assertEqual(summary["irrigation"]["daily_count"], 1)
+        self.assertEqual(summary["irrigation"]["last_duration_seconds"], 20)
+        self.assertEqual(summary["irrigation"]["last_origin"], "Manual")
+        self.assertTrue(summary["lighting"]["active"])
+        self.assertEqual(summary["lighting"]["hours_per_day"], 12)
+        self.assertIn(summary["lighting"]["next_action"], {"Ligar", "Desligar"})
 
     def test_report_permission_is_scoped_and_admin_can_view_any(self):
         self.client.force_login(self.other)
