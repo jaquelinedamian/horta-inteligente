@@ -1950,6 +1950,58 @@ bool scheduleMatchesNow(
   return false;
 }
 
+bool lightingScheduleMatchesNow(
+    JsonObject lighting,
+    const char* current,
+    int weekday,
+    uint32_t& durationSeconds
+) {
+
+  JsonArray schedules =
+      lighting["schedules"]
+          .as<JsonArray>();
+
+  if (!schedules.isNull()) {
+    for (JsonObject schedule : schedules) {
+      if (!(schedule["enabled"] | false)) {
+        continue;
+      }
+
+      if (schedule["start"].as<String>() != current) {
+        continue;
+      }
+
+      JsonArray days = schedule["days"].as<JsonArray>();
+      bool matchesDay = days.isNull();
+      for (JsonVariant day : days) {
+        if (day.as<int>() == weekday) {
+          matchesDay = true;
+          break;
+        }
+      }
+      if (!matchesDay) {
+        continue;
+      }
+
+      durationSeconds = constrain(
+          schedule["duration_seconds"] | 3600UL,
+          1UL,
+          86400UL
+      );
+      return true;
+    }
+    return false;
+  }
+
+  // Compatibilidade com configurações antigas, anteriores à lista de
+  // períodos independentes.
+  if (scheduleMatchesNow(lighting, current)) {
+    durationSeconds = readDurationSeconds(lighting, 3600UL, 86400UL);
+    return true;
+  }
+  return false;
+}
+
 void runOfflineAutomation() {
 
   if (
@@ -2081,12 +2133,18 @@ void runOfflineAutomation() {
   JsonObject lighting =
       doc["lighting"];
 
+  uint32_t lightingDuration = 0;
+  const int mondayBasedWeekday =
+      (local.tm_wday + 6) % 7;
+
   if (
       !lampOn
       &&
-      scheduleMatchesNow(
+      lightingScheduleMatchesNow(
           lighting,
-          current
+          current,
+          mondayBasedWeekday,
+          lightingDuration
       )
       &&
       lastLightingBucket
@@ -2094,11 +2152,7 @@ void runOfflineAutomation() {
   ) {
 
     uint32_t duration =
-        readDurationSeconds(
-            lighting,
-            3600UL,
-            86400UL
-        );
+        lightingDuration;
 
     setLamp(
         true,

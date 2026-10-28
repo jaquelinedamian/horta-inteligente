@@ -36,7 +36,9 @@ from operations.selectors import get_customer_visits, get_technician_orders, get
 from .forms import (CheckoutAddressForm, GardenOperationalConfigurationForm, InstallationDateForm,
                     InstallationSurveyForm, IrrigationScheduleForm, LightingScheduleForm, ProfileForm,
                     SignupForm, SoilCalibrationForm, SupportTicketForm, WorkOrderForm)
-from .garden_experience import garden_report, restore_garden_configuration, update_garden_configuration
+from .garden_experience import (garden_report, mark_custom_lighting_configuration,
+                                restore_crop_lighting_configuration, restore_garden_configuration,
+                                update_garden_configuration)
 from gardens.configuration import effective_garden_configuration
 from .permissions import customer_required, operations_required, technician_required
 
@@ -520,7 +522,10 @@ def garden_automation_update(request, garden_id):
         channel = get_object_or_404(controller.channels, metric="light_state")
         item = LightingSchedule(actuator=channel, name="Iluminação")
         form = LightingScheduleForm(request.POST, instance=item)
-        if form.is_valid(): form.save(); messages.success(request, "Programação da iluminação atualizada.")
+        if form.is_valid():
+            form.save()
+            mark_custom_lighting_configuration(garden=garden, user=request.user)
+            messages.success(request, "Programação personalizada da iluminação atualizada.")
         else: messages.error(request, "Revise a programação da iluminação.")
     elif action in {"lighting_toggle", "lighting_delete"}:
         item = get_object_or_404(LightingSchedule, pk=request.POST.get("schedule_id"), actuator__device=controller)
@@ -529,6 +534,10 @@ def garden_automation_update(request, garden_id):
             item.enabled = not item.enabled
             item.save(update_fields=["enabled", "updated_at"])
             messages.success(request, "Programação atualizada.")
+        mark_custom_lighting_configuration(garden=garden, user=request.user)
+    elif action == "lighting_restore_default":
+        restore_crop_lighting_configuration(garden=garden, user=request.user)
+        messages.success(request, "Iluminação restaurada para o padrão recomendado da cultura.")
     elif action in {"irrigation_toggle", "irrigation_delete"}:
         item = get_object_or_404(IrrigationSchedule, pk=request.POST.get("schedule_id"), actuator__device=controller)
         if action == "irrigation_delete": item.delete(); messages.success(request, "Horário removido.")
@@ -578,6 +587,7 @@ def garden_lighting_schedule(request, garden_id, schedule_id):
     form = LightingScheduleForm(request.POST or None, instance=schedule)
     if request.method == "POST" and form.is_valid():
         form.save()
+        mark_custom_lighting_configuration(garden=garden, user=request.user)
         messages.success(request, "Programação da iluminação atualizada.")
         return redirect("garden-configuration", garden_id=garden.pk)
     return render(request, "customer/form.html", {"title": "Editar iluminação", "form": form})
@@ -645,6 +655,7 @@ def garden_configuration(request, garden_id):
         "controller": controller, "soil_channel": soil_channel, "pump_channel": pump_channel,
         "light_channel": light_channel, "irrigation_form": IrrigationScheduleForm(),
         "lighting_form": LightingScheduleForm(), "lighting_hours": lighting_hours,
+        "effective_lighting": effective.get("lighting", {}),
         "calibration_form": SoilCalibrationForm(initial={"dry_raw": calibration.get("dry_raw", 850), "wet_raw": calibration.get("wet_raw", 350)}),
     })
 

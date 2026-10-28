@@ -51,6 +51,35 @@ class Crop(BaseModel):
         return self.common_name
 
 
+class CropLightingSchedule(BaseModel):
+    """Período de iluminação recomendado e administrado pela HortaViva."""
+
+    crop = models.ForeignKey(Crop, on_delete=models.CASCADE, related_name="lighting_schedules")
+    name = models.CharField(max_length=100, default="Iluminação recomendada")
+    timezone = models.CharField(max_length=64, default="America/Sao_Paulo")
+    days_of_week = models.JSONField(default=list, help_text="0=segunda-feira, 6=domingo")
+    start_time = models.TimeField()
+    end_time = models.TimeField()
+    enabled = models.BooleanField(default=True)
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="updated_crop_lighting_schedules",
+    )
+
+    class Meta:
+        ordering = ("crop__common_name", "start_time", "created_at")
+
+    def clean(self):
+        errors = {}
+        if not self.days_of_week or any(day not in range(7) for day in self.days_of_week):
+            errors["days_of_week"] = "Selecione pelo menos um dia válido."
+        if errors:
+            raise ValidationError(errors)
+
+    def __str__(self):
+        return f"{self.crop.common_name} — {self.start_time:%H:%M}–{self.end_time:%H:%M}"
+
+
 class Cultivar(BaseModel):
     crop = models.ForeignKey(Crop, on_delete=models.CASCADE, related_name="cultivars")
     name = models.CharField(max_length=120)

@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 
 from accounts.models import Address, Membership, Organization, User
-from crops.models import (Crop, CropCultivationProfile, CropNutritionPlan, CropRequirement, CropStageProfile,
+from crops.models import (Crop, CropCultivationProfile, CropLightingSchedule, CropNutritionPlan, CropRequirement, CropStageProfile,
     Cultivar, Fertilizer, HarvestEvent, PlantingCycle, SubstrateMaterial, SubstrateRecipe, SubstrateRecipeComponent)
 from devices.models import (Alert, AlertRule, Channel, Device, DeviceCommand, DeviceCredential, DeviceHeartbeat,
     DeviceModel, GardenPhoto, LightingSchedule, SensorCalibration, TelemetryMetric, TelemetryReading)
@@ -43,6 +43,7 @@ RESOURCES = {
     "subscription-events": Resource("Histórico de assinaturas", SubscriptionEvent, search=("subscription__organization__name", "event_type"), readonly=True),
     "payments": r("Pagamentos", Payment, "subscription competence gross_amount_cents coupon discount_cents amount_cents currency due_at paid_at payment_method status provider_reference notes", ("subscription__organization__name", "provider_reference")),
     "crops": r("Culturas", Crop, "common_name code description image_url is_available light_hours irrigation_frequency_count irrigation_frequency_period pump_duration_seconds", ("common_name", "code")),
+    "crop-lighting": r("Padrões de iluminação", CropLightingSchedule, "crop name timezone days_of_week start_time end_time enabled", ("crop__common_name", "name")),
     "cultivars": r("Variedades", Cultivar, "crop name code description size color flavor vigor resistance days_to_harvest specific_characteristics is_active", ("crop__common_name", "name")),
     "crop-requirements": r("Requisitos de cultivo", CropRequirement, "cultivar metric unit minimum maximum target", ("cultivar__name", "metric")),
     "cultivation-profiles": r("Perfis de cultivo", CropCultivationProfile, "crop cultivar cultivation_system name description is_active target_temperature_min target_temperature_max target_humidity_min target_humidity_max photoperiod_hours target_ppfd substrate_moisture_min substrate_moisture_max initial_irrigation_amount irrigation_unit initial_irrigation_interval_hours ph_min ph_target ph_max ec_min ec_target ec_max automation_config", ("crop__common_name", "name")),
@@ -92,7 +93,7 @@ ALIASES = {"clients": "organizations", "agenda": "visits", "finance": "payments"
 BACKOFFICE_AREAS = {
     "comercial": {"label": "Clientes", "description": "Clientes da HortaViva.", "links": (("Visão geral", None), ("Clientes", "clients"))},
     "configuracoes": {"label": "Configurações", "description": "Modelos, planos, assinaturas e dispositivos.", "links": (("Visão geral", None), ("Modelos de horta", "garden-models"), ("Planos", "plans"), ("Assinaturas", "subscriptions"), ("Dispositivos", "devices"))},
-    "cultivo": {"label": "Cultivo", "description": "Catálogo agronômico, ciclos, colheitas e insumos.", "links": (("Visão geral", None), ("Culturas", "crops"), ("Variedades", "cultivars"), ("Perfis de cultivo", "cultivation-profiles"), ("Estágios", "crop-stages"), ("Ciclos e colheitas", "cycles"), ("Substratos", "substrates"), ("Receitas de substrato", "substrate-recipes"), ("Fertilizantes", "fertilizers"), ("Planos nutricionais", "nutrition-plans"))},
+    "cultivo": {"label": "Cultivo", "description": "Catálogo agronômico, ciclos, colheitas e insumos.", "links": (("Visão geral", None), ("Culturas", "crops"), ("Padrões de iluminação", "crop-lighting"), ("Variedades", "cultivars"), ("Perfis de cultivo", "cultivation-profiles"), ("Estágios", "crop-stages"), ("Ciclos e colheitas", "cycles"), ("Substratos", "substrates"), ("Receitas de substrato", "substrate-recipes"), ("Fertilizantes", "fertilizers"), ("Planos nutricionais", "nutrition-plans"))},
     "hortas": {"label": "Hortas", "description": "Estrutura instalada, módulos e instalações.", "links": (("Visão geral", None), ("Hortas", "gardens"), ("Tipos de módulos", "module-types"), ("Módulos", "modules"), ("Instalações", "installations"), ("QR Codes", "qrcodes"))},
     "iot": {"label": "IoT", "description": "Dispositivos, métricas, telemetria e automações.", "links": (("Visão geral", None), ("Modelos de dispositivos", "device-models"), ("Dispositivos", "devices"), ("Métricas", "metrics"), ("Canais", "channels"), ("Telemetria", "telemetry"), ("Calibrações", "calibrations"), ("Comandos", "commands"), ("Regras de alerta", "alert-rules"), ("Alertas", "alerts"), ("Iluminação", "lighting"))},
     "operacao": {"label": "Operação", "description": "Agenda, ordens, manutenção e atendimento.", "links": (("Visão geral", None), ("Agenda e visitas", "visits"), ("Ordens de serviço", "orders"), ("Planos de manutenção", "maintenance"), ("Registros de manutenção", "maintenance-records"), ("Suporte", "tickets"))},

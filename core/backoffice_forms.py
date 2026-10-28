@@ -10,7 +10,7 @@ from accounts.models import Address, Membership, Organization, User
 from devices.models import Channel, Device
 from subscriptions.models import Plan, PlanEntitlement, PlanVersion, Subscription
 from subscriptions.selectors import get_available_plan_versions
-from crops.models import Crop, PlantingCycle
+from crops.models import Crop, CropLightingSchedule, PlantingCycle
 from crops.selectors import get_available_cultivars
 from gardens.models import Garden, GardenModel, GardenModule, ModuleInstallation
 from operations.models import Visit
@@ -164,6 +164,8 @@ def resource_form_class(resource):
         return CommercialPlanForm
     if resource.model is Crop:
         return CropForm
+    if resource.model is CropLightingSchedule:
+        return CropLightingScheduleForm
     if resource.model is Visit:
         return VisitForm
     if resource.model is Garden:
@@ -171,6 +173,23 @@ def resource_form_class(resource):
     if resource.model is Device:
         return DeviceForm
     return modelform_factory(resource.model, form=OperationalModelForm, fields=resource.fields)
+
+
+class CropLightingScheduleForm(OperationalModelForm):
+    days_of_week = forms.TypedMultipleChoiceField(
+        label="Dias da semana",
+        choices=tuple(enumerate(("Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"))),
+        coerce=int,
+        widget=forms.CheckboxSelectMultiple,
+    )
+
+    class Meta:
+        model = CropLightingSchedule
+        fields = ("crop", "name", "timezone", "days_of_week", "start_time", "end_time", "enabled")
+        widgets = {
+            "start_time": forms.TimeInput(attrs={"type": "time"}),
+            "end_time": forms.TimeInput(attrs={"type": "time"}),
+        }
 
 
 class DeviceForm(OperationalModelForm):

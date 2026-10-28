@@ -18,7 +18,7 @@ from django.utils import timezone
 from django.views.decorators.http import require_POST
 
 from accounts.models import Membership, Organization, User
-from crops.models import Crop, Cultivar, PlantingCycle
+from crops.models import Crop, CropLightingSchedule, Cultivar, PlantingCycle
 from devices.models import Alert, Device, DeviceCredential
 from gardens.models import Garden, GardenModule, ModuleInstallation
 from gardens.selectors import get_active_installations
@@ -43,7 +43,7 @@ from .deletion_services import (
 AREAS = {
     "comercial": ("Clientes", "Clientes da HortaViva.", ("clients",)),
     "configuracoes": ("Planos e assinaturas", "Configurações comerciais dos modelos de horta.", ("plans", "subscriptions")),
-    "cultivo": ("Cultivo", "Catálogo agronômico, ciclos, colheitas e insumos.", ("crops", "cultivars", "cultivation-profiles", "crop-stages", "cycles", "harvests", "substrates", "substrate-recipes", "fertilizers", "nutrition-plans")),
+    "cultivo": ("Cultivo", "Catálogo agronômico, ciclos, colheitas e insumos.", ("crops", "crop-lighting", "cultivars", "cultivation-profiles", "crop-stages", "cycles", "harvests", "substrates", "substrate-recipes", "fertilizers", "nutrition-plans")),
     "hortas": ("Hortas", "Estrutura instalada, módulos e instalações.", ("gardens", "module-types", "modules", "installations", "qrcodes")),
     "iot": ("IoT", "Dispositivos, métricas, telemetria e automações.", ("device-models", "devices", "metrics", "channels", "telemetry", "calibrations", "commands", "alert-rules", "alerts", "lighting")),
     "operacao": ("Operação", "Agenda, ordens, manutenção e atendimento.", ("visits", "orders", "maintenance", "maintenance-records", "tickets")),
@@ -264,6 +264,8 @@ def create(request, section):
         raise Http404
     form = resource_form_class(resource)(request.POST or None)
     if request.method == "POST" and form.is_valid():
+        if isinstance(form.instance, CropLightingSchedule):
+            form.instance.updated_by = request.user
         obj = run_guided_workflow(section, form)
         messages.success(request, "Registro criado com sucesso.")
         return redirect("ops-detail", section=section, pk=obj.pk)
@@ -281,6 +283,8 @@ def edit(request, section, pk):
     obj = get_object_or_404(resource.model, pk=pk)
     form = resource_form_class(resource)(request.POST or None, instance=obj)
     if request.method == "POST" and form.is_valid():
+        if isinstance(form.instance, CropLightingSchedule):
+            form.instance.updated_by = request.user
         form.save()
         if section == "crops" and getattr(form, "active_cycle_count", 0):
             messages.warning(request, f"Esta cultura possui {form.active_cycle_count} cultivo(s) ativo(s). Ela deixou de aparecer para novas escolhas, mas os cultivos existentes continuam funcionando.")

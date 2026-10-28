@@ -6,7 +6,7 @@ from django.db.models.functions import TruncDay, TruncHour
 from django.utils import timezone
 
 from accounts.models import User
-from devices.models import AlertRule, Device, DeviceCommand, GardenPhoto, TelemetryReading
+from devices.models import AlertRule, Device, DeviceCommand, GardenPhoto, LightingSchedule, TelemetryReading
 from gardens.configuration import effective_garden_configuration
 from gardens.models import GardenConfigurationEvent
 
@@ -30,7 +30,10 @@ def update_garden_configuration(*, garden, user, cleaned_data):
     overrides = garden.automation_overrides if isinstance(garden.automation_overrides, dict) else {}
     garden.automation_overrides = {
         **overrides,
-        "lighting": {"hours_per_day": float(cleaned_data["light_hours"])},
+        "lighting": {
+            **(overrides.get("lighting", {}) if isinstance(overrides.get("lighting"), dict) else {}),
+            "hours_per_day": float(cleaned_data["light_hours"]),
+        },
         "irrigation": {
             "frequency_count": cleaned_data["irrigation_frequency_count"],
             "frequency_period": cleaned_data["irrigation_frequency_period"],
@@ -51,8 +54,45 @@ def restore_garden_configuration(*, garden, user):
     overrides = garden.automation_overrides if isinstance(garden.automation_overrides, dict) else {}
     garden.automation_overrides = {key: value for key, value in overrides.items() if key not in OPERATIONAL_KEYS}
     garden.save(update_fields=["automation_overrides", "updated_at"])
+    LightingSchedule.objects.filter(actuator__device__garden=garden).delete()
     current = effective_garden_configuration(garden)
     GardenConfigurationEvent.objects.create(garden=garden, user=user, origin=configuration_origin(user, True), previous_configuration=previous, new_configuration=current)
+    return current
+
+
+@transaction.atomic
+def mark_custom_lighting_configuration(*, garden, user):
+    previous = effective_garden_configuration(garden)
+    overrides = garden.automation_overrides if isinstance(garden.automation_overrides, dict) else {}
+    garden.automation_overrides = {**overrides, "lighting": {**overrides.get("lighting", {}), "source": "custom"}}
+    garden.save(update_fields=["automation_overrides", "updated_at"])
+    current = effective_garden_configuration(garden)
+    GardenConfigurationEvent.objects.create(
+        garden=garden, user=user, origin=configuration_origin(user),
+        previous_configuration=previous, new_configuration=current,
+    )
+    return current
+
+
+@transaction.atomic
+def restore_crop_lighting_configuration(*, garden, user):
+    previous = effective_garden_configuration(garden)
+    LightingSchedule.objects.filter(actuator__device__garden=garden).delete()
+    overrides = garden.automation_overrides if isinstance(garden.automation_overrides, dict) else {}
+    lighting = overrides.get("lighting", {}) if isinstance(overrides.get("lighting"), dict) else {}
+    lighting = {key: value for key, value in lighting.items() if key != "source"}
+    updated = dict(overrides)
+    if lighting:
+        updated["lighting"] = lighting
+    else:
+        updated.pop("lighting", None)
+    garden.automation_overrides = updated
+    garden.save(update_fields=["automation_overrides", "updated_at"])
+    current = effective_garden_configuration(garden)
+    GardenConfigurationEvent.objects.create(
+        garden=garden, user=user, origin=configuration_origin(user, True),
+        previous_configuration=previous, new_configuration=current,
+    )
     return current
 
 

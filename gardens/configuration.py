@@ -106,7 +106,7 @@ def effective_garden_configuration(garden):
                         irrigation["duration_seconds"] = active[0]["duration_seconds"]
         light = controller.channels.filter(metric="light_state", is_enabled=True).first()
         if light:
-            schedules = [
+            custom_schedules = [
                 {
                     "id": str(item.id), "start": item.start_time.strftime("%H:%M"),
                     "end": item.end_time.strftime("%H:%M"), "days": item.days_of_week,
@@ -115,8 +115,27 @@ def effective_garden_configuration(garden):
                 }
                 for item in light.lighting_schedules.all().order_by("start_time")
             ]
+            lighting_override = garden.automation_overrides.get("lighting", {}) if isinstance(garden.automation_overrides, dict) else {}
+            uses_custom = isinstance(lighting_override, Mapping) and lighting_override.get("source") == "custom"
+            crops = [cycle.crop or (cycle.cultivar.crop if cycle.cultivar_id else None) for cycle in cycles]
+            crop = crops[0] if len(crops) == 1 and crops[0] else None
+            recommended = []
+            if crop:
+                recommended = [
+                    {
+                        "id": str(item.id), "start": item.start_time.strftime("%H:%M"),
+                        "end": item.end_time.strftime("%H:%M"), "days": item.days_of_week,
+                        "enabled": item.enabled,
+                        "duration_seconds": lighting_duration_seconds(item.start_time, item.end_time),
+                    }
+                    for item in crop.lighting_schedules.all()
+                ]
+            schedules = custom_schedules if uses_custom else recommended
             if schedules or "lighting" in config:
                 lighting = config.setdefault("lighting", {})
+                lighting["source"] = "custom" if uses_custom else "crop_default"
+                lighting["source_label"] = "Personalizada para esta horta" if uses_custom else "Padrão recomendado para a cultura"
+                lighting["recommended_schedules"] = recommended
                 lighting["schedules"] = schedules
                 lighting["enabled"] = any(item["enabled"] for item in schedules)
                 active = [item for item in schedules if item["enabled"]]
