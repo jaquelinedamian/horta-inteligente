@@ -149,21 +149,40 @@ def ingest_readings(device, readings):
 @transaction.atomic
 def pending_commands(device, limit=20):
     now = timezone.now()
+    # Um GET bem-sucedido no servidor nao prova que a resposta chegou ao
+    # controlador. Expira comandos vencidos e reentrega os ainda sem ACK para
+    # que uma perda de conexao depois do commit nao deixe o comando preso em
+    # ``delivered`` para sempre.
+    DeviceCommand.objects.filter(
+        device=device,
+        status__in=[DeviceCommand.Status.PENDING, DeviceCommand.Status.DELIVERED],
+        expires_at__lte=now,
+    ).update(status=DeviceCommand.Status.EXPIRED, updated_at=now)
     commands = list(
         DeviceCommand.objects.select_for_update()
-        .filter(device=device, status=DeviceCommand.Status.PENDING)
+        .filter(
+            device=device,
+            status__in=[DeviceCommand.Status.PENDING, DeviceCommand.Status.DELIVERED],
+        )
         .filter(Q(not_before__isnull=True) | Q(not_before__lte=now))
-        .filter(Q(expires_at__isnull=True) | Q(expires_at__gt=now))[:limit]
+        .filter(Q(expires_at__isnull=True) | Q(expires_at__gt=now))
+        .order_by("created_at", "id")[:limit]
     )
     for command in commands:
-        command.status = DeviceCommand.Status.DELIVERED
-        command.delivered_at = now
-        command.save(update_fields=["status", "delivered_at", "updated_at"])
-        logger.info(
-            "manual_command_delivered command_id=%s device_id=%s channel=%s queue_latency_ms=%d",
-            command.id, device.id, command.channel.key if command.channel else "none",
-            max(0, int((now - command.created_at).total_seconds() * 1000)),
-        )
+        if command.status == DeviceCommand.Status.PENDING:
+            command.status = DeviceCommand.Status.DELIVERED
+            command.delivered_at = now
+            command.save(update_fields=["status", "delivered_at", "updated_at"])
+            logger.info(
+                "manual_command_delivered command_id=%s device_id=%s channel=%s queue_latency_ms=%d",
+                command.id, device.id, command.channel.key if command.channel else "none",
+                max(0, int((now - command.created_at).total_seconds() * 1000)),
+            )
+        else:
+            logger.info(
+                "manual_command_redelivered command_id=%s device_id=%s channel=%s",
+                command.id, device.id, command.channel.key if command.channel else "none",
+            )
     return commands
 
 

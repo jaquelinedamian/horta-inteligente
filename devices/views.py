@@ -94,11 +94,7 @@ def commands(request):
         return JsonResponse({"commands": [
             {
                 "id": str(command.id),
-                "channel": (
-                    "lamp" if command.channel and command.channel.metric == "light_state"
-                    else "pump" if command.channel and command.channel.metric == "pump_state"
-                    else command.channel.key if command.channel else None
-                ),
+                "channel": command.channel.key if command.channel else None,
                 "type": command.command_type,
                 "payload": command.payload,
                 "expires_at": command.expires_at.isoformat() if command.expires_at else None,

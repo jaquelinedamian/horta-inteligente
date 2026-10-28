@@ -151,7 +151,7 @@ class DeviceApiTests(TestCase):
         response = self.client.get(reverse("devices:commands"), **self.command_headers)
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["commands"][0]["channel"], "lamp")
+        self.assertEqual(response.json()["commands"][0]["channel"], "grow-light")
         self.assertEqual(response.json()["commands"][0]["type"], "set_state")
         self.assertFalse(response.json()["commands"][0]["payload"]["on"])
 
@@ -167,6 +167,37 @@ class DeviceApiTests(TestCase):
         self.assertEqual(command.result["relay"], False)
         confirmation = TelemetryReading.objects.get(channel=light, idempotency_key=f"ack:{command.id}")
         self.assertIs(confirmation.boolean_value, False)
+
+    def test_unacknowledged_command_is_redelivered_until_ack(self):
+        command = DeviceCommand.objects.create(
+            device=self.device, channel=self.actuator, command_type="set_state",
+            payload={"on": False}, idempotency_key="retry-pump-off",
+            expires_at=timezone.now() + timedelta(minutes=5),
+        )
+
+        first = self.client.get(reverse("devices:commands"), **self.command_headers)
+        second = self.client.get(reverse("devices:commands"), **self.command_headers)
+
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(second.status_code, 200)
+        self.assertEqual(first.json()["commands"][0]["id"], str(command.id))
+        self.assertEqual(second.json()["commands"][0]["id"], str(command.id))
+        command.refresh_from_db()
+        self.assertEqual(command.status, DeviceCommand.Status.DELIVERED)
+
+    def test_expired_command_is_not_delivered(self):
+        command = DeviceCommand.objects.create(
+            device=self.device, channel=self.actuator, command_type="set_state",
+            payload={"on": True}, idempotency_key="expired-pump-on",
+            expires_at=timezone.now() - timedelta(seconds=1),
+        )
+
+        response = self.client.get(reverse("devices:commands"), **self.command_headers)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["commands"], [])
+        command.refresh_from_db()
+        self.assertEqual(command.status, DeviceCommand.Status.EXPIRED)
 
     def test_pump_ack_normalizes_physical_state_for_the_ui(self):
         command = DeviceCommand.objects.create(

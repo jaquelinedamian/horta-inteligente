@@ -70,7 +70,9 @@
       });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || 'Não foi possível enviar o comando.');
-      message.textContent = payload.manual_notice ? `${payload.manual_notice} Confirmando estado…` : 'Confirmando estado…';
+      message.textContent = payload.manual_notice
+        ? `${payload.manual_notice} Aguardando confirmação do controlador…`
+        : 'Aguardando confirmação do controlador…';
       await pollCommand(payload.status_url, Date.now(), message);
     } catch (error) {
       message.textContent = error.message.includes('pendente') ? 'Não foi possível confirmar o estado.' : error.message;

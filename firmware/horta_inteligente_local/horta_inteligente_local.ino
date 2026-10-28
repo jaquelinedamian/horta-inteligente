@@ -1334,11 +1334,23 @@ void pollCommands() {
         channel == "pump"
     ) {
 
+      const int gpioBefore =
+          digitalRead(
+              PUMP_RELAY_PIN
+          );
+
       setPump(
           on
       );
 
       const uint32_t relayActuatedAt = millis();
+
+      Serial.printf(
+          "GPIO D5 BEFORE: %s | AFTER: %s | PUMP STATE: %s\n",
+          gpioBefore == HIGH ? "HIGH" : "LOW",
+          digitalRead(PUMP_RELAY_PIN) == HIGH ? "HIGH" : "LOW",
+          pumpOn ? "ON" : "OFF"
+      );
 
       if (!on) {
 
@@ -1403,11 +1415,23 @@ void pollCommands() {
 
       Serial.println(F("Executando comando da LAMPADA recebido pela plataforma..."));
 
+      const int gpioBefore =
+          digitalRead(
+              LAMP_RELAY_PIN
+          );
+
       setLamp(
           on
       );
 
       const uint32_t relayActuatedAt = millis();
+
+      Serial.printf(
+          "GPIO D6 BEFORE: %s | AFTER: %s | LIGHT STATE: %s\n",
+          gpioBefore == HIGH ? "HIGH" : "LOW",
+          digitalRead(LAMP_RELAY_PIN) == HIGH ? "HIGH" : "LOW",
+          lampOn ? "ON" : "OFF"
+      );
 
       Serial.print(F("Estado fisico solicitado para a lampada no D6: "));
       Serial.println(on ? F("LIGADA") : F("DESLIGADA"));
