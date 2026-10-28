@@ -65,6 +65,10 @@ constexpr uint8_t LAMP_RELAY_PIN = D6;
 constexpr uint8_t SOIL_MOISTURE_PIN = A0;
 
 constexpr bool RELAY_ACTIVE_LOW = true;
+constexpr uint8_t RELAY_ON_LEVEL =
+    RELAY_ACTIVE_LOW ? LOW : HIGH;
+constexpr uint8_t RELAY_OFF_LEVEL =
+    RELAY_ACTIVE_LOW ? HIGH : LOW;
 
 constexpr char FIRMWARE_VERSION[] =
     "horta-esp8266-1.3.1-platform-lamp";
@@ -187,9 +191,9 @@ void writeRelay(
 
   digitalWrite(
       pin,
-      (on == RELAY_ACTIVE_LOW)
-          ? LOW
-          : HIGH
+      on
+          ? RELAY_ON_LEVEL
+          : RELAY_OFF_LEVEL
   );
 }
 
@@ -227,7 +231,10 @@ void setPump(bool on) {
   );
 }
 
-void setLamp(bool on) {
+bool setLamp(
+    bool on,
+    const char* source = "SYSTEM"
+) {
 
   writeRelay(
       LAMP_RELAY_PIN,
@@ -244,10 +251,15 @@ void setLamp(bool on) {
   );
 
   Serial.println(
-      on
+      lampOn
           ? F("LIGADA")
           : F("DESLIGADA")
   );
+
+  Serial.print(F("LIGHT CHANGE SOURCE: "));
+  Serial.println(source);
+
+  return lampOn == on;
 }
 
 // ============================================================
@@ -1413,28 +1425,61 @@ void pollCommands() {
         channel == "grow-light"
     ) {
 
-      Serial.println(F("Executando comando da LAMPADA recebido pela plataforma..."));
+      Serial.println();
+      Serial.println(F("===== LIGHT COMMAND ====="));
+      Serial.print(F("Command ID: "));
+      Serial.println(id);
+      Serial.print(F("Channel: "));
+      Serial.println(channel);
+      Serial.print(F("Requested: "));
+      Serial.println(on ? F("ON") : F("OFF"));
+      Serial.printf(
+          "LIGHT_PIN: D6 / GPIO %u\n",
+          static_cast<unsigned int>(LAMP_RELAY_PIN)
+      );
 
       const int gpioBefore =
           digitalRead(
               LAMP_RELAY_PIN
           );
 
-      setLamp(
-          on
+      Serial.print(F("GPIO before: "));
+      Serial.println(gpioBefore == HIGH ? F("HIGH") : F("LOW"));
+      Serial.print(F("Writing: "));
+      Serial.println(
+          (on ? RELAY_ON_LEVEL : RELAY_OFF_LEVEL) == HIGH
+              ? F("HIGH")
+              : F("LOW")
       );
+
+      setLamp(
+          on,
+          "COMMAND"
+      );
+
+      // Aguarda o modulo de rele estabilizar antes da leitura e do ACK. A
+      // leitura confirma o nivel do GPIO, nao os contatos mecanicos do rele.
+      delay(150);
 
       const uint32_t relayActuatedAt = millis();
 
-      Serial.printf(
-          "GPIO D6 BEFORE: %s | AFTER: %s | LIGHT STATE: %s\n",
-          gpioBefore == HIGH ? "HIGH" : "LOW",
-          digitalRead(LAMP_RELAY_PIN) == HIGH ? "HIGH" : "LOW",
-          lampOn ? "ON" : "OFF"
-      );
+      const int gpioAfter =
+          digitalRead(
+              LAMP_RELAY_PIN
+          );
 
-      Serial.print(F("Estado fisico solicitado para a lampada no D6: "));
-      Serial.println(on ? F("LIGADA") : F("DESLIGADA"));
+      lampOn =
+          readRelayState(
+              LAMP_RELAY_PIN
+          );
+
+      const bool gpioMatchesRequest =
+          lampOn == on;
+
+      Serial.print(F("GPIO after: "));
+      Serial.println(gpioAfter == HIGH ? F("HIGH") : F("LOW"));
+      Serial.print(F("Physical state expected: "));
+      Serial.println(lampOn ? F("ON") : F("OFF"));
 
       if (!on) {
 
@@ -1468,11 +1513,15 @@ void pollCommands() {
 
       acknowledge(
           id,
-          true,
-          on
-              ? "lampada ligada"
-              : "lampada desligada"
+          gpioMatchesRequest,
+          gpioMatchesRequest
+              ? (on ? "lampada ligada" : "lampada desligada")
+              : "nivel do GPIO da lampada divergiu do comando"
       );
+
+      Serial.print(F("ACK: "));
+      Serial.println(gpioMatchesRequest ? F("success") : F("failed"));
+      Serial.println(F("========================="));
 
       Serial.println(F("COMMAND LATENCY"));
       Serial.printf("recebido -> rele acionado: %lu ms\n", relayActuatedAt - commandReceivedAt);
@@ -2007,7 +2056,8 @@ void runOfflineAutomation() {
         );
 
     setLamp(
-        true
+        true,
+        "SCHEDULE"
     );
 
     lampStopAt =
@@ -2064,25 +2114,15 @@ void setup() {
       )
   );
 
-  pinMode(
-      PUMP_RELAY_PIN,
-      OUTPUT
-  );
+  // Precarrega o latch no nivel inativo antes de habilitar as saidas. Isso
+  // reduz o pulso de acionamento durante o boot em modulos ACTIVE LOW.
+  digitalWrite(PUMP_RELAY_PIN, RELAY_OFF_LEVEL);
+  digitalWrite(LAMP_RELAY_PIN, RELAY_OFF_LEVEL);
+  pinMode(PUMP_RELAY_PIN, OUTPUT);
+  pinMode(LAMP_RELAY_PIN, OUTPUT);
 
-  pinMode(
-      LAMP_RELAY_PIN,
-      OUTPUT
-  );
-
-  // Os dois relés iniciam desligados.
-  // A plataforma ou a programação salva decide quando ligar.
-  setPump(
-      false
-  );
-
-  setLamp(
-      false
-  );
+  setPump(false);
+  setLamp(false, "BOOT");
 
   // SDA = D2
   // SCL = D1
@@ -2268,7 +2308,8 @@ void loop() {
   ) {
 
     setLamp(
-        false
+        false,
+        "TIMER"
     );
 
     lampStopAt =

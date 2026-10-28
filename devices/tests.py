@@ -37,10 +37,15 @@ class FirmwareLightingCommandContractTests(TestCase):
         self.assertRegex(firmware, re.compile(r"RELAY_ACTIVE_LOW\s*\?\s*!gpioHigh\s*:\s*gpioHigh"))
         self.assertRegex(
             firmware,
-            re.compile(
-                r'setLamp\s*\(\s*on\s*\).*?acknowledge\s*\(\s*id\s*,\s*true',
-                re.DOTALL,
-            ),
+            re.compile(r'setLamp\s*\(\s*on\s*,\s*"COMMAND"\s*\)'),
+        )
+        self.assertIn("gpioMatchesRequest", firmware)
+        self.assertRegex(firmware, re.compile(r"acknowledge\s*\(\s*id\s*,\s*gpioMatchesRequest"))
+        self.assertIn('"LIGHT_PIN: D6 / GPIO %u\\n"', firmware)
+        self.assertIn('F("LIGHT CHANGE SOURCE: ")', firmware)
+        self.assertLess(
+            firmware.index("digitalWrite(LAMP_RELAY_PIN, RELAY_OFF_LEVEL);"),
+            firmware.index("pinMode(LAMP_RELAY_PIN, OUTPUT);"),
         )
 
     def test_manual_command_polling_has_priority_and_bounded_timeouts(self):
