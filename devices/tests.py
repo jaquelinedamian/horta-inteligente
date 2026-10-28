@@ -60,6 +60,10 @@ class FirmwareLightingCommandContractTests(TestCase):
         self.assertIn('secure.setSession(', firmware)
         self.assertIn('http.collectHeaders(responseHeaders, 1)', firmware)
         self.assertIn('"HTTP backend Server-Timing: "', firmware)
+        self.assertIn('F("===== COMMAND POLL =====")', firmware)
+        self.assertIn('F("RESPONSE BODY: ")', firmware)
+        self.assertIn('F("CONTENT LENGTH: ")', firmware)
+        self.assertIn('F("COMMAND COUNT: ")', firmware)
         loop = firmware[firmware.index("void loop()") :]
         self.assertLess(loop.index("pollCommands();"), loop.index("sendTelemetry();"))
 

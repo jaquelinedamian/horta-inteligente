@@ -1245,6 +1245,9 @@ void pollCommands() {
 
   String response;
 
+  Serial.println();
+  Serial.println(F("===== COMMAND POLL ====="));
+
   int status =
       apiRequest(
           "GET",
@@ -1253,6 +1256,13 @@ void pollCommands() {
           "",
           response
       );
+
+  Serial.print(F("HTTP STATUS: "));
+  Serial.println(status);
+  Serial.print(F("RESPONSE BODY: "));
+  Serial.println(response.length() ? response : F("<vazio>"));
+  Serial.print(F("CONTENT LENGTH: "));
+  Serial.println(response.length());
 
   if (
       status
@@ -1269,25 +1279,41 @@ void pollCommands() {
       );
     }
 
+    Serial.println(F("COMMAND COUNT: indisponivel"));
+    Serial.println(F("========================"));
+
     return;
   }
 
   JsonDocument doc;
 
-  if (
+  DeserializationError jsonError =
       deserializeJson(
           doc,
           response
-      )
-  ) {
+      );
+
+  if (jsonError) {
+
+    Serial.print(F("JSON ERROR: "));
+    Serial.println(jsonError.c_str());
+    Serial.println(F("COMMAND COUNT: indisponivel"));
+    Serial.println(F("========================"));
 
     return;
   }
 
+  JsonArray commands =
+      doc["commands"]
+          .as<JsonArray>();
+
+  Serial.print(F("COMMAND COUNT: "));
+  Serial.println(commands.isNull() ? 0 : commands.size());
+  Serial.println(F("========================"));
+
   for (
       JsonObject command :
-      doc["commands"]
-          .as<JsonArray>()
+      commands
   ) {
 
     const uint32_t commandReceivedAt = millis();

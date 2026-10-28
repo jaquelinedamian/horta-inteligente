@@ -91,6 +91,14 @@ def commands(request):
     try:
         validate_device_id(request)
         items = pending_commands(request.device)
+        logger.info(
+            "device_command_poll device_id=%s command_count=%d command_ids=%s statuses=%s server_time=%s",
+            request.device.id,
+            len(items),
+            ",".join(str(command.id) for command in items) or "none",
+            ",".join(command.status for command in items) or "none",
+            timezone.now().isoformat(),
+        )
         return JsonResponse({"commands": [
             {
                 "id": str(command.id),

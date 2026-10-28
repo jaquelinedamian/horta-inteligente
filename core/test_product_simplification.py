@@ -74,6 +74,12 @@ class ProductSimplificationTests(TestCase):
         self.assertEqual(response.status_code, 201)
         command = DeviceCommand.objects.get(id=response.json()["id"])
         self.assertEqual(command.status, DeviceCommand.Status.PENDING)
+        self.assertEqual(command.device_id, self.device.id)
+        self.assertEqual(command.channel_id, self.light.id)
+        self.assertEqual(command.command_type, "set_state")
+        self.assertIs(command.payload["on"], True)
+        self.assertIsNotNone(command.expires_at)
+        self.assertGreater(command.expires_at, command.created_at)
         self.assertEqual(response.json()["status_url"], reverse("device-command-status", args=[command.id]))
 
         command.status = DeviceCommand.Status.SUCCEEDED
