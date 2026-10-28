@@ -116,7 +116,10 @@ def evaluate_alerts(reading):
 
 @transaction.atomic
 def ingest_readings(device, readings):
-    channels = {c.key: c for c in device.channels.filter(kind=Channel.Kind.SENSOR, is_enabled=True)}
+    # Sensores e atuadores usam a mesma trilha temporal. Para atuadores, a
+    # leitura booleana representa o estado confirmado pelo controlador, não
+    # apenas o estado solicitado por um comando.
+    channels = {c.key: c for c in device.channels.filter(is_enabled=True)}
     results = []
     for item in readings:
         channel = channels.get(item.get("channel"))

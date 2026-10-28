@@ -10,7 +10,7 @@ from django.views.decorators.http import require_GET, require_POST
 
 from .authentication import device_required
 from gardens.configuration import effective_garden_configuration
-from .models import Channel, DeviceCommand, DeviceHeartbeat, GardenPhoto
+from .models import Channel, DeviceCommand, DeviceHeartbeat, GardenPhoto, TelemetryReading
 from .services import ingest_readings, parsed_datetime, pending_commands
 
 logger = logging.getLogger(__name__)
@@ -139,6 +139,17 @@ def acknowledge_command(request, command_id):
         command.result = result
         command.acknowledged_at = timezone.now()
         command.save(update_fields=["status", "result", "acknowledged_at", "updated_at"])
+        if command.status == DeviceCommand.Status.SUCCEEDED and command.channel and "relay" in result:
+            TelemetryReading.objects.get_or_create(
+                channel=command.channel,
+                idempotency_key=f"ack:{command.id}",
+                defaults={
+                    "recorded_at": command.acknowledged_at,
+                    "boolean_value": bool(result["relay"]),
+                    "source": "device",
+                    "raw": {"source": "command_ack", "command_id": str(command.id)},
+                },
+            )
         logger.info(
             "manual_command_acknowledged command_id=%s device_id=%s status=%s "
             "created_to_ack_ms=%d delivered_to_ack_ms=%d",
@@ -173,7 +184,7 @@ def telemetry_v2(request):
         message_id = str(payload.get("idempotency_key") or f"{request.device.id}:{recorded_at}")
         for field, metric in aliases.items():
             channel = channels.get(metric)
-            if field in payload and channel and channel.kind == Channel.Kind.SENSOR:
+            if field in payload and channel:
                 readings.append({
                     "channel": channel.key, "value": payload[field], "recorded_at": recorded_at,
                     "idempotency_key": f"{message_id}:{field}", "raw": payload,

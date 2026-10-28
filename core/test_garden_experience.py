@@ -208,6 +208,9 @@ class GardenExperienceTests(TestCase):
 
     def test_quick_control_summary_uses_real_schedules_heartbeat_and_history(self):
         now = timezone.now()
+        self.device.last_seen_at = now
+        self.device.status = Device.Status.ONLINE
+        self.device.save(update_fields=["last_seen_at", "status", "updated_at"])
         light = self.device.channels.get(metric="light_state")
         IrrigationSchedule.objects.create(
             actuator=self.pump, name="Manhã", days_of_week=list(range(7)),
@@ -242,6 +245,26 @@ class GardenExperienceTests(TestCase):
         self.assertTrue(summary["lighting"]["active"])
         self.assertEqual(summary["lighting"]["hours_per_day"], 12)
         self.assertIn(summary["lighting"]["next_action"], {"Ligar", "Desligar"})
+
+    def test_physical_state_confirmation_overrides_an_older_command(self):
+        now = timezone.now()
+        light = self.device.channels.get(metric="light_state")
+        self.device.last_seen_at = now
+        self.device.save(update_fields=["last_seen_at", "updated_at"])
+        DeviceCommand.objects.create(
+            device=self.device, channel=light, command_type="set_state", payload={"on": False},
+            status=DeviceCommand.Status.SUCCEEDED, acknowledged_at=now - timedelta(minutes=2),
+            result={"relay": False}, idempotency_key="older-off-command",
+        )
+        TelemetryReading.objects.create(
+            channel=light, recorded_at=now, boolean_value=True, idempotency_key="physical-light-on",
+        )
+
+        summary = actuator_automation_summary(garden_snapshot(self.garden))
+
+        self.assertIs(summary["lighting"]["state"], True)
+        self.assertTrue(summary["lighting"]["state_is_recent"])
+        self.assertEqual(summary["lighting"]["state_source"], "telemetry")
 
     def test_report_permission_is_scoped_and_admin_can_view_any(self):
         self.client.force_login(self.other)

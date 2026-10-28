@@ -29,6 +29,12 @@ class FirmwareLightingCommandContractTests(TestCase):
                 r'channel\s*==\s*"lamp"\s*\|\|\s*channel\s*==\s*"grow-light"'
             ),
         )
+        self.assertIn('lightStateItem["channel"] =', firmware)
+        self.assertIn('"grow-light"', firmware)
+        self.assertIn('lightStateItem["value"] =', firmware)
+        self.assertIn('lampOn;', firmware)
+        self.assertIn("bool readRelayState(uint8_t pin)", firmware)
+        self.assertRegex(firmware, re.compile(r"RELAY_ACTIVE_LOW\s*\?\s*!gpioHigh\s*:\s*gpioHigh"))
         self.assertRegex(
             firmware,
             re.compile(
@@ -107,6 +113,16 @@ class DeviceApiTests(TestCase):
             "canal desconhecido ou desabilitado: temperature",
         )
 
+    def test_telemetry_persists_confirmed_boolean_actuator_states(self):
+        payload = {"readings": [
+            {"channel": "pump", "value": False, "recorded_at": timezone.now().isoformat(), "idempotency_key": "pump-state-1"},
+            {"channel": "grow-light", "value": True, "recorded_at": timezone.now().isoformat(), "idempotency_key": "light-state-1"},
+        ]}
+        response = self.client.post(reverse("devices:telemetry"), json.dumps(payload), content_type="application/json", **self.headers)
+        self.assertEqual(response.status_code, 202)
+        self.assertIs(TelemetryReading.objects.get(channel__key="pump").boolean_value, False)
+        self.assertIs(TelemetryReading.objects.get(channel__key="grow-light").boolean_value, True)
+
     def test_device_can_poll_and_acknowledge_its_command(self):
         command = DeviceCommand.objects.create(
             device=self.device, channel=self.actuator, command_type="set_state",
@@ -149,6 +165,8 @@ class DeviceApiTests(TestCase):
         command.refresh_from_db()
         self.assertEqual(command.result["lamp"], False)
         self.assertEqual(command.result["relay"], False)
+        confirmation = TelemetryReading.objects.get(channel=light, idempotency_key=f"ack:{command.id}")
+        self.assertIs(confirmation.boolean_value, False)
 
     def test_pump_ack_normalizes_physical_state_for_the_ui(self):
         command = DeviceCommand.objects.create(

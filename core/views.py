@@ -396,8 +396,6 @@ def device_command_status(request, command_id):
     relay = result.get("relay")
     if relay is None and command.channel:
         relay = result.get("lamp" if command.channel.metric == "light_state" else "pump")
-    if relay is None and command.status == DeviceCommand.Status.SUCCEEDED:
-        relay = command.payload.get("on")
     if command.status in {DeviceCommand.Status.SUCCEEDED, DeviceCommand.Status.FAILED}:
         now = timezone.now()
         logger.info(
@@ -454,7 +452,7 @@ def garden_detail(request, garden_id):
     config = effective_garden_configuration(garden)
     snapshot = garden_snapshot(garden)
     can_manage_credentials = request.user.is_hortaviva_admin
-    return render(request, "shared/garden_detail.html", {"snapshot": snapshot, "configuration": config, "has_overrides": bool(garden.automation_overrides), "technical": request.user.is_hortaviva_admin or request.user.employee_role == User.EmployeeRole.TECHNICIAN or request.user.memberships.filter(role=Membership.Role.TECHNICIAN, is_active=True).exists(), "can_manage_credentials": can_manage_credentials})
+    return render(request, "shared/garden_detail.html", {"snapshot": snapshot, "automation_summary": actuator_automation_summary(snapshot), "configuration": config, "has_overrides": bool(garden.automation_overrides), "technical": request.user.is_hortaviva_admin or request.user.employee_role == User.EmployeeRole.TECHNICIAN or request.user.memberships.filter(role=Membership.Role.TECHNICIAN, is_active=True).exists(), "can_manage_credentials": can_manage_credentials})
 
 
 def _admin_garden(request, garden_id):

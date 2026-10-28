@@ -28,7 +28,8 @@
       if (!response.ok) throw new Error('Não foi possível consultar a confirmação do controlador.');
       const command = await response.json();
       if (command.status === 'succeeded') {
-        message.textContent = 'Comando confirmado. Atualizando estado…';
+        if (typeof command.state !== 'boolean') throw new Error('Não foi possível confirmar o estado.');
+        message.textContent = 'Estado confirmado pelo controlador. Atualizando…';
         window.location.reload();
         return;
       }
@@ -61,7 +62,7 @@
       message.setAttribute('aria-live', 'polite');
       form.appendChild(message);
     }
-    message.textContent = 'Enviando comando… Aguardando confirmação do controlador.';
+    message.textContent = 'Enviando comando…';
     try {
       const response = await fetch(form.action, {
         method: 'POST', body: data, credentials: 'same-origin',
@@ -69,10 +70,10 @@
       });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || 'Não foi possível enviar o comando.');
-      if (payload.manual_notice) message.textContent = `${payload.manual_notice} Aguardando confirmação…`;
+      message.textContent = payload.manual_notice ? `${payload.manual_notice} Confirmando estado…` : 'Confirmando estado…';
       await pollCommand(payload.status_url, Date.now(), message);
     } catch (error) {
-      message.textContent = error.message;
+      message.textContent = error.message.includes('pendente') ? 'Não foi possível confirmar o estado.' : error.message;
       message.classList.remove('text-muted');
       message.classList.add('text-danger');
       buttons.forEach((button) => { button.disabled = false; });

@@ -193,14 +193,28 @@ void writeRelay(
   );
 }
 
-void setPump(bool on) {
+bool readRelayState(uint8_t pin) {
 
-  pumpOn = on;
+  const bool gpioHigh =
+      digitalRead(pin)
+      == HIGH;
+
+  return RELAY_ACTIVE_LOW
+      ? !gpioHigh
+      : gpioHigh;
+}
+
+void setPump(bool on) {
 
   writeRelay(
       PUMP_RELAY_PIN,
       on
   );
+
+  pumpOn =
+      readRelayState(
+          PUMP_RELAY_PIN
+      );
 
   Serial.print(
       F("Bomba: ")
@@ -215,12 +229,15 @@ void setPump(bool on) {
 
 void setLamp(bool on) {
 
-  lampOn = on;
-
   writeRelay(
       LAMP_RELAY_PIN,
       on
   );
+
+  lampOn =
+      readRelayState(
+          LAMP_RELAY_PIN
+      );
 
   Serial.print(
       F("Lampada: ")
@@ -959,6 +976,42 @@ void sendTelemetry() {
   moistureItem["idempotency_key"] =
       nextKey(
           "soil-moisture"
+      );
+
+  // Estado da saída GPIO confirmado pelo próprio controlador. O valor enviado
+  // é lógico (true = relé acionado), independentemente de ACTIVE LOW.
+  JsonObject pumpStateItem =
+      readings.add<JsonObject>();
+
+  pumpStateItem["channel"] =
+      "pump";
+
+  pumpStateItem["value"] =
+      pumpOn;
+
+  pumpStateItem["recorded_at"] =
+      recordedAt;
+
+  pumpStateItem["idempotency_key"] =
+      nextKey(
+          "pump-state"
+      );
+
+  JsonObject lightStateItem =
+      readings.add<JsonObject>();
+
+  lightStateItem["channel"] =
+      "grow-light";
+
+  lightStateItem["value"] =
+      lampOn;
+
+  lightStateItem["recorded_at"] =
+      recordedAt;
+
+  lightStateItem["idempotency_key"] =
+      nextKey(
+          "light-state"
       );
 
   String body;

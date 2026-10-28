@@ -6,6 +6,7 @@ from django.db.models import Q
 from django.utils import timezone
 
 from crops.models import PlantingCycle
+from gardens.configuration import effective_garden_configuration
 from subscriptions.models import CheckoutRequest
 from .models import Alert, Device, DeviceCommand, GardenPhoto
 
@@ -47,15 +48,27 @@ def _next_lighting_action(schedules, now):
     return min(candidates, key=lambda item: item[0]) if candidates else None
 
 
+def _confirmed_actuator_state(channel, controller, diagnostic_key, freshness_minutes):
+    """Retorna somente estado informado pelo dispositivo, nunca o solicitado."""
+    candidates = []
+    reading = channel.readings.filter(boolean_value__isnull=False).order_by("-recorded_at").first() if channel else None
+    if reading:
+        candidates.append((reading.recorded_at, bool(reading.boolean_value), "telemetry"))
+    heartbeat = controller.latest_heartbeat if controller else None
+    diagnostics = heartbeat.diagnostics if heartbeat and isinstance(heartbeat.diagnostics, dict) else {}
+    if diagnostic_key in diagnostics:
+        candidates.append((heartbeat.recorded_at, bool(diagnostics[diagnostic_key]), "heartbeat"))
+    if not candidates:
+        return {"state": None, "last_state": None, "confirmed_at": None, "source": None, "is_recent": False}
+    confirmed_at, state, source = max(candidates, key=lambda item: item[0])
+    is_recent = bool(controller and controller.is_online and timezone.now() - confirmed_at <= timedelta(minutes=freshness_minutes))
+    return {"state": state if is_recent else None, "last_state": state, "confirmed_at": confirmed_at, "source": source, "is_recent": is_recent}
+
+
 def actuator_automation_summary(snapshot):
     """Resumo factual dos atuadores; não infere eventos offline não reportados."""
     now = timezone.now()
     controller = snapshot.get("controller")
-    diagnostics = (
-        controller.latest_heartbeat.diagnostics
-        if controller and controller.latest_heartbeat and isinstance(controller.latest_heartbeat.diagnostics, dict)
-        else {}
-    )
     pump = snapshot.get("pump_channel")
     light = snapshot.get("light_channel")
     pump_schedules = list(pump.irrigation_schedules.filter(enabled=True).order_by("start_time")) if pump else []
@@ -63,8 +76,12 @@ def actuator_automation_summary(snapshot):
     last_pump_on = pump.commands.filter(status=DeviceCommand.Status.SUCCEEDED, payload__on=True).order_by("-acknowledged_at").first() if pump else None
     last_light_on = light.commands.filter(status=DeviceCommand.Status.SUCCEEDED, payload__on=True).order_by("-acknowledged_at").first() if light else None
     last_light_off = light.commands.filter(status=DeviceCommand.Status.SUCCEEDED, payload__on=False).order_by("-acknowledged_at").first() if light else None
-    pump_state = bool(diagnostics.get("pump_on", _command_state(snapshot["actuator_states"].get("pump_state"), "pump_state")))
-    light_state = bool(diagnostics.get("lamp_on", _command_state(snapshot["actuator_states"].get("light_state"), "light_state")))
+    config = effective_garden_configuration(snapshot["garden"])
+    freshness_minutes = max(2, int((config.get("monitoring") or {}).get("interval_minutes") or 60) * 2)
+    pump_confirmation = _confirmed_actuator_state(pump, controller, "pump_on", freshness_minutes)
+    light_confirmation = _confirmed_actuator_state(light, controller, "lamp_on", freshness_minutes)
+    pump_state = pump_confirmation["state"] is True
+    light_state = light_confirmation["state"] is True
     pump_duration = last_pump_on.payload.get("duration_seconds") if last_pump_on else None
     pump_end = last_pump_on.acknowledged_at + timedelta(seconds=pump_duration) if pump_state and last_pump_on and last_pump_on.acknowledged_at and pump_duration else None
     if pump_end and pump_end <= now:
@@ -92,6 +109,9 @@ def actuator_automation_summary(snapshot):
     return {
         "irrigation": {
             "configured": bool(pump_schedules), "active": pump_state,
+            "state": pump_confirmation["state"], "last_state": pump_confirmation["last_state"],
+            "confirmed_at": pump_confirmation["confirmed_at"], "state_source": pump_confirmation["source"],
+            "state_is_recent": pump_confirmation["is_recent"],
             "mode": _command_origin(last_pump_on) if pump_state and last_pump_on else ("Automático" if pump_schedules else "Manual"),
             "schedules": pump_schedules, "daily_count": max_irrigations,
             "next_at": next_irrigation[0] if next_irrigation else None,
@@ -101,6 +121,9 @@ def actuator_automation_summary(snapshot):
         },
         "lighting": {
             "configured": bool(light_schedules), "active": light_state,
+            "state": light_confirmation["state"], "last_state": light_confirmation["last_state"],
+            "confirmed_at": light_confirmation["confirmed_at"], "state_source": light_confirmation["source"],
+            "state_is_recent": light_confirmation["is_recent"],
             "mode": _command_origin(last_light_on) if light_state and last_light_on else ("Automático" if light_schedules else "Manual"),
             "schedules": light_schedules, "hours_per_day": max_light_seconds / 3600 if max_light_seconds else None,
             "next_at": next_light[0] if next_light else None, "next_action": next_light[1] if next_light else None,
