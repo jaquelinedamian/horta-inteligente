@@ -6,7 +6,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from accounts.models import Membership, Organization, User
-from devices.models import Channel, Device, DeviceCommand, DeviceModel, TelemetryReading
+from devices.models import AlertRule, Channel, Device, DeviceCommand, DeviceModel, TelemetryReading
 from gardens.models import Garden, GardenModel
 
 
@@ -37,7 +37,13 @@ class MonitoringExperienceTests(TestCase):
         self.assertEqual(payload["sensors"]["air_temperature"]["current"], 24.0)
         self.assertEqual(payload["sensors"]["air_temperature"]["delta"], 2.0)
         self.assertFalse(payload["is_stale"])
+        self.assertTrue(payload["device_offline"])
         self.assertEqual(payload["monitoring_interval_minutes"], 15)
+
+    def test_configured_critical_alert_rule_drives_sensor_classification(self):
+        AlertRule.objects.create(organization=self.org, channel=self.temperature, name="Temperatura crítica", operator=AlertRule.Operator.GT, threshold=23, severity=3)
+        response = self.client.get(reverse("garden-measurements-latest-api", args=[self.garden.pk]))
+        self.assertEqual(response.json()["sensors"]["air_temperature"]["classification"], "critical")
 
     def test_history_api_aggregates_and_only_returns_real_ack_events(self):
         response = self.client.get(reverse("garden-measurements-api", args=[self.garden.pk]), {"period": "24h"})
@@ -51,6 +57,13 @@ class MonitoringExperienceTests(TestCase):
     def test_custom_range_requires_valid_dates(self):
         response = self.client.get(reverse("garden-measurements-api", args=[self.garden.pk]), {"period": "custom"})
         self.assertEqual(response.status_code, 400)
+
+    def test_custom_range_accepts_from_and_to_aliases(self):
+        now = timezone.now()
+        response = self.client.get(reverse("garden-measurements-api", args=[self.garden.pk]), {
+            "period": "custom", "from": (now - timedelta(hours=1)).isoformat(), "to": now.isoformat(),
+        })
+        self.assertEqual(response.status_code, 200)
 
     def test_other_customer_cannot_read_garden_measurements(self):
         other = User.objects.create_user(email="other@example.com", password="secret", full_name="Other")

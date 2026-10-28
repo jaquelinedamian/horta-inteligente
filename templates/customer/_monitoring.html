@@ -1,19 +1,19 @@
 <section class="content-card mb-4 monitoring-panel" data-monitoring data-api="{% url 'garden-measurements-api' garden.pk %}?period=24h">
   <div class="d-flex flex-wrap justify-content-between align-items-start gap-3">
-    <div><span class="eyebrow">Monitoramento</span><h2 class="h4 mt-2 mb-1">Condições da horta</h2><p class="text-muted mb-0">Última medição: {% if monitoring.last_measurement_at %}{{ monitoring.last_measurement_at|date:'d/m/Y H:i' }}{% else %}ainda não recebida{% endif %}</p></div>
-    <span class="badge-soft {% if monitoring.is_stale %}badge-warning{% endif %}">{% if monitoring.is_stale %}Dados desatualizados{% else %}Dados atualizados{% endif %} · intervalo {{ monitoring.monitoring_interval }} min</span>
+    <div><span class="eyebrow">Monitoramento</span><h2 class="h4 mt-2 mb-1">Condições da horta</h2><p class="text-muted mb-0"><strong>Última medição:</strong> {% if monitoring.last_measurement_at %}{{ monitoring.last_measurement_at|date:'d/m/Y' }} às {{ monitoring.last_measurement_at|date:'H:i' }}{% else %}aguardando primeira leitura{% endif %}</p></div>
+    <span class="badge-soft {% if monitoring.device_offline or monitoring.is_stale %}badge-warning{% endif %}">{% if monitoring.device_offline %}Dispositivo offline{% elif monitoring.is_stale %}Sem atualização recente{% else %}Dados atualizados{% endif %} · intervalo {{ monitoring.monitoring_interval }} min</span>
   </div>
   <div class="row g-3 mt-1">
     {% for key,item in monitoring.sensors.items %}<div class="col-md-4"><article class="monitor-sensor h-100">
-      <div class="d-flex justify-content-between"><strong>{{ item.label }}</strong>{% if item.classification == 'ideal' %}<span class="badge-soft">Ideal</span>{% elif item.classification == 'attention' %}<span class="badge-soft badge-warning">Atenção</span>{% elif item.limits %}<span class="badge-soft">Monitorado</span>{% endif %}</div>
+      <div class="d-flex justify-content-between"><strong>{{ item.label }}</strong>{% if item.classification == 'ideal' %}<span class="badge-soft">Ideal</span>{% elif item.classification == 'attention' %}<span class="badge-soft badge-warning">Atenção</span>{% elif item.classification == 'critical' %}<span class="badge-soft badge-danger">Crítico</span>{% elif item.limits %}<span class="badge-soft">Monitorado</span>{% endif %}</div>
       {% if item.current != None %}<div class="monitor-value">{{ item.current|floatformat:1 }} <small>{{ item.unit }}</small></div><small class="text-muted">{{ item.recorded_at|date:'d/m/Y H:i' }}{% if item.delta != None %} · {% if item.delta > 0 %}↑{% elif item.delta < 0 %}↓{% else %}→{% endif %} {{ item.delta|floatformat:1 }} desde a anterior{% endif %}</small>
       {% else %}<div class="monitor-empty"><strong>Sem dados</strong><small>O sensor está configurado, mas ainda não enviou leituras.</small></div>{% endif %}
-      <small class="d-block mt-2">{% if item.limits %}Faixa configurada: {{ item.limits.minimum|default:'—' }} a {{ item.limits.maximum|default:'—' }} {{ item.unit }}{% else %}Sem limites configurados{% endif %}</small>
+      <small class="d-block mt-2">{% if item.limits %}Faixa configurada: {{ item.limits.minimum|default:'—' }} a {{ item.limits.maximum|default:'—' }} {{ item.unit }}{% else %}Sem limites configurados{% endif %}</small><a class="d-inline-block mt-2 fw-bold text-success" href="{% url 'garden-reports' garden.pk %}?period=24h&metric={{ key }}">Ver histórico →</a>
     </article></div>{% endfor %}
   </div>
   <div class="monitor-chart-wrap mt-4">
-    <div class="d-flex flex-wrap justify-content-between gap-2"><div><strong>Últimas 24 horas</strong><small class="d-block text-muted" data-chart-summary>Carregando resumo…</small></div><div class="btn-group btn-group-sm" role="group" aria-label="Selecionar sensor">{% for key,item in monitoring.sensors.items %}<button type="button" class="btn btn-light {% if forloop.first %}active{% endif %}" data-sensor="{{ key }}">{{ item.label }}</button>{% endfor %}</div></div>
+    <div class="d-flex flex-wrap justify-content-between gap-2"><div><strong>Evolução nas últimas 24 horas</strong><small class="d-block text-muted" data-chart-summary>Carregando resumo…</small></div><div class="btn-group btn-group-sm" role="group" aria-label="Selecionar sensor">{% for key,item in monitoring.sensors.items %}<button type="button" class="btn btn-light {% if forloop.first %}active{% endif %}" data-sensor="{{ key }}">{{ item.label }}</button>{% endfor %}</div></div>
     <div class="monitor-chart mt-3" data-chart><div class="monitor-loading">Carregando histórico…</div></div>
   </div>
-  <div class="d-flex justify-content-end mt-3"><a href="{% url 'garden-reports' garden.pk %}" class="btn btn-outline-brand">Ver histórico completo</a></div>
+  <div class="d-flex justify-content-end mt-3"><a href="{% url 'garden-reports' garden.pk %}" class="btn btn-outline-brand">Ver análise completa →</a></div>
 </section>

@@ -6,7 +6,7 @@ from django.db.models.functions import TruncDay, TruncHour
 from django.utils import timezone
 
 from accounts.models import User
-from devices.models import DeviceCommand, GardenPhoto, TelemetryReading
+from devices.models import AlertRule, Device, DeviceCommand, GardenPhoto, TelemetryReading
 from gardens.configuration import effective_garden_configuration
 from gardens.models import GardenConfigurationEvent
 
@@ -85,12 +85,26 @@ def _sensor_limits(garden, metric):
     return None
 
 
-def _classification(value, limits):
+def _rule_matches(value, operator, threshold):
+    return {"lt": value < threshold, "lte": value <= threshold, "gt": value > threshold,
+            "gte": value >= threshold, "eq": value == threshold}.get(operator, False)
+
+
+def _classification(garden, metric, value, limits):
     if value is None or not limits:
-        return None
-    low, high = limits["minimum"], limits["maximum"]
-    outside = (low is not None and value < low) or (high is not None and value > high)
-    return "attention" if outside else "ideal"
+        profile_state = None
+    else:
+        low, high = limits["minimum"], limits["maximum"]
+        outside = (low is not None and value < low) or (high is not None and value > high)
+        profile_state = "attention" if outside else "ideal"
+    rules = AlertRule.objects.filter(
+        organization=garden.organization, channel__device__garden=garden,
+        channel__metric=metric, is_active=True,
+    ).only("operator", "threshold", "severity")
+    matched = [rule for rule in rules if _rule_matches(value, rule.operator, rule.threshold)] if value is not None else []
+    if matched:
+        return "critical" if max(rule.severity for rule in matched) >= 3 else "attention"
+    return profile_state
 
 
 def garden_report(garden, period, start=None, end=None):
@@ -113,7 +127,7 @@ def garden_report(garden, period, start=None, end=None):
             "label": meta["label"], "unit": meta["unit"], "current": current,
             "recorded_at": latest[0]["recorded_at"] if latest else None,
             "delta": current - previous if current is not None and previous is not None else None,
-            "limits": limits, "classification": _classification(current, limits),
+            "limits": limits, "classification": _classification(garden, metric, current, limits),
         }
     command_queryset = DeviceCommand.objects.filter(
         channel__device__garden=garden, channel__metric="pump_state", created_at__gte=since,
@@ -127,13 +141,16 @@ def garden_report(garden, period, start=None, end=None):
     interval = max(1, int(config.get("monitoring", {}).get("interval_minutes") or 60))
     newest = max((item["recorded_at"] for item in sensor_data.values() if item["recorded_at"]), default=None)
     stale = newest is None or timezone.now() - newest > timedelta(minutes=interval * 2)
+    controller = Device.objects.filter(garden=garden, kind=Device.Kind.CONTROLLER).order_by("created_at").first()
+    device_offline = bool(controller and not controller.is_online)
     events = list(DeviceCommand.objects.filter(
         channel__device__garden=garden, channel__metric__in=("pump_state", "light_state"),
         status=DeviceCommand.Status.SUCCEEDED, acknowledged_at__gte=since, acknowledged_at__lte=until,
     ).select_related("channel").order_by("acknowledged_at"))
     return {
         "period": period, "start": since, "end": until, "aggregation": aggregation,
-        "sensors": sensor_data, "last_measurement_at": newest, "is_stale": stale, "monitoring_interval": interval,
+        "sensors": sensor_data, "last_measurement_at": newest, "is_stale": stale,
+        "device_offline": device_offline, "monitoring_interval": interval,
         "events": events, "irrigation_commands": commands,
         "irrigation_count": len(all_commands), "irrigation_total": sum(durations),
         "irrigation_average": sum(durations) / len(durations) if durations else 0,

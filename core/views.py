@@ -673,16 +673,17 @@ def garden_reports(request, garden_id):
     return render(request, "shared/garden_reports.html", {
         "garden": garden, "report": garden_report(garden, period, start, end),
         "custom_start": request.GET.get("start", ""), "custom_end": request.GET.get("end", ""),
+        "selected_metric": request.GET.get("metric") if request.GET.get("metric") in {"air_temperature", "soil_moisture", "air_pressure"} else "air_temperature",
     })
 
 
 def _custom_report_dates(request):
-    def value(name):
-        parsed = parse_datetime(request.GET.get(name, ""))
+    def value(name, alias):
+        parsed = parse_datetime(request.GET.get(name, "") or request.GET.get(alias, ""))
         if parsed and timezone.is_naive(parsed):
             parsed = timezone.make_aware(parsed)
         return parsed
-    return value("start"), value("end")
+    return value("start", "from"), value("end", "to")
 
 
 def _report_json(report):
@@ -703,7 +704,7 @@ def _report_json(report):
         "period": report["period"], "start": report["start"].isoformat(), "end": report["end"].isoformat(),
         "aggregation": report["aggregation"], "monitoring_interval_minutes": report["monitoring_interval"],
         "last_measurement_at": report["last_measurement_at"].isoformat() if report["last_measurement_at"] else None,
-        "is_stale": report["is_stale"], "sensors": sensors,
+        "is_stale": report["is_stale"], "device_offline": report["device_offline"], "sensors": sensors,
         "events": [{"at": event.acknowledged_at.isoformat(), "metric": event.channel.metric, "on": bool((event.payload or {}).get("on"))} for event in report["events"]],
     }
 
@@ -725,13 +726,16 @@ def garden_measurements_api(request, garden_id):
 @require_GET
 def garden_measurements_latest_api(request, garden_id):
     payload = _report_json(garden_report(get_object_or_404(gardens_for_user(request.user), pk=garden_id), "24h"))
-    return JsonResponse({key: payload[key] for key in ("last_measurement_at", "is_stale", "monitoring_interval_minutes", "sensors")})
+    return JsonResponse({key: payload[key] for key in ("last_measurement_at", "is_stale", "device_offline", "monitoring_interval_minutes", "sensors")})
 
 
 @login_required
 @require_GET
 def garden_measurements_summary_api(request, garden_id):
-    payload = _report_json(garden_report(get_object_or_404(gardens_for_user(request.user), pk=garden_id), request.GET.get("period", "7d")))
+    period = request.GET.get("period", "7d")
+    if period not in {"today", "24h", "7d", "30d"}:
+        period = "7d"
+    payload = _report_json(garden_report(get_object_or_404(gardens_for_user(request.user), pk=garden_id), period))
     return JsonResponse({key: payload[key] for key in ("period", "start", "end", "aggregation", "sensors", "events")})
 
 
