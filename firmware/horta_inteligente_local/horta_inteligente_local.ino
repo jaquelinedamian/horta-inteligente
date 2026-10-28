@@ -64,11 +64,10 @@ constexpr uint8_t LAMP_RELAY_PIN = D6;
 // NOVO: sensor de umidade do solo
 constexpr uint8_t SOIL_MOISTURE_PIN = A0;
 
-constexpr bool RELAY_ACTIVE_LOW = true;
-constexpr uint8_t RELAY_ON_LEVEL =
-    RELAY_ACTIVE_LOW ? LOW : HIGH;
-constexpr uint8_t RELAY_OFF_LEVEL =
-    RELAY_ACTIVE_LOW ? HIGH : LOW;
+// Os dois canais usam modulos/entradas com polaridades diferentes nesta
+// instalacao. Nao compartilhar a polaridade entre bomba e iluminacao.
+constexpr bool PUMP_RELAY_ACTIVE_LOW = true;
+constexpr bool LAMP_RELAY_ACTIVE_LOW = false;
 
 constexpr char FIRMWARE_VERSION[] =
     "horta-esp8266-1.3.1-platform-lamp";
@@ -184,26 +183,41 @@ void resetAllWifi() {
 // RELES / BOMBA E LAMPADA
 // ============================================================
 
+uint8_t relayLevel(
+    bool on,
+    bool activeLow
+) {
+
+  return on == activeLow
+      ? LOW
+      : HIGH;
+}
+
 void writeRelay(
     uint8_t pin,
-    bool on
+    bool on,
+    bool activeLow
 ) {
 
   digitalWrite(
       pin,
-      on
-          ? RELAY_ON_LEVEL
-          : RELAY_OFF_LEVEL
+      relayLevel(
+          on,
+          activeLow
+      )
   );
 }
 
-bool readRelayState(uint8_t pin) {
+bool readRelayState(
+    uint8_t pin,
+    bool activeLow
+) {
 
   const bool gpioHigh =
       digitalRead(pin)
       == HIGH;
 
-  return RELAY_ACTIVE_LOW
+  return activeLow
       ? !gpioHigh
       : gpioHigh;
 }
@@ -212,12 +226,14 @@ void setPump(bool on) {
 
   writeRelay(
       PUMP_RELAY_PIN,
-      on
+      on,
+      PUMP_RELAY_ACTIVE_LOW
   );
 
   pumpOn =
       readRelayState(
-          PUMP_RELAY_PIN
+          PUMP_RELAY_PIN,
+          PUMP_RELAY_ACTIVE_LOW
       );
 
   Serial.print(
@@ -238,12 +254,14 @@ bool setLamp(
 
   writeRelay(
       LAMP_RELAY_PIN,
-      on
+      on,
+      LAMP_RELAY_ACTIVE_LOW
   );
 
   lampOn =
       readRelayState(
-          LAMP_RELAY_PIN
+          LAMP_RELAY_PIN,
+          LAMP_RELAY_ACTIVE_LOW
       );
 
   Serial.print(
@@ -1473,7 +1491,7 @@ void pollCommands() {
       Serial.println(gpioBefore == HIGH ? F("HIGH") : F("LOW"));
       Serial.print(F("Writing: "));
       Serial.println(
-          (on ? RELAY_ON_LEVEL : RELAY_OFF_LEVEL) == HIGH
+          relayLevel(on, LAMP_RELAY_ACTIVE_LOW) == HIGH
               ? F("HIGH")
               : F("LOW")
       );
@@ -1496,7 +1514,8 @@ void pollCommands() {
 
       lampOn =
           readRelayState(
-              LAMP_RELAY_PIN
+              LAMP_RELAY_PIN,
+              LAMP_RELAY_ACTIVE_LOW
           );
 
       const bool gpioMatchesRequest =
@@ -2140,10 +2159,10 @@ void setup() {
       )
   );
 
-  // Precarrega o latch no nivel inativo antes de habilitar as saidas. Isso
-  // reduz o pulso de acionamento durante o boot em modulos ACTIVE LOW.
-  digitalWrite(PUMP_RELAY_PIN, RELAY_OFF_LEVEL);
-  digitalWrite(LAMP_RELAY_PIN, RELAY_OFF_LEVEL);
+  // Precarrega cada latch no respectivo nivel inativo antes de habilitar a
+  // saida, evitando pulsos no boot independentemente da polaridade do canal.
+  digitalWrite(PUMP_RELAY_PIN, relayLevel(false, PUMP_RELAY_ACTIVE_LOW));
+  digitalWrite(LAMP_RELAY_PIN, relayLevel(false, LAMP_RELAY_ACTIVE_LOW));
   pinMode(PUMP_RELAY_PIN, OUTPUT);
   pinMode(LAMP_RELAY_PIN, OUTPUT);
 

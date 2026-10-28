@@ -33,8 +33,10 @@ class FirmwareLightingCommandContractTests(TestCase):
         self.assertIn('"grow-light"', firmware)
         self.assertIn('lightStateItem["value"] =', firmware)
         self.assertIn('lampOn;', firmware)
-        self.assertIn("bool readRelayState(uint8_t pin)", firmware)
-        self.assertRegex(firmware, re.compile(r"RELAY_ACTIVE_LOW\s*\?\s*!gpioHigh\s*:\s*gpioHigh"))
+        self.assertIn("bool readRelayState(", firmware)
+        self.assertIn("constexpr bool PUMP_RELAY_ACTIVE_LOW = true;", firmware)
+        self.assertIn("constexpr bool LAMP_RELAY_ACTIVE_LOW = false;", firmware)
+        self.assertRegex(firmware, re.compile(r"return activeLow\s*\?\s*!gpioHigh\s*:\s*gpioHigh"))
         self.assertRegex(
             firmware,
             re.compile(r'setLamp\s*\(\s*on\s*,\s*"COMMAND"\s*\)'),
@@ -44,7 +46,7 @@ class FirmwareLightingCommandContractTests(TestCase):
         self.assertIn('"LIGHT_PIN: D6 / GPIO %u\\n"', firmware)
         self.assertIn('F("LIGHT CHANGE SOURCE: ")', firmware)
         self.assertLess(
-            firmware.index("digitalWrite(LAMP_RELAY_PIN, RELAY_OFF_LEVEL);"),
+            firmware.index("digitalWrite(LAMP_RELAY_PIN, relayLevel(false, LAMP_RELAY_ACTIVE_LOW));"),
             firmware.index("pinMode(LAMP_RELAY_PIN, OUTPUT);"),
         )
 

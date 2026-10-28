@@ -44,7 +44,7 @@ CONTROLLER_DEFAULT_CHANNELS = (
         "key": "grow-light", "name": "Iluminação",
         "kind": Channel.Kind.ACTUATOR, "metric": "light_state", "unit": "",
         "value_type": Channel.ValueType.BOOLEAN, "pin": "D6",
-        "configuration": {"component": "relay_2ch", "active_low": True},
+        "configuration": {"component": "relay_2ch", "active_low": False},
     },
 )
 

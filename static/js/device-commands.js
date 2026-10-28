@@ -51,6 +51,14 @@
     const data = new FormData(form);
     data.set('client_clicked_at', new Date().toISOString());
     if (event.submitter?.name) data.set(event.submitter.name, event.submitter.value);
+    if (form.dataset.actuator === 'lighting') {
+      const action = data.get('action');
+      console.info('UI ACTION:', action === 'on' ? 'LIGAR ILUMINAÇÃO' : 'DESLIGAR ILUMINAÇÃO', {
+        channel: form.dataset.channelKey,
+        action,
+        requested_state: action === 'on' ? 'ON' : 'OFF',
+      });
+    }
     const buttons = [...form.querySelectorAll('button, input[type="submit"]')];
     buttons.forEach((button) => { button.disabled = true; });
     let message = form.querySelector('[data-command-status]');

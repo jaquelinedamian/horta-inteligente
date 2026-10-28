@@ -59,7 +59,7 @@ class Command(BaseCommand):
             ("air-pressure", "Pressão atmosférica", Channel.Kind.SENSOR, "air_pressure", "hPa", Channel.ValueType.DECIMAL, "I2C", {"component": "BME280"}),
             ("water-level", "Nível do reservatório", Channel.Kind.SENSOR, "water_level", "%", Channel.ValueType.DECIMAL, "A0", {"component": "FD10", "adc_min": 0, "adc_max": 1023}),
             ("pump", "Bomba", Channel.Kind.ACTUATOR, "pump_state", "", Channel.ValueType.BOOLEAN, "D5", {"component": "relay_1ch", "active_low": True}),
-            ("grow-light", "Grow light", Channel.Kind.ACTUATOR, "light_state", "", Channel.ValueType.BOOLEAN, "D6", {"component": "relay_1ch", "active_low": True}),
+            ("grow-light", "Grow light", Channel.Kind.ACTUATOR, "light_state", "", Channel.ValueType.BOOLEAN, "D6", {"component": "relay_1ch", "active_low": False}),
         ]
         channels = {}
         for key, name, kind, metric, unit, value_type, pin, configuration in specs:
