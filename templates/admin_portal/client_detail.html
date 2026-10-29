@@ -1,7 +1,17 @@
 {% extends 'base.html' %}
 {% block area_name %}Central do cliente{% endblock %}
 {% block content %}
-<div class="client-hero content-card mb-4"><div><span class="eyebrow">Central do cliente</span><h1>{{ client.full_name }}</h1><p>{{ client.email }}{% if client.phone %} · {{ client.phone }}{% endif %}</p><span class="badge-soft">{% if client.is_active %}Cliente ativo{% else %}Cliente inativo{% endif %}</span></div><div class="d-flex gap-2"><a class="btn btn-light" href="{% url 'ops-client-edit' client.pk %}">Editar dados</a>{% if request.user.is_hortaviva_admin %}<a class="btn btn-outline-danger" href="{% url 'ops-client-delete' client.pk %}">Excluir cliente e dados de teste</a>{% endif %}</div></div>
+<header class="client-compact-header content-card mb-3">
+  <div>
+    <span class="eyebrow">Central do cliente</span>
+    <div class="client-compact-title">
+      <h1>{{ client.full_name }}</h1>
+      <span class="badge-soft">{% if client.is_active %}Cliente ativo{% else %}Cliente inativo{% endif %}</span>
+    </div>
+    <p>{{ client.email }}{% if client.phone %} · {{ client.phone }}{% endif %}</p>
+  </div>
+  <a class="btn btn-light" href="{% url 'ops-client-edit' client.pk %}">Editar dados</a>
+</header>
 
 <nav class="client-tabs mb-4" aria-label="Áreas do cliente">
   <a href="?aba=resumo" class="{% if active_tab == 'resumo' %}active{% endif %}">Resumo</a>
@@ -42,5 +52,11 @@
 
 {% else %}
   <div class="content-card"><div class="section-heading"><h2>Suporte</h2><a class="btn btn-brand" href="{% url 'ops-client-related-create' client.pk 'tickets' %}">Novo chamado</a></div>{% with objects=tickets %}{% include 'admin_portal/client_records.html' %}{% endwith %}</div>
+{% endif %}
+{% if request.user.is_hortaviva_admin %}
+  <section class="client-danger-zone">
+    <div><strong>Zona de perigo do cliente</strong><p>A exclusão remove o cliente e os dados de teste associados. Esta ação exige confirmação.</p></div>
+    <a class="btn btn-outline-danger" href="{% url 'ops-client-delete' client.pk %}">Excluir cliente e dados de teste</a>
+  </section>
 {% endif %}
 {% endblock %}

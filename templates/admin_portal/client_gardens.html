@@ -1,22 +1,268 @@
+{% load static %}
+
 {% for panel in garden_panels %}
-<article class="content-card mb-4">
-  <header class="section-heading flex-wrap gap-3"><div><span class="eyebrow">Modo administrativo · Status da horta</span><h2>{{ panel.garden.name }}</h2><span class="badge-soft">{{ panel.garden.get_status_display }}</span></div>{% if request.user.is_hortaviva_admin %}<div class="d-flex flex-wrap gap-2"><a class="btn btn-brand" href="{% url 'ops-garden-edit' panel.garden.pk %}">Editar horta</a><a class="btn btn-outline-brand" href="{% url 'garden-configuration' panel.garden.pk %}">Configurações</a><a class="btn btn-light" href="{% url 'ops-garden-devices' panel.garden.pk %}">Gerenciar dispositivos</a><a class="btn btn-light" href="{% url 'ops-client-related-create' client.pk 'visits' %}">Agendar visita</a></div>{% endif %}</header>
-  {% if request.user.is_hortaviva_admin and panel.garden.status != 'installed' %}<form method="post" action="{% url 'ops-garden-mark-installed' panel.garden.pk %}" class="mb-4">{% csrf_token %}<button class="btn btn-success">Marcar como instalada</button></form>{% endif %}
+  <article class="admin-garden-dashboard">
+    <section class="garden-ops-hero content-card">
+      <div class="garden-ops-main">
+        <div class="garden-ops-heading">
+          <span class="badge-soft">{{ panel.garden.get_status_display }}</span>
+          <div>
+            <p class="eyebrow">Horta operacional · Status da horta</p>
+            <h2>{{ panel.garden.name }}</h2>
+            <p class="garden-ops-summary">
+              {{ panel.garden.garden_model.name|default:"Modelo não definido" }}
+              {% if panel.planted_crops %} · {{ panel.planted_crops|length }} cultura{{ panel.planted_crops|length|pluralize }} ativa{{ panel.planted_crops|length|pluralize }}{% endif %}
+            </p>
+          </div>
+        </div>
 
-  <section class="mb-4"><h3 class="h5">Dados da horta</h3><div class="row g-3"><div class="col-md-3"><div class="soft-card h-100"><small>Modelo</small><strong class="d-block">{{ panel.garden.garden_model.name|default:'Não definido' }}</strong></div></div><div class="col-md-3"><div class="soft-card h-100"><small>Endereço</small><strong class="d-block">{{ panel.garden.address|default:'Não cadastrado' }}</strong></div></div><div class="col-md-3"><div class="soft-card h-100"><small>Instalação</small><strong class="d-block">{{ panel.garden.installed_at|date:'d/m/Y H:i'|default:'Aguardando' }}</strong></div></div><div class="col-md-3"><div class="soft-card h-100"><small>Técnico responsável</small><strong class="d-block">{{ panel.garden.primary_technician.full_name|default:'Não definido' }}</strong></div></div></div></section>
+        <div class="garden-device-health" aria-label="Conectividade da horta">
+          <div class="device-health-item {% if panel.snapshot.controller.is_online %}is-online{% else %}is-offline{% endif %}">
+            <span class="device-health-dot" aria-hidden="true"></span>
+            <div>
+              <strong>Controlador da horta</strong>
+              <span>{% if not panel.snapshot.controller %}Não configurado{% elif panel.snapshot.controller.is_online %}Online{% else %}Offline{% endif %}</span>
+              <span>{% if panel.snapshot.controller.last_seen_at %}Último contato {{ panel.snapshot.controller.last_seen_at|date:"d/m/Y H:i" }}{% else %}Sem comunicação{% endif %}</span>
+            </div>
+          </div>
+          <div class="device-health-item {% if panel.snapshot.camera.is_online %}is-online{% else %}is-offline{% endif %}">
+            <span class="device-health-dot" aria-hidden="true"></span>
+            <div>
+              <strong>Câmera da horta</strong>
+              <span>{% if not panel.snapshot.camera %}Não configurada{% elif panel.snapshot.camera.is_online %}Online{% else %}Offline{% endif %}</span>
+              <span>{% if panel.snapshot.camera.last_seen_at %}Último contato {{ panel.snapshot.camera.last_seen_at|date:"d/m/Y H:i" }}{% else %}Sem comunicação{% endif %}</span>
+            </div>
+          </div>
+        </div>
+      </div>
 
-  <section class="mb-4"><div class="section-heading"><h3 class="h5">Culturas</h3>{% if request.user.is_hortaviva_admin %}<div class="d-flex gap-2"><a class="btn btn-sm btn-brand" href="{% url 'ops-garden-cultures' panel.garden.pk %}">Gerenciar culturas</a><a class="btn btn-sm btn-light" href="{% url 'ops-garden-contracted-crops' panel.garden.pk %}">Editar culturas contratadas</a></div>{% endif %}</div><div class="row g-3"><div class="col-md-6"><div class="soft-card h-100"><strong>Contratadas</strong>{% for crop in panel.snapshot.contracted_crops %}<div class="mt-2">{{ crop.common_name }}</div>{% empty %}<p class="text-muted mt-2">Nenhuma cultura contratada.</p>{% endfor %}</div></div><div class="col-md-6"><div class="soft-card h-100"><strong>Plantadas</strong>{% for planted in panel.planted_crops %}<div class="mt-2"><strong>{{ planted.name }}</strong><small class="d-block text-muted">{{ planted.position }} · {{ planted.cycle.get_status_display }}{% if planted.cycle.planted_at %} · {{ planted.cycle.planted_at|date:'d/m/Y' }}{% endif %}</small></div>{% empty %}<p class="text-muted mt-2">Nenhuma cultura plantada.</p>{% endfor %}</div></div></div></section>
+      <div class="garden-ops-actions">
+        {% if request.user.is_hortaviva_admin %}
+          <a class="btn btn-brand" href="{% url 'ops-garden-edit' panel.garden.pk %}">Editar horta</a>
+          <a class="btn btn-outline-brand" href="{% url 'garden-configuration' panel.garden.pk %}">Editar configurações</a>
+          <a class="btn btn-light" href="{% url 'ops-garden-devices' panel.garden.pk %}">Gerenciar dispositivos</a>
+          <a class="btn btn-light" href="{% url 'ops-client-related-create' client.pk 'visits' %}">Agendar visita</a>
+        {% endif %}
+      </div>
+    </section>
 
-  <section class="mb-4"><div class="section-heading"><h3 class="h5">Conectividade</h3>{% if request.user.is_hortaviva_admin %}<a class="btn btn-sm btn-light" href="{% url 'ops-garden-devices' panel.garden.pk %}">Gerenciar dispositivos</a>{% endif %}</div><div class="row g-3"><div class="col-md-6"><div class="metric-card"><small>Controlador da horta</small><strong class="d-block">{% if not panel.snapshot.controller %}Não configurado{% elif panel.snapshot.controller.is_online %}Online{% else %}Offline{% endif %}</strong><small>{% if panel.snapshot.controller.last_seen_at %}Último contato: {{ panel.snapshot.controller.last_seen_at|date:'d/m/Y H:i' }}{% else %}Sem comunicação{% endif %}</small></div></div><div class="col-md-6"><div class="metric-card"><small>Câmera da horta</small><strong class="d-block">{% if not panel.snapshot.camera %}Não configurada{% elif panel.snapshot.camera.is_online %}Online{% else %}Offline{% endif %}</strong><small>{% if panel.snapshot.camera.last_seen_at %}Último contato: {{ panel.snapshot.camera.last_seen_at|date:'d/m/Y H:i' }}{% else %}Sem comunicação{% endif %}</small></div></div></div></section>
+    {% if panel.garden.status != "installed" and request.user.is_hortaviva_admin %}
+      <form method="post" action="{% url 'ops-garden-mark-installed' panel.garden.pk %}" class="garden-install-callout">
+        {% csrf_token %}
+        <div>
+          <strong>Instalação ainda não concluída</strong>
+          <span>Confirme quando a horta estiver pronta para entrar em operação.</span>
+        </div>
+        <button class="btn btn-success" type="submit">Marcar como instalada</button>
+      </form>
+    {% endif %}
 
-  <section class="mb-4"><h3 class="h5">Monitoramento</h3><div class="row g-4"><div class="col-lg-4"><div class="soft-card h-100"><h4 class="h6">Última fotografia</h4>{% if panel.snapshot.latest_photo %}<div class="horta-camera-frame"><img src="{% url 'garden-photo' panel.snapshot.latest_photo.id %}" alt="Última fotografia da horta"></div><small>{{ panel.snapshot.latest_photo.captured_at|date:'d/m/Y H:i' }}</small>{% else %}<p class="text-muted">Nenhuma fotografia.</p>{% endif %}</div></div><div class="col-lg-8"><div class="row g-3"><div class="col-md-4"><div class="metric-card h-100"><small>Temperatura</small><strong class="d-block">{% if panel.snapshot.metrics.air_temperature.value != None %}{{ panel.snapshot.metrics.air_temperature.value|floatformat:1 }} {{ panel.snapshot.metrics.air_temperature.unit }}{% else %}Sensor indisponível{% endif %}</strong></div></div><div class="col-md-4"><div class="metric-card h-100"><small>Umidade do solo</small><strong class="d-block">{% if panel.snapshot.metrics.soil_moisture.value != None %}{{ panel.snapshot.metrics.soil_moisture.value|floatformat:0 }} {{ panel.snapshot.metrics.soil_moisture.unit }}{% else %}Sensor indisponível{% endif %}</strong></div></div><div class="col-md-4"><div class="metric-card h-100"><small>Pressão atmosférica</small><strong class="d-block">{% if panel.snapshot.metrics.air_pressure.value != None %}{{ panel.snapshot.metrics.air_pressure.value|floatformat:1 }} {{ panel.snapshot.metrics.air_pressure.unit }}{% else %}Sensor indisponível{% endif %}</strong></div></div></div><div class="d-flex gap-2 mt-3"><a class="btn btn-light" href="{% url 'garden-gallery' panel.garden.pk %}">Ver desenvolvimento</a><a class="btn btn-light" href="{% url 'garden-reports' panel.garden.pk %}">Ver relatórios</a></div></div></div></section>
+    {% if not panel.snapshot.controller.is_online or not panel.snapshot.camera.is_online %}
+      <section class="garden-connectivity-alert" role="status">
+        <div>
+          <strong>Conectividade · atenção necessária</strong>
+          <p>
+            {% if not panel.snapshot.controller.is_online and not panel.snapshot.camera.is_online %}
+              Controlador e câmera estão sem comunicação.
+            {% elif not panel.snapshot.controller.is_online %}
+              O controlador está sem comunicação; comandos e leituras podem ficar indisponíveis.
+            {% else %}
+              A câmera está sem comunicação; novas imagens podem demorar a aparecer.
+            {% endif %}
+          </p>
+        </div>
+        <a href="{% url 'ops-garden-devices' panel.garden.pk %}">Ver dispositivos</a>
+      </section>
+    {% endif %}
 
-  <section class="mb-4"><h3 class="h5">Controle rápido</h3><div class="row g-3"><div class="col-md-6"><div class="soft-card h-100"><h4 class="h6">Irrigação</h4><p class="small">{{ panel.irrigation.frequency_count|default:'Não configurada' }} vez(es) por {{ panel.irrigation.frequency_period|default:'período' }} · {{ panel.irrigation_duration|default:'—' }} segundos</p>{% if panel.snapshot.pump_channel %}<form method="post" action="{% url 'device-action' %}">{% csrf_token %}<input type="hidden" name="channel" value="{{ panel.snapshot.pump_channel.id }}"><input type="hidden" name="next" value="{{ request.get_full_path }}"><button class="btn btn-brand" name="action" value="irrigate">Irrigar agora</button></form>{% else %}<span class="text-muted">Irrigação não configurada</span>{% endif %}</div></div><div class="col-md-6"><div class="soft-card h-100"><h4 class="h6">Iluminação</h4>{% if panel.snapshot.light_channel %}<form method="post" action="{% url 'device-action' %}" class="d-flex gap-2">{% csrf_token %}<input type="hidden" name="channel" value="{{ panel.snapshot.light_channel.id }}"><input type="hidden" name="next" value="{{ request.get_full_path }}"><button class="btn btn-brand" name="action" value="on">Ligar</button><button class="btn btn-light" name="action" value="off">Desligar</button></form>{% else %}<span class="text-muted">Iluminação ainda não configurada</span>{% endif %}</div></div></div></section>
+    <section class="garden-metadata-strip" aria-label="Dados principais da horta">
+      <div><span>Modelo</span><strong>{{ panel.garden.garden_model.name|default:"Não definido" }}</strong></div>
+      <div><span>Instalação</span><strong>{% if panel.garden.installed_at %}{{ panel.garden.installed_at|date:"d/m/Y" }}{% else %}Não informada{% endif %}</strong></div>
+      <div><span>Técnico responsável</span><strong>{{ panel.garden.primary_technician.full_name|default:"Não definido" }}</strong></div>
+      <div><span>Local</span><strong>{{ panel.garden.address|default:"Endereço não informado" }}</strong></div>
+    </section>
 
-  <section class="mb-4"><div class="section-heading"><div><h3 class="h5">Configurações operacionais</h3><p class="text-muted">Rotinas aplicadas à horta.</p></div><div><a class="btn btn-brand" href="{% url 'garden-configuration' panel.garden.pk %}">Editar configurações</a>{% if panel.garden.automation_overrides %}<a class="btn btn-outline-secondary" href="{% url 'garden-configuration-restore' panel.garden.pk %}">Restaurar padrão</a>{% endif %}</div></div><div class="row g-3"><div class="col-md-3"><div class="soft-card h-100"><strong>Irrigação</strong><small class="d-block">{{ panel.irrigation.frequency_count|default:'Não configurada' }} vez(es) · {{ panel.irrigation_duration|default:'—' }} s</small><span class="badge-soft">{{ panel.configuration_origins.irrigation }}</span></div></div><div class="col-md-3"><div class="soft-card h-100"><strong>Iluminação</strong><small class="d-block">{{ panel.lighting.hours_per_day|default:'Não configurada' }}{% if panel.lighting.hours_per_day %} h/dia{% endif %}</small><span class="badge-soft">{{ panel.configuration_origins.lighting }}</span></div></div><div class="col-md-3"><div class="soft-card h-100"><strong>Fotografias</strong><small class="d-block">{{ panel.configuration.camera.photos_per_day|default:4 }} fotos/dia · máximo 4</small><span class="badge-soft">{{ panel.configuration_origins.camera }}</span></div></div><div class="col-md-3"><div class="soft-card h-100"><strong>Monitoramento</strong><small class="d-block">A cada {{ panel.configuration.monitoring.interval_minutes|default:60 }} min</small><span class="badge-soft">{{ panel.configuration_origins.monitoring }}</span></div></div></div></section>
+    <div class="garden-monitoring-grid">
+      <section class="content-card garden-sensor-card">
+        <div class="section-heading compact">
+          <div>
+            <p class="eyebrow">Monitoramento</p>
+            <h3>Sensores agora</h3>
+          </div>
+          <a href="{% url 'garden-reports' panel.garden.pk %}">Ver histórico</a>
+        </div>
+        <div class="garden-sensor-grid">
+          <div class="sensor-reading">
+            <span>Umidade do solo</span>
+            <strong>{% if panel.snapshot.metrics.soil_moisture.value is not None %}{{ panel.snapshot.metrics.soil_moisture.value|floatformat:0 }}<small>%</small>{% else %}—{% endif %}</strong>
+            <small>{% if panel.snapshot.metrics.soil_moisture.recorded_at %}{{ panel.snapshot.metrics.soil_moisture.recorded_at|date:"H:i" }}{% else %}Sem leitura{% endif %}</small>
+          </div>
+          <div class="sensor-reading">
+            <span>Temperatura</span>
+            <strong>{% if panel.snapshot.metrics.air_temperature.value is not None %}{{ panel.snapshot.metrics.air_temperature.value|floatformat:1 }}<small>°C</small>{% else %}—{% endif %}</strong>
+            <small>{% if panel.snapshot.metrics.air_temperature.recorded_at %}{{ panel.snapshot.metrics.air_temperature.recorded_at|date:"H:i" }}{% else %}Sem leitura{% endif %}</small>
+          </div>
+          <div class="sensor-reading">
+            <span>Pressão</span>
+            <strong>{% if panel.snapshot.metrics.air_pressure.value is not None %}{{ panel.snapshot.metrics.air_pressure.value|floatformat:0 }}<small> hPa</small>{% else %}—{% endif %}</strong>
+            <small>{% if panel.snapshot.metrics.air_pressure.recorded_at %}{{ panel.snapshot.metrics.air_pressure.recorded_at|date:"H:i" }}{% else %}Sem leitura{% endif %}</small>
+          </div>
+          <div class="sensor-reading">
+            <span>Sistema</span>
+            <strong class="{% if panel.snapshot.controller.is_online %}text-success{% else %}text-danger{% endif %}">{% if panel.snapshot.controller.is_online %}Online{% else %}Offline{% endif %}</strong>
+            <small>Controlador</small>
+          </div>
+        </div>
+      </section>
 
-  <section class="mb-4"><div class="section-heading"><h3 class="h5">Próxima visita</h3>{% if request.user.is_hortaviva_admin %}<a class="btn btn-sm btn-light" href="{% url 'ops-client-related-create' client.pk 'visits' %}">Agendar visita</a>{% endif %}</div>{% if panel.snapshot.next_visit %}<strong>{{ panel.snapshot.next_visit.scheduled_start|date:'d/m/Y H:i' }}</strong><span class="text-muted"> · {{ panel.snapshot.next_visit.technician.full_name|default:'Técnico a definir' }} · {{ panel.snapshot.next_visit.get_status_display }}</span>{% if request.user.is_hortaviva_admin %}<a class="btn btn-sm btn-outline-brand ms-2" href="{% url 'ops-edit' 'visits' panel.snapshot.next_visit.pk %}">Editar visita</a>{% endif %}{% else %}<p class="text-muted">Nenhuma visita agendada</p>{% endif %}</section>
+      <section class="content-card garden-photo-card">
+        <div class="section-heading compact">
+          <div>
+            <p class="eyebrow">Desenvolvimento</p>
+            <h3>Imagem mais recente</h3>
+          </div>
+          <span class="inline-actions"><a href="{% url 'garden-gallery' panel.garden.pk %}">Ver desenvolvimento</a><a href="{% url 'garden-reports' panel.garden.pk %}">Ver relatórios</a></span>
+        </div>
+        {% if panel.snapshot.latest_photo %}
+          <figure>
+            <img src="{% url 'garden-photo' panel.snapshot.latest_photo.id %}" alt="Imagem recente da horta {{ panel.garden.name }}">
+            <figcaption>Registrada em {{ panel.snapshot.latest_photo.captured_at|date:"d/m/Y H:i" }}</figcaption>
+          </figure>
+        {% else %}
+          <div class="garden-photo-empty">
+            <span aria-hidden="true">▧</span>
+            <strong>Nenhuma fotografia</strong>
+            <p>A próxima captura aparecerá aqui quando a câmera enviar uma foto.</p>
+          </div>
+        {% endif %}
+      </section>
+    </div>
 
-  {% if request.user.is_hortaviva_admin %}<footer class="border-top pt-3 d-flex justify-content-between align-items-center"><small class="text-muted">Mais ações administrativas</small><a class="btn btn-sm btn-outline-danger" href="{% url 'ops-delete' 'gardens' panel.garden.pk %}">Excluir horta</a></footer>{% endif %}
-</article>
-{% empty %}<div class="empty-state"><h3>Nenhuma horta cadastrada</h3><a class="btn btn-brand" href="{% url 'ops-client-related-create' client.pk 'gardens' %}">Criar horta</a></div>{% endfor %}
+    <section class="content-card garden-crops-section">
+      <div class="section-heading compact">
+        <div>
+          <p class="eyebrow">Cultivo</p>
+          <h3>Culturas da horta</h3>
+        </div>
+        {% if request.user.is_hortaviva_admin %}<div class="inline-actions"><a class="btn btn-sm btn-brand" href="{% url 'ops-garden-cultures' panel.garden.pk %}">Gerenciar culturas</a><a class="btn btn-sm btn-light" href="{% url 'ops-garden-contracted-crops' panel.garden.pk %}">Editar contratadas</a></div>{% endif %}
+      </div>
+      <div class="garden-crop-columns">
+        <div>
+          <strong class="crop-group-title">Contratadas</strong>
+          <div class="garden-crop-list">
+            {% for crop in panel.snapshot.contracted_crops %}
+              <div class="garden-crop-item"><strong>{{ crop.common_name }}</strong><span>Cultura contratada</span></div>
+            {% empty %}
+              <p class="empty-inline">Nenhuma cultura contratada.</p>
+            {% endfor %}
+          </div>
+        </div>
+        <div>
+          <strong class="crop-group-title">Plantadas</strong>
+      {% if panel.planted_crops %}
+          <div class="garden-crop-list">
+          {% for planted_crop in panel.planted_crops %}
+            <div class="garden-crop-item">
+              <strong>{{ planted_crop.name }}</strong>
+              <span>{{ planted_crop.position }} · {{ planted_crop.cycle.get_status_display }}{% if planted_crop.cycle.planted_at %} · {{ planted_crop.cycle.planted_at|date:"d/m/Y" }}{% endif %}</span>
+            </div>
+          {% endfor %}
+          </div>
+      {% else %}
+          <p class="empty-inline">Nenhuma cultura plantada.</p>
+      {% endif %}
+        </div>
+      </div>
+    </section>
+
+    <section class="garden-automation-section">
+      <div class="section-heading compact">
+        <div>
+          <p class="eyebrow">Controle rápido</p>
+          <h3>Automação e comandos manuais</h3>
+        </div>
+        <a href="{% url 'garden-configuration' panel.garden.pk %}">Editar programação</a>
+      </div>
+      <div class="garden-automation-grid">
+        <article class="automation-summary-card">
+          <div class="automation-summary-head">
+            <div>
+              <span>Irrigação</span>
+              <strong>{% if panel.snapshot.pump_channel %}Pronta para comando{% else %}Não configurada{% endif %}</strong>
+            </div>
+            <span class="state-indicator {% if panel.snapshot.pump_channel %}is-active{% endif %}"></span>
+          </div>
+          <dl>
+            <div><dt>Frequência</dt><dd>{{ panel.irrigation.frequency_count|default:"Não configurada" }} vez(es) por {{ panel.irrigation.frequency_period|default:"período" }}</dd></div>
+            <div><dt>Duração</dt><dd>{{ panel.irrigation_duration|default:"—" }} segundos</dd></div>
+          </dl>
+          {% if panel.snapshot.pump_channel %}<form method="post" action="{% url 'device-action' %}" class="automation-actions">{% csrf_token %}<input type="hidden" name="channel" value="{{ panel.snapshot.pump_channel.id }}"><input type="hidden" name="next" value="{{ request.get_full_path }}"><button class="btn btn-brand" type="submit" name="action" value="irrigate">Irrigar agora</button></form>{% else %}<span class="text-muted">Irrigação não configurada</span>{% endif %}
+        </article>
+
+        <article class="automation-summary-card">
+          <div class="automation-summary-head">
+            <div>
+              <span>Iluminação</span>
+              <strong>{% if panel.snapshot.light_channel %}Controle disponível{% else %}Não configurada{% endif %}</strong>
+            </div>
+            <span class="state-indicator {% if panel.snapshot.light_channel %}is-active{% endif %}"></span>
+          </div>
+          <dl>
+            <div><dt>Iluminação diária</dt><dd>{{ panel.lighting.hours_per_day|default:"Não configurada" }}{% if panel.lighting.hours_per_day %} h/dia{% endif %}</dd></div>
+          </dl>
+          {% if panel.snapshot.light_channel %}<form method="post" action="{% url 'device-action' %}" class="automation-actions">{% csrf_token %}<input type="hidden" name="channel" value="{{ panel.snapshot.light_channel.id }}"><input type="hidden" name="next" value="{{ request.get_full_path }}"><button class="btn btn-brand" type="submit" name="action" value="on">Ligar</button><button class="btn btn-light" type="submit" name="action" value="off">Desligar</button></form>{% else %}<span class="text-muted">Iluminação ainda não configurada</span>{% endif %}
+        </article>
+      </div>
+    </section>
+
+    <section class="content-card garden-config-section">
+      <div class="section-heading compact">
+        <div>
+          <p class="eyebrow">Configuração operacional</p>
+          <h3>Parâmetros aplicados</h3>
+        </div>
+        <div class="inline-actions">
+          <a href="{% url 'garden-configuration' panel.garden.pk %}">Editar</a>
+          {% if panel.garden.automation_overrides %}<a href="{% url 'garden-configuration-restore' panel.garden.pk %}">Restaurar padrão</a>{% endif %}
+        </div>
+      </div>
+      <div class="garden-config-grid">
+        <div><span>Irrigação</span><strong>{{ panel.irrigation.frequency_count|default:"Não configurada" }} vez(es) · {{ panel.irrigation_duration|default:"—" }} s</strong><small>{{ panel.configuration_origins.irrigation }}</small></div>
+        <div><span>Iluminação</span><strong>{{ panel.lighting.hours_per_day|default:"Não configurada" }}{% if panel.lighting.hours_per_day %} h/dia{% endif %}</strong><small>{{ panel.configuration_origins.lighting }}</small></div>
+        <div><span>Monitoramento</span><strong>A cada {{ panel.configuration.monitoring.interval_minutes|default:60 }} min</strong><small>{{ panel.configuration_origins.monitoring }}</small></div>
+        <div><span>Fotos</span><strong>{{ panel.configuration.camera.photos_per_day|default:4 }} fotos/dia</strong><small>{{ panel.configuration_origins.camera }}</small></div>
+      </div>
+    </section>
+
+    <section class="garden-operations-strip">
+      <div>
+        <span>Próxima visita</span>
+        <strong>{% if panel.snapshot.next_visit %}{{ panel.snapshot.next_visit.scheduled_start|date:"d/m/Y H:i" }}{% else %}Nenhuma visita agendada{% endif %}</strong>
+        {% if panel.snapshot.next_visit %}<small>{{ panel.snapshot.next_visit.technician.full_name|default:"Técnico a definir" }} · {{ panel.snapshot.next_visit.get_status_display }}</small>{% endif %}
+      </div>
+      <div class="inline-actions">
+        {% if panel.snapshot.next_visit %}
+          <a href="{% url 'ops-edit' 'visits' panel.snapshot.next_visit.pk %}">Editar visita</a>
+        {% endif %}
+        {% if request.user.is_hortaviva_admin %}<a class="btn btn-light btn-sm" href="{% url 'ops-client-related-create' client.pk 'visits' %}">Nova visita</a>{% endif %}
+      </div>
+    </section>
+
+    {% if request.user.is_hortaviva_admin %}
+      <section class="garden-danger-zone">
+        <div>
+          <strong>Zona de perigo</strong>
+          <p>Excluir esta horta remove seu vínculo operacional com o cliente.</p>
+        </div>
+        <a class="btn btn-sm btn-outline-danger" href="{% url 'ops-delete' 'gardens' panel.garden.pk %}">Excluir horta</a>
+      </section>
+    {% endif %}
+  </article>
+{% empty %}
+  <section class="content-card garden-empty-state">
+    <span aria-hidden="true">⌂</span>
+    <h2>Nenhuma horta cadastrada</h2>
+    <p>Cadastre a primeira horta deste cliente para iniciar o acompanhamento operacional.</p>
+    <a class="btn btn-brand" href="{% url 'ops-client-related-create' client.pk 'gardens' %}">Cadastrar horta</a>
+  </section>
+{% endfor %}
