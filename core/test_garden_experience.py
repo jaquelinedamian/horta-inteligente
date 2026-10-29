@@ -10,6 +10,7 @@ from devices.models import (Channel, Device, DeviceCommand, DeviceCredential, De
 from devices.selectors import actuator_automation_summary, garden_snapshot
 from gardens.configuration import effective_garden_configuration
 from gardens.models import Garden, GardenConfigurationEvent, GardenModel
+from core.forms import GardenOperationalConfigurationForm, IrrigationScheduleForm, LightingScheduleForm
 
 
 class GardenExperienceTests(TestCase):
@@ -100,6 +101,42 @@ class GardenExperienceTests(TestCase):
         api = self.client.get(reverse("device_api:configuration"), HTTP_AUTHORIZATION=f"Device {token}", HTTP_X_DEVICE_ID=str(self.device.pk))
         self.assertEqual(api.json()["monitoring"]["interval_minutes"], 60)
         self.assertEqual(api.json()["camera"]["photos_per_day"], 4)
+
+    def test_configuration_uses_presets_and_preserves_historical_values(self):
+        form = GardenOperationalConfigurationForm(initial={
+            "light_hours": 10,
+            "irrigation_frequency_count": 3,
+            "irrigation_frequency_period": "day",
+            "pump_duration_seconds": 25,
+            "photos_per_day": 4,
+            "monitoring_interval_minutes": 500,
+        })
+        self.assertEqual(form.fields["light_hours"].widget.input_type, "select")
+        self.assertEqual(form.fields["irrigation_frequency_count"].widget.input_type, "select")
+        self.assertEqual(form.fields["pump_duration_seconds"].widget.input_type, "select")
+        self.assertEqual(form.fields["monitoring_interval_minutes"].widget.input_type, "select")
+        self.assertIn(("25", "25 (segundos · configuração atual)"), [
+            (str(value), label) for value, label in form.fields["pump_duration_seconds"].choices
+        ])
+        self.assertIn(("500", "500 (minutos · configuração atual)"), [
+            (str(value), label) for value, label in form.fields["monitoring_interval_minutes"].choices
+        ])
+
+    def test_schedule_forms_use_time_days_switches_and_duration_presets(self):
+        lighting = LightingScheduleForm(instance=LightingSchedule(
+            actuator=self.device.channels.get(metric="light_state"),
+            start_time=time(8), end_time=time(16), days_of_week=[0, 2, 4], enabled=True,
+        ))
+        irrigation = IrrigationScheduleForm(instance=IrrigationSchedule(
+            actuator=self.pump, start_time=time(7), duration_seconds=25,
+            days_of_week=[1, 3], enabled=True,
+        ))
+        self.assertEqual(lighting.fields["start_time"].label, "Horário de início")
+        self.assertEqual(lighting.fields["enabled"].label, "Ativo")
+        self.assertEqual(lighting.fields["days_of_week"].widget.input_type, "checkbox")
+        self.assertEqual(lighting.initial["days_of_week"], [0, 2, 4])
+        self.assertEqual(irrigation.fields["duration_seconds"].widget.input_type, "select")
+        self.assertIn("25", {str(value) for value, _ in irrigation.fields["duration_seconds"].choices})
 
     def test_customer_cannot_edit_foreign_garden(self):
         self.client.force_login(self.owner)

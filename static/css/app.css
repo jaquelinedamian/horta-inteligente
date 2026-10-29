@@ -172,3 +172,67 @@
   .garden-metadata-strip > div, .garden-config-grid > div { border-right: 0; border-bottom: 1px solid #e2e8f0; }
   .garden-metadata-strip > div:last-child, .garden-config-grid > div:last-child { border-bottom: 0; }
 }
+/* Compact, predictable form controls */
+.weekday-checks {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(58px, 1fr));
+  gap: .5rem;
+}
+.weekday-checks > div,
+.weekday-checks label {
+  margin: 0;
+}
+.weekday-checks label {
+  display: flex;
+  align-items: center;
+  gap: .4rem;
+  min-height: 42px;
+  padding: .55rem .65rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  cursor: pointer;
+  font-weight: 650;
+}
+.weekday-checks input {
+  width: 1rem;
+  height: 1rem;
+  margin: 0;
+  accent-color: var(--green);
+}
+.form-check-input[role="switch"] {
+  width: 2.5rem;
+  min-height: 1.35rem;
+  border-radius: 2rem;
+  background-position: left center;
+  transition: background-position .15s ease-in-out;
+  cursor: pointer;
+}
+.form-check-input[role="switch"]:checked { background-position: right center; }
+.compact-control,
+select[name="light_hours"],
+select[name="light_hours_per_day"],
+select[name="irrigation_frequency_count"],
+select[name="photos_per_day"] {
+  width: min(100%, 230px);
+}
+select[name="pump_duration_seconds"],
+select[name="monitoring_interval_minutes"],
+select[name="duration_minutes"],
+select[name="duration_seconds"],
+input[type="time"] {
+  width: min(100%, 290px);
+}
+.form-select:focus,
+.form-check-input:focus,
+.weekday-checks input:focus-visible {
+  border-color: var(--green);
+  box-shadow: 0 0 0 .2rem rgba(63, 143, 95, .13);
+  outline: 0;
+}
+@media (max-width: 767.98px) {
+  .weekday-checks { grid-template-columns: repeat(4, minmax(58px, 1fr)); }
+}
+@media (max-width: 479.98px) {
+  .weekday-checks { grid-template-columns: repeat(2, minmax(90px, 1fr)); }
+}

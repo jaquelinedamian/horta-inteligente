@@ -1,5 +1,6 @@
 from django import forms
 from collections.abc import Mapping
+from decimal import Decimal
 from django.contrib.auth.password_validation import validate_password
 from django.db import models, transaction
 from django.forms import modelform_factory
@@ -14,6 +15,28 @@ from crops.models import Crop, CropLightingSchedule, PlantingCycle
 from crops.selectors import get_available_cultivars
 from gardens.models import Garden, GardenModel, GardenModule, ModuleInstallation
 from operations.models import Visit
+from core.forms import MONITORING_INTERVAL_CHOICES, PUMP_DURATION_CHOICES
+
+
+LIGHT_HOUR_CHOICES = tuple((value, f"{value} h") for value in range(1, 19))
+IRRIGATION_COUNT_CHOICES = tuple(
+    (value, f"{value} vez" if value == 1 else f"{value} vezes") for value in range(7)
+)
+PHOTO_COUNT_CHOICES = tuple(
+    (value, f"{value} foto/dia" if value == 1 else f"{value} fotos/dia") for value in range(1, 5)
+)
+
+
+def _optional_choices(choices):
+    return (("", "Usar padrão existente"), *choices)
+
+
+def _keep_instance_choice(form, name, value, suffix):
+    if value in (None, ""):
+        return
+    field = form.fields[name]
+    if str(value) not in {str(key) for key, _ in field.choices}:
+        field.choices = (*field.choices, (value, f"{value} ({suffix})"))
 
 
 LABELS = {
@@ -72,6 +95,27 @@ class OperationalModelForm(forms.ModelForm):
                 field.required = False
             if isinstance(field, forms.ModelChoiceField):
                 field.empty_label = "Selecione uma opção"
+        preset_fields = {
+            "light_hours_per_day": ("Horas de luz por dia", _optional_choices(LIGHT_HOUR_CHOICES), Decimal),
+            "irrigation_frequency_count": ("Irrigações", _optional_choices(IRRIGATION_COUNT_CHOICES), int),
+            "pump_duration_seconds": ("Duração da bomba", _optional_choices(PUMP_DURATION_CHOICES), int),
+            "photos_per_day": ("Fotos por dia", PHOTO_COUNT_CHOICES, int),
+            "monitoring_interval_minutes": ("Intervalo de monitoramento", MONITORING_INTERVAL_CHOICES, int),
+        }
+        for name, (label, choices, coerce) in preset_fields.items():
+            if name not in self.fields:
+                continue
+            previous = self.fields[name]
+            self.fields[name] = forms.TypedChoiceField(
+                label=label,
+                choices=choices,
+                coerce=coerce,
+                required=previous.required,
+                empty_value=None,
+                help_text=previous.help_text,
+            )
+            current = getattr(self.instance, name, None) if self.instance and self.instance.pk else self.initial.get(name)
+            _keep_instance_choice(self, name, current, "configuração atual")
         if "plan_version" in self.fields:
             available = get_available_plan_versions()
             selected_id = self.data.get(self.add_prefix("plan_version")) if self.is_bound else getattr(self.instance, "plan_version_id", None)
@@ -80,7 +124,16 @@ class OperationalModelForm(forms.ModelForm):
             self.fields["plan_version"].queryset = available
         if "cultivar" in self.fields:
             self.fields["cultivar"].queryset = get_available_cultivars()
-            field.widget.attrs.setdefault("class", "form-check-input" if isinstance(field.widget, forms.CheckboxInput) else "form-control")
+        for field in self.fields.values():
+            if isinstance(field.widget, forms.CheckboxSelectMultiple):
+                field.widget.attrs["class"] = "weekday-checks"
+            elif isinstance(field.widget, forms.CheckboxInput):
+                field.widget.attrs["class"] = "form-check-input"
+                field.widget.attrs["role"] = "switch"
+            elif isinstance(field.widget, forms.Select):
+                field.widget.attrs["class"] = "form-select"
+            else:
+                field.widget.attrs.setdefault("class", "form-control")
             if isinstance(field.widget, forms.DateTimeInput):
                 field.widget.input_type = "datetime-local"
                 field.widget.format = "%Y-%m-%dT%H:%M"
@@ -191,6 +244,11 @@ class CropLightingScheduleForm(OperationalModelForm):
             "end_time": forms.TimeInput(attrs={"type": "time"}),
         }
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["start_time"].label = "Horário de início"
+        self.fields["enabled"].label = "Ativo"
+
 
 class DeviceForm(OperationalModelForm):
     class Meta:
@@ -237,6 +295,25 @@ class VisitForm(OperationalModelForm):
 
 
 class CropForm(OperationalModelForm):
+    light_hours = forms.TypedChoiceField(
+        label="Horas de luz por dia",
+        choices=_optional_choices(tuple((value, f"{value} h") for value in range(25))),
+        coerce=Decimal,
+        required=False, empty_value=None,
+    )
+    irrigation_frequency_count = forms.TypedChoiceField(
+        label="Irrigações",
+        choices=_optional_choices(IRRIGATION_COUNT_CHOICES),
+        coerce=int,
+        required=False, empty_value=None,
+    )
+    irrigation_frequency_period = forms.ChoiceField(
+        label="Período", choices=(("day", "Diário"), ("week", "Semanal")), required=False,
+    )
+    pump_duration_seconds = forms.TypedChoiceField(
+        label="Duração da bomba", choices=_optional_choices(PUMP_DURATION_CHOICES),
+        coerce=int, required=False, empty_value=None,
+    )
     is_available = AvailabilityChoiceField(
         label="Disponibilizar esta cultura?",
         choices=((True, "Ativa e disponível"), (False, "Manter inativa")),
@@ -248,6 +325,17 @@ class CropForm(OperationalModelForm):
     class Meta:
         model = Crop
         fields = ("common_name", "code", "description", "image_url", "is_available", "light_hours", "irrigation_frequency_count", "irrigation_frequency_period", "pump_duration_seconds")
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        for name, suffix in (
+            ("light_hours", "h · configuração atual"),
+            ("irrigation_frequency_count", "vezes · configuração atual"),
+            ("pump_duration_seconds", "segundos · configuração atual"),
+        ):
+            raw = self.data.get(self.add_prefix(name)) if self.is_bound else getattr(self.instance, name, None)
+            if raw not in (None, "") and str(raw) not in {str(key) for key, _ in self.fields[name].choices}:
+                self.fields[name].choices = (*self.fields[name].choices, (raw, f"{raw} ({suffix})"))
 
     def clean_is_available(self):
         available = self.cleaned_data["is_available"]
@@ -323,10 +411,22 @@ class EmployeeForm(OperationalModelForm):
 
 
 class GardenForm(OperationalModelForm):
-    light_hours = forms.DecimalField(label="Horas de luz por dia", max_digits=4, decimal_places=1, required=False)
-    irrigation_frequency_count = forms.IntegerField(label="Frequência de irrigação", min_value=1, required=False)
-    irrigation_frequency_period = forms.ChoiceField(label="Período", choices=Crop.IrrigationPeriod.choices, required=False)
-    pump_duration_seconds = forms.IntegerField(label="Duração da bomba (segundos)", min_value=1, max_value=300, required=False)
+    light_hours = forms.TypedChoiceField(
+        label="Horas de luz por dia",
+        choices=_optional_choices(tuple((value, f"{value} h") for value in range(25))),
+        coerce=Decimal, required=False, empty_value=None,
+    )
+    irrigation_frequency_count = forms.TypedChoiceField(
+        label="Irrigações", choices=_optional_choices(IRRIGATION_COUNT_CHOICES),
+        coerce=int, required=False, empty_value=None,
+    )
+    irrigation_frequency_period = forms.ChoiceField(
+        label="Período", choices=(("day", "Diário"), ("week", "Semanal")), required=False,
+    )
+    pump_duration_seconds = forms.TypedChoiceField(
+        label="Duração da bomba", choices=_optional_choices(PUMP_DURATION_CHOICES),
+        coerce=int, required=False, empty_value=None,
+    )
 
     class Meta:
         model = Garden
@@ -341,6 +441,14 @@ class GardenForm(OperationalModelForm):
         self.initial.setdefault("irrigation_frequency_count", irrigation.get("frequency_count"))
         self.initial.setdefault("irrigation_frequency_period", irrigation.get("frequency_period"))
         self.initial.setdefault("pump_duration_seconds", irrigation.get("pump_duration_seconds"))
+        for name, suffix in (
+            ("light_hours", "h · configuração atual"),
+            ("irrigation_frequency_count", "vezes · configuração atual"),
+            ("pump_duration_seconds", "segundos · configuração atual"),
+        ):
+            raw = self.data.get(self.add_prefix(name)) if self.is_bound else self.initial.get(name)
+            if raw not in (None, "") and str(raw) not in {str(key) for key, _ in self.fields[name].choices}:
+                self.fields[name].choices = (*self.fields[name].choices, (raw, f"{raw} ({suffix})"))
         self.fields["primary_technician"].queryset = User.objects.filter(is_active=True, employee_role=User.EmployeeRole.TECHNICIAN)
 
     def save(self, commit=True):
@@ -366,7 +474,10 @@ class ClientOnboardingForm(forms.Form):
     user_tax_id = forms.CharField(label="CPF", max_length=14, required=False)
     birth_date = forms.DateField(label="Data de nascimento", required=False, widget=forms.DateInput(attrs={"type": "date"}))
     password = forms.CharField(label="Senha inicial", widget=forms.PasswordInput, required=False, help_text="Obrigatória apenas para um novo usuário.")
-    user_is_active = forms.BooleanField(label="Usuário ativo", required=False, initial=True)
+    user_is_active = forms.BooleanField(
+        label="Usuário ativo", required=False, initial=True,
+        widget=forms.CheckboxInput(attrs={"class": "form-check-input", "role": "switch"}),
+    )
     organization_name = forms.CharField(label="Nome da organização", max_length=180)
     organization_slug = forms.SlugField(label="Identificador da organização")
     tax_id = forms.CharField(label="CPF/CNPJ", max_length=30, required=False)
