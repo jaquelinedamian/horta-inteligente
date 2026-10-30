@@ -65,6 +65,10 @@ def telemetry(request):
 def heartbeat(request):
     try:
         payload = json_body(request)
+        diagnostics = payload.get("diagnostics", {})
+        diagnostics = diagnostics if isinstance(diagnostics, dict) else {}
+        local_ip_raw = payload.get("local_ip") or diagnostics.get("local_ip")
+        local_ip = str(ipaddress.ip_address(local_ip_raw)) if local_ip_raw else None
         beat = DeviceHeartbeat.objects.create(
             device=request.device,
             recorded_at=parsed_datetime(payload.get("recorded_at")),
@@ -72,12 +76,11 @@ def heartbeat(request):
             signal_strength=payload.get("signal_strength"),
             free_heap_bytes=payload.get("free_heap_bytes"),
             firmware_version=payload.get("firmware_version", ""),
-            diagnostics=payload.get("diagnostics", {}),
+            diagnostics=diagnostics,
         )
         request.device.last_seen_at = timezone.now()
         request.device.status = request.device.Status.ONLINE
         request.device.firmware_version = beat.firmware_version or request.device.firmware_version
-        local_ip = beat.diagnostics.get("local_ip") if isinstance(beat.diagnostics, dict) else None
         if local_ip:
             request.device.local_ip = local_ip
         request.device.save(update_fields=["last_seen_at", "status", "firmware_version", "local_ip", "updated_at"])
@@ -225,8 +228,6 @@ def photo(request):
             raise ValueError(f"imagem excede o limite de {limit} bytes")
         captured_raw = request.POST.get("captured_at") or request.headers.get("X-Captured-At")
         captured_at = parsed_datetime(captured_raw) if captured_raw else timezone.now()
-        local_ip_raw = request.headers.get("X-Local-IP", "").strip()
-        local_ip = str(ipaddress.ip_address(local_ip_raw)) if local_ip_raw else None
         garden = device_garden(request.device)
         item = GardenPhoto.objects.create(
             garden=garden, device=request.device, captured_at=captured_at,
@@ -234,9 +235,7 @@ def photo(request):
         )
         request.device.last_seen_at = timezone.now()
         request.device.status = request.device.Status.ONLINE
-        if local_ip:
-            request.device.local_ip = local_ip
-        request.device.save(update_fields=["last_seen_at", "status", "local_ip", "updated_at"])
+        request.device.save(update_fields=["last_seen_at", "status", "updated_at"])
         return JsonResponse({"id": str(item.id), "captured_at": item.captured_at.isoformat()}, status=201)
     except PermissionError as exc:
         return JsonResponse({"error": "device_mismatch", "detail": str(exc)}, status=403)

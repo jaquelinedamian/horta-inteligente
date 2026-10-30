@@ -16,6 +16,7 @@ httpd_handle_t cameraServer = nullptr;
 constexpr char STREAM_BOUNDARY[] = "horta-camera-boundary";
 unsigned long lastPhotoUploadAt = 0;
 unsigned long lastConfigFetchAt = 0;
+unsigned long lastHeartbeatAt = 0;
 unsigned long lastWifiAttemptAt = 0;
 bool servicesStarted = false;
 bool clockSynchronized = false;
@@ -24,10 +25,45 @@ constexpr time_t MIN_VALID_EPOCH = 1700000000;
 constexpr unsigned long NTP_TIMEOUT_MS = 30000UL;
 constexpr uint8_t DEFAULT_PHOTOS_PER_DAY = 4;
 constexpr unsigned long CONFIG_REFRESH_INTERVAL_MS = 30UL * 60UL * 1000UL;
+constexpr unsigned long HEARTBEAT_INTERVAL_MS = 60UL * 1000UL;
 constexpr unsigned long MILLIS_PER_DAY = 86400000UL;
 unsigned long photoIntervalMs = MILLIS_PER_DAY / DEFAULT_PHOTOS_PER_DAY;
 
 void processSerialCommand();
+
+bool sendHeartbeat() {
+  if (WiFi.status() != WL_CONNECTED || time(nullptr) < MIN_VALID_EPOCH) return false;
+  HTTPClient http;
+  WiFiClientSecure secure;
+  String url = String(API_BASE_URL) + "/api/v1/device/heartbeat/";
+  if (!url.startsWith("https://") || strlen(HTTPS_ROOT_CA) < 40) return false;
+  secure.setCACert(HTTPS_ROOT_CA);
+  if (!http.begin(secure, url)) return false;
+
+  char recordedAt[32];
+  const time_t now = time(nullptr);
+  struct tm utcTime;
+  gmtime_r(&now, &utcTime);
+  strftime(recordedAt, sizeof(recordedAt), "%Y-%m-%dT%H:%M:%SZ", &utcTime);
+
+  JsonDocument document;
+  document["recorded_at"] = recordedAt;
+  document["uptime_seconds"] = millis() / 1000UL;
+  document["signal_strength"] = WiFi.RSSI();
+  document["free_heap_bytes"] = ESP.getFreeHeap();
+  document["local_ip"] = WiFi.localIP().toString();
+  String body;
+  serializeJson(document, body);
+
+  http.setTimeout(15000);
+  http.addHeader("Authorization", String("Device ") + DEVICE_API_TOKEN);
+  http.addHeader("X-Device-ID", DEVICE_ID);
+  http.addHeader("Content-Type", "application/json");
+  const int status = http.POST(body);
+  http.end();
+  Serial.printf("Heartbeat: HTTP %d; Local IP: %s\n", status, WiFi.localIP().toString().c_str());
+  return status >= 200 && status < 300;
+}
 
 void useCameraSchedule(uint8_t photosPerDay) {
   photosPerDay = constrain(photosPerDay, 1, 4);
@@ -322,7 +358,6 @@ void uploadPhoto() {
   http.setTimeout(15000);
   http.addHeader("Authorization", String("Device ") + DEVICE_API_TOKEN);
   http.addHeader("X-Device-ID", DEVICE_ID);
-  http.addHeader("X-Local-IP", WiFi.localIP().toString());
   http.addHeader("Content-Type", "image/jpeg");
   char capturedAt[32];
   const time_t now = time(nullptr);
@@ -370,6 +405,8 @@ void loop() {
     Serial.println(WiFi.localIP());
     servicesStarted = startHttpServer();
     Serial.println(servicesStarted ? "HTTP ativo: /, /capture e /stream" : "Falha ao iniciar HTTP");
+    sendHeartbeat();
+    lastHeartbeatAt = millis();
     uploadPhoto();
     lastPhotoUploadAt = millis();
   }
@@ -380,6 +417,10 @@ void loop() {
   if (clockSynchronized && millis() - lastConfigFetchAt >= CONFIG_REFRESH_INTERVAL_MS) {
     lastConfigFetchAt = millis();
     fetchCameraConfiguration();
+  }
+  if (clockSynchronized && millis() - lastHeartbeatAt >= HEARTBEAT_INTERVAL_MS) {
+    lastHeartbeatAt = millis();
+    sendHeartbeat();
   }
   if (millis() - lastPhotoUploadAt >= photoIntervalMs) {
     lastPhotoUploadAt = millis();

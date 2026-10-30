@@ -69,10 +69,22 @@ class ClientCenterTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Ver ao vivo")
-        self.assertContains(response, 'data-stream-url="http://192.168.1.42/stream"')
+        self.assertContains(response, 'href="http://192.168.1.42/stream"')
+        self.assertContains(response, 'target="_blank" rel="noopener noreferrer"')
+        self.assertContains(response, "Endereço local: 192.168.1.42")
         self.assertContains(response, "?period=all&amp;order=asc&amp;limit=all")
         self.assertNotContains(response, "192.168.1.42/capture")
         self.assertEqual(GardenPhoto.objects.filter(garden=garden).count(), photo_count)
+
+    def test_garden_without_camera_ip_has_no_stream_link(self):
+        _, garden = self._customer_org_garden()
+        Device.objects.filter(garden=garden, kind=Device.Kind.CAMERA).delete()
+
+        response = self.client.get(f"{reverse('ops-client-detail', args=[self.customer.pk])}?aba=gardens")
+
+        self.assertContains(response, "Endereço local da câmera indisponível")
+        self.assertNotContains(response, 'href="http://')
+        self.assertContains(response, "Ver ao vivo")
 
     def test_admin_can_open_garden_administration_routes_and_mark_installed(self):
         _, garden = self._customer_org_garden()

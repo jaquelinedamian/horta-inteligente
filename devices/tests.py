@@ -90,6 +90,49 @@ class DeviceApiTests(TestCase):
         response = self.client.get(reverse("devices:commands"))
         self.assertEqual(response.status_code, 401)
 
+    def _camera_with_credential(self, serial="CAM-HEARTBEAT"):
+        model, _ = DeviceModel.objects.get_or_create(name="ESP32-CAM", code="camera-heartbeat", hardware_platform="ESP32")
+        camera = Device.objects.create(
+            organization=self.organization, garden=self.garden, model=model,
+            serial_number=serial, name="Câmera", kind=Device.Kind.CAMERA,
+        )
+        _, token = DeviceCredential.issue(camera)
+        headers = {"HTTP_AUTHORIZATION": f"Device {token}", "HTTP_X_DEVICE_ID": str(camera.id)}
+        return camera, headers
+
+    def _heartbeat(self, headers, **extra):
+        payload = {"recorded_at": timezone.now().isoformat(), **extra}
+        return self.client.post(reverse("devices:heartbeat"), json.dumps(payload), content_type="application/json", **headers)
+
+    def test_camera_heartbeat_saves_and_updates_local_ip(self):
+        camera, headers = self._camera_with_credential()
+        self.assertEqual(self._heartbeat(headers, local_ip="192.168.15.20").status_code, 202)
+        camera.refresh_from_db()
+        self.assertEqual(camera.local_ip, "192.168.15.20")
+
+        self.assertEqual(self._heartbeat(headers, local_ip="192.168.15.27").status_code, 202)
+        camera.refresh_from_db()
+        self.assertEqual(camera.local_ip, "192.168.15.27")
+
+    def test_camera_heartbeat_without_local_ip_preserves_previous_value(self):
+        camera, headers = self._camera_with_credential("CAM-HEARTBEAT-PRESERVE")
+        camera.local_ip = "192.168.15.20"
+        camera.save(update_fields=["local_ip", "updated_at"])
+
+        self.assertEqual(self._heartbeat(headers).status_code, 202)
+        camera.refresh_from_db()
+        self.assertEqual(camera.local_ip, "192.168.15.20")
+
+    def test_camera_heartbeat_rejects_invalid_local_ip(self):
+        camera, headers = self._camera_with_credential("CAM-HEARTBEAT-INVALID")
+
+        response = self._heartbeat(headers, local_ip="http://192.168.15.20/stream")
+
+        self.assertEqual(response.status_code, 400)
+        camera.refresh_from_db()
+        self.assertIsNone(camera.local_ip)
+        self.assertFalse(camera.heartbeats.exists())
+
     def test_telemetry_ingestion_is_idempotent(self):
         payload = {"readings": [
             {
@@ -281,14 +324,12 @@ class DeviceApiTests(TestCase):
         response = self.client.post(
             reverse("device_api:photo"), b"\xff\xd8jpeg-test\xff\xd9", content_type="image/jpeg",
             HTTP_AUTHORIZATION=f"Device {token}", HTTP_X_DEVICE_ID=str(camera.id),
-            HTTP_X_LOCAL_IP="192.168.1.42",
         )
         self.assertEqual(response.status_code, 201)
         self.assertEqual(GardenPhoto.objects.filter(garden=self.garden, device=camera).count(), 1)
         camera.refresh_from_db()
         self.assertEqual(camera.status, Device.Status.ONLINE)
         self.assertIsNotNone(camera.last_seen_at)
-        self.assertEqual(camera.local_ip, "192.168.1.42")
 
     def test_photo_rejects_wrong_uuid_even_with_valid_camera_token(self):
         model = DeviceModel.objects.create(name="ESP32-CAM UUID", code="camera-uuid", hardware_platform="ESP32")
