@@ -17,6 +17,7 @@ constexpr char STREAM_BOUNDARY[] = "horta-camera-boundary";
 unsigned long lastPhotoUploadAt = 0;
 unsigned long lastConfigFetchAt = 0;
 unsigned long lastHeartbeatAt = 0;
+unsigned long lastCommandPollAt = 0;
 unsigned long lastWifiAttemptAt = 0;
 bool servicesStarted = false;
 bool clockSynchronized = false;
@@ -26,6 +27,7 @@ constexpr unsigned long NTP_TIMEOUT_MS = 30000UL;
 constexpr uint8_t DEFAULT_PHOTOS_PER_DAY = 4;
 constexpr unsigned long CONFIG_REFRESH_INTERVAL_MS = 30UL * 60UL * 1000UL;
 constexpr unsigned long HEARTBEAT_INTERVAL_MS = 60UL * 1000UL;
+constexpr unsigned long COMMAND_POLL_INTERVAL_MS = 5UL * 1000UL;
 constexpr unsigned long MILLIS_PER_DAY = 86400000UL;
 unsigned long photoIntervalMs = MILLIS_PER_DAY / DEFAULT_PHOTOS_PER_DAY;
 
@@ -320,21 +322,21 @@ bool startHttpServer() {
          httpd_register_uri_handler(cameraServer, &stream) == ESP_OK;
 }
 
-void uploadPhoto() {
-  if (WiFi.status() != WL_CONNECTED) return;
+bool uploadPhoto(bool manual = false) {
+  if (WiFi.status() != WL_CONNECTED) return false;
   if (time(nullptr) < MIN_VALID_EPOCH) {
     clockSynchronized = synchronizeClock();
-    if (!clockSynchronized) return;
+    if (!clockSynchronized) return false;
   }
   camera_fb_t* frame = esp_camera_fb_get();
   if (!frame) {
     Serial.println("Upload: falha ao capturar imagem");
-    return;
+    return false;
   }
   if (frame->format != PIXFORMAT_JPEG) {
     Serial.println("Upload: frame nao e JPEG");
     esp_camera_fb_return(frame);
-    return;
+    return false;
   }
 
   Serial.printf("JPEG capturado: %u bytes\n", static_cast<unsigned>(frame->len));
@@ -345,7 +347,7 @@ void uploadPhoto() {
   if (!url.startsWith("https://") || strlen(HTTPS_ROOT_CA) < 40) {
     Serial.println("Upload recusado: API_BASE_URL deve usar HTTPS e HTTPS_ROOT_CA deve estar configurada");
     esp_camera_fb_return(frame);
-    return;
+    return false;
   }
   secure.setCACert(HTTPS_ROOT_CA);
   Serial.println("Iniciando upload da foto...");
@@ -353,12 +355,13 @@ void uploadPhoto() {
   if (!started) {
     Serial.println("Falha ao iniciar conexao HTTPS");
     esp_camera_fb_return(frame);
-    return;
+    return false;
   }
   http.setTimeout(15000);
   http.addHeader("Authorization", String("Device ") + DEVICE_API_TOKEN);
   http.addHeader("X-Device-ID", DEVICE_ID);
   http.addHeader("Content-Type", "image/jpeg");
+  http.addHeader("X-Capture-Origin", manual ? "manual" : "automatic");
   char capturedAt[32];
   const time_t now = time(nullptr);
   struct tm utcTime;
@@ -366,6 +369,7 @@ void uploadPhoto() {
   strftime(capturedAt, sizeof(capturedAt), "%Y-%m-%dT%H:%M:%SZ", &utcTime);
   http.addHeader("X-Captured-At", capturedAt);
   int status = http.POST(frame->buf, frame->len);
+  const bool succeeded = status >= 200 && status < 300;
   if (status > 0) {
     Serial.printf("photo: HTTP %d\n", status);
     if (status >= 400) Serial.printf("Resposta: %s\n", http.getString().c_str());
@@ -377,6 +381,54 @@ void uploadPhoto() {
   }
   http.end();
   esp_camera_fb_return(frame);
+  return succeeded;
+}
+
+void acknowledgeCaptureCommand(const String& commandId, bool succeeded) {
+  HTTPClient http;
+  WiFiClientSecure secure;
+  String url = String(API_BASE_URL) + "/api/v1/device/commands/" + commandId + "/ack/";
+  secure.setCACert(HTTPS_ROOT_CA);
+  if (!http.begin(secure, url)) return;
+  JsonDocument document;
+  document["status"] = succeeded ? "succeeded" : "failed";
+  document["result"]["detail"] = succeeded ? "foto enviada" : "falha ao capturar ou enviar foto";
+  String body;
+  serializeJson(document, body);
+  http.addHeader("Authorization", String("Device ") + DEVICE_API_TOKEN);
+  http.addHeader("X-Device-ID", DEVICE_ID);
+  http.addHeader("Content-Type", "application/json");
+  const int status = http.POST(body);
+  Serial.printf("capture ack: HTTP %d\n", status);
+  http.end();
+}
+
+void pollCaptureCommands() {
+  if (WiFi.status() != WL_CONNECTED || time(nullptr) < MIN_VALID_EPOCH) return;
+  HTTPClient http;
+  WiFiClientSecure secure;
+  String url = String(API_BASE_URL) + "/api/v1/device/commands/";
+  secure.setCACert(HTTPS_ROOT_CA);
+  if (!http.begin(secure, url)) return;
+  http.addHeader("Authorization", String("Device ") + DEVICE_API_TOKEN);
+  http.addHeader("X-Device-ID", DEVICE_ID);
+  const int status = http.GET();
+  if (status != HTTP_CODE_OK) {
+    http.end();
+    return;
+  }
+  JsonDocument document;
+  const DeserializationError error = deserializeJson(document, http.getString());
+  http.end();
+  if (error) return;
+  for (JsonObject command : document["commands"].as<JsonArray>()) {
+    const String commandId = command["id"] | "";
+    const String commandType = command["type"] | "";
+    if (commandId.length() && commandType == "capture_photo") {
+      const bool succeeded = uploadPhoto(true);
+      acknowledgeCaptureCommand(commandId, succeeded);
+    }
+  }
 }
 }  // namespace
 
@@ -421,6 +473,10 @@ void loop() {
   if (clockSynchronized && millis() - lastHeartbeatAt >= HEARTBEAT_INTERVAL_MS) {
     lastHeartbeatAt = millis();
     sendHeartbeat();
+  }
+  if (clockSynchronized && millis() - lastCommandPollAt >= COMMAND_POLL_INTERVAL_MS) {
+    lastCommandPollAt = millis();
+    pollCaptureCommands();
   }
   if (millis() - lastPhotoUploadAt >= photoIntervalMs) {
     lastPhotoUploadAt = millis();

@@ -228,10 +228,13 @@ def photo(request):
             raise ValueError(f"imagem excede o limite de {limit} bytes")
         captured_raw = request.POST.get("captured_at") or request.headers.get("X-Captured-At")
         captured_at = parsed_datetime(captured_raw) if captured_raw else timezone.now()
+        source = request.headers.get("X-Capture-Origin", GardenPhoto.Source.AUTOMATIC)
+        if source not in GardenPhoto.Source.values:
+            raise ValueError("origem da foto inválida")
         garden = device_garden(request.device)
         item = GardenPhoto.objects.create(
             garden=garden, device=request.device, captured_at=captured_at,
-            image_data=data, content_type="image/jpeg", byte_size=len(data),
+            image_data=data, content_type="image/jpeg", byte_size=len(data), source=source,
         )
         request.device.last_seen_at = timezone.now()
         request.device.status = request.device.Status.ONLINE

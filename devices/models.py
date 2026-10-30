@@ -176,6 +176,10 @@ class DeviceHeartbeat(BaseModel):
 
 
 class GardenPhoto(BaseModel):
+    class Source(models.TextChoices):
+        AUTOMATIC = "automatic", "Automática"
+        MANUAL = "manual", "Manual"
+
     garden = models.ForeignKey(Garden, on_delete=models.CASCADE, related_name="photos")
     device = models.ForeignKey(Device, on_delete=models.PROTECT, related_name="photos")
     captured_at = models.DateTimeField()
@@ -183,6 +187,7 @@ class GardenPhoto(BaseModel):
     image_data = models.BinaryField()
     content_type = models.CharField(max_length=40, default="image/jpeg")
     byte_size = models.PositiveIntegerField()
+    source = models.CharField(max_length=16, choices=Source.choices, default=Source.AUTOMATIC)
 
     class Meta:
         ordering = ("-captured_at",)

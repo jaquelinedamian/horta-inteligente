@@ -24,6 +24,7 @@ from crops.models import Crop, Cultivar, PlantingCycle
 from devices.models import (Alert, Channel, Device, DeviceCommand, DeviceCredential, GardenPhoto,
                             IrrigationSchedule, LightingSchedule, TelemetryReading)
 from devices.selectors import actuator_automation_summary, devices_for_garden, garden_snapshot
+from devices.services import queue_camera_capture
 from gardens.access import gardens_for_user
 from gardens.models import Garden, GardenModule, ModuleInstallation
 from operations.models import ChecklistExecution, InventoryItem, SupportTicket, Visit, WorkOrder
@@ -323,6 +324,26 @@ def customer_development(request):
     if garden:
         return redirect("garden-gallery", garden_id=garden.pk)
     return render(request, "customer/history.html", {"development": True})
+
+
+@login_required
+@require_POST
+def garden_capture_photo(request, garden_id):
+    garden = get_object_or_404(gardens_for_user(request.user), pk=garden_id)
+    camera = devices_for_garden(garden).filter(kind=Device.Kind.CAMERA).first()
+    next_url = request.POST.get("next", "")
+    if not camera:
+        messages.error(request, "Câmera não configurada para esta horta.")
+    else:
+        try:
+            _, created = queue_camera_capture(user=request.user, camera=camera)
+        except ConnectionError as exc:
+            messages.error(request, str(exc))
+        else:
+            messages.success(request, "Solicitação de foto enviada.") if created else messages.warning(request, "Já existe uma captura em andamento.")
+    if url_has_allowed_host_and_scheme(next_url, allowed_hosts={request.get_host()}, require_https=request.is_secure()):
+        return redirect(next_url)
+    return redirect("garden-detail", garden_id=garden.pk)
 
 
 @login_required

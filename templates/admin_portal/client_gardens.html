@@ -128,6 +128,12 @@
             {% else %}
               <button class="btn btn-sm btn-brand" type="button" disabled>Ver ao vivo</button>
             {% endif %}
+            {% if panel.snapshot.camera %}
+              <form method="post" action="{% url 'garden-capture-photo' panel.garden.pk %}" class="d-inline">
+                {% csrf_token %}<input type="hidden" name="next" value="{{ request.get_full_path }}">
+                <button class="btn btn-sm btn-outline-brand" type="submit" {% if not panel.snapshot.camera.is_online %}disabled title="Câmera offline"{% endif %}>Tirar foto</button>
+              </form>
+            {% endif %}
           </span>
         </div>
         {% if panel.snapshot.latest_photo %}

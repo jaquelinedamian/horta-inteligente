@@ -14,6 +14,8 @@ from gardens.configuration import effective_garden_configuration
 
 logger = logging.getLogger(__name__)
 
+CAMERA_CAPTURE_COOLDOWN_SECONDS = 30
+
 
 CONTROLLER_DEFAULT_CHANNELS = (
     {
@@ -257,6 +259,35 @@ def queue_actuator_command(*, user, channel, action, duration_seconds=None):
         command.id, channel.device_id, channel.key, action, command.created_at.isoformat(),
     )
     return command
+
+
+@transaction.atomic
+def queue_camera_capture(*, user, camera):
+    """Enfileira captura manual usando o escopo central de acesso às hortas."""
+    if camera.kind != Device.Kind.CAMERA:
+        raise ValueError("dispositivo não é uma câmera")
+    garden = camera.assigned_garden()
+    if not garden or not user_can_access_garden(user, garden):
+        from django.core.exceptions import PermissionDenied
+        raise PermissionDenied
+    if not camera.is_online:
+        raise ConnectionError("Câmera offline. Comando não executado.")
+
+    camera = Device.objects.select_for_update().get(pk=camera.pk)
+    cutoff = timezone.now() - timedelta(seconds=CAMERA_CAPTURE_COOLDOWN_SECONDS)
+    existing = DeviceCommand.objects.filter(device=camera, command_type="capture_photo").filter(
+        Q(status__in=[DeviceCommand.Status.PENDING, DeviceCommand.Status.DELIVERED])
+        | Q(created_at__gte=cutoff)
+    ).order_by("created_at").first()
+    if existing:
+        return existing, False
+
+    command = DeviceCommand.objects.create(
+        device=camera, command_type="capture_photo", payload={"source": "manual"},
+        idempotency_key=f"web-camera:{user.pk}:{timezone.now().timestamp()}",
+        expires_at=timezone.now() + timedelta(minutes=2),
+    )
+    return command, True
 
 
 def schedule_lighting(now=None):
