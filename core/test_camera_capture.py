@@ -73,6 +73,26 @@ class ManualCameraCaptureTests(TestCase):
         response = self.client.get(url)
         self.assertNotContains(response, "Tirar foto")
 
+    def test_customer_garden_camera_card_has_clear_actions_and_offline_state(self):
+        self.client.force_login(self.owner)
+        url = reverse("customer-section", args=["garden"])
+        self.camera.local_ip = "192.168.15.20"
+        self.camera.save(update_fields=["local_ip", "updated_at"])
+
+        response = self.client.get(url)
+
+        for text in ("Câmera da horta", "Tirar foto", "Ver ao vivo", "Ver desenvolvimento", "Desenvolvimento da horta"):
+            self.assertContains(response, text)
+        self.assertContains(response, 'href="http://192.168.15.20/stream"')
+        self.assertContains(response, "Nenhuma fotografia registrada ainda")
+
+        self.camera.last_seen_at = timezone.now() - timedelta(hours=1)
+        self.camera.save(update_fields=["last_seen_at", "updated_at"])
+        response = self.client.get(url)
+        self.assertContains(response, "Câmera offline. As fotos já registradas continuam disponíveis.")
+        self.assertNotContains(response, 'href="http://192.168.15.20/stream"')
+        self.assertContains(response, reverse("garden-gallery", args=[self.garden.pk]))
+
     def test_offline_or_missing_camera_does_not_create_command(self):
         self.client.force_login(self.owner)
         self.camera.last_seen_at = timezone.now() - timedelta(hours=1)

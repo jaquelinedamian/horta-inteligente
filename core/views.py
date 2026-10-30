@@ -266,7 +266,13 @@ def customer_section(request, section):
             config = effective_garden_configuration(garden)
             overrides = garden.automation_overrides if isinstance(garden.automation_overrides, dict) else {}
             origins = {section: "Personalizado" if section in overrides else "Padrão HortaViva" for section in ("irrigation", "lighting", "camera", "monitoring")}
-            panels.append({"garden": garden, "snapshot": garden_snapshot(garden), "configuration": config, "configuration_origins": origins, "overrides": overrides, "recent_photos": garden.photos.all()[:7]})
+            snapshot = garden_snapshot(garden)
+            camera = snapshot["camera"]
+            stream_url = None
+            if camera and camera.local_ip:
+                host = f"[{camera.local_ip}]" if ":" in camera.local_ip else camera.local_ip
+                stream_url = f"http://{host}/stream"
+            panels.append({"garden": garden, "snapshot": snapshot, "camera_stream_url": stream_url, "configuration": config, "configuration_origins": origins, "overrides": overrides, "recent_photos": garden.photos.all()[:7]})
         context["panels"] = panels
     if section == "crops":
         context["active_modules"] = GardenModule.objects.filter(organization=org, status=GardenModule.Status.INSTALLED).count()
