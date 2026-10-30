@@ -18,9 +18,10 @@ imagem. Ele oferece `GET /`, `GET /capture` (JPEG atual) e `GET /stream`
    GPIO 0/GND e reinicie depois da gravacao.
 6. Abra o Monitor Serial em **115200 baud** e copie o IP exibido.
 
-Como alternativa reproduzível, instale PlatformIO e execute `pio run` nesta
-pasta. O ambiente `esp32cam` e a dependência do WiFiManager estão declarados em
-`platformio.ini`.
+Como alternativa reproduzível, a configuração do PlatformIO fica separada em
+`../esp32_cam_horta_platformio`. Execute `pio run` naquela pasta. Essa separação
+impede que a Arduino IDE compile simultaneamente o sketch e o invólucro C++ do
+PlatformIO.
 
 O sketch usa a pinagem `CAMERA_MODEL_AI_THINKER` publicada no exemplo oficial
 CameraWebServer da Espressif, isolada em `camera_pins.h`. Nao altere essa
