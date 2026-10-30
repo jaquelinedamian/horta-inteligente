@@ -1,4 +1,5 @@
 import json
+import importlib
 import re
 from pathlib import Path
 from unittest.mock import patch
@@ -491,8 +492,8 @@ class ControllerChannelProvisioningTests(TestCase):
         self.assertEqual(device.channels.get(key="air-temperature").metric, "air_temperature")
         self.assertEqual(device.channels.get(key="air-pressure").kind, Channel.Kind.SENSOR)
         self.assertEqual(device.channels.get(key="pump").kind, Channel.Kind.ACTUATOR)
-        self.assertFalse(device.channels.get(key="grow-light").is_enabled)
-        self.assertTrue(device.channels.get(key="grow-light").configuration["active_low"])
+        self.assertTrue(device.channels.get(key="grow-light").is_enabled)
+        self.assertFalse(device.channels.get(key="grow-light").configuration["active_low"])
 
     def test_ensure_defaults_is_idempotent_and_preserves_custom_channels(self):
         from devices.services import ensure_controller_default_channels
@@ -520,3 +521,30 @@ class ControllerChannelProvisioningTests(TestCase):
             serial_number="CAM-NO-DEFAULTS", name="Câmera", kind=Device.Kind.CAMERA,
         )
         self.assertFalse(camera.channels.exists())
+
+    def test_existing_grow_light_is_enabled_without_duplication_or_pump_changes(self):
+        from django.apps import apps
+
+        device = Device.objects.create(
+            organization=self.organization, model=self.model,
+            serial_number="ESP-MIGRATION", name="Controlador",
+        )
+        light = device.channels.get(key="grow-light")
+        light.is_enabled = False
+        light.configuration = {"component": "relay_2ch", "active_low": True, "custom": "preserved"}
+        light.save(update_fields=["is_enabled", "configuration", "updated_at"])
+        pump = device.channels.get(key="pump")
+        pump_before = (pump.pin, pump.is_enabled, dict(pump.configuration))
+
+        migration = importlib.import_module("devices.migrations.0011_enable_installed_grow_light")
+        migration.enable_installed_grow_light(apps, None)
+
+        light.refresh_from_db()
+        pump.refresh_from_db()
+        self.assertTrue(light.is_enabled)
+        self.assertEqual(light.pin, "D6")
+        self.assertFalse(light.configuration["active_low"])
+        self.assertEqual(light.configuration["component"], "relay_2ch")
+        self.assertEqual(light.configuration["custom"], "preserved")
+        self.assertEqual(device.channels.filter(key="grow-light").count(), 1)
+        self.assertEqual((pump.pin, pump.is_enabled, pump.configuration), pump_before)

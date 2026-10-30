@@ -3,6 +3,7 @@ from datetime import timedelta
 from pathlib import Path
 
 from django.test import TestCase
+from django.urls import reverse
 from django.utils import timezone
 
 from accounts.models import Membership, Organization, User
@@ -71,6 +72,8 @@ class RelayChannelAvailabilityTests(TestCase):
         self.light = self.device.channels.get(metric="light_state")
 
     def test_uninstalled_light_is_hidden_and_cannot_receive_commands(self):
+        self.light.is_enabled = False
+        self.light.save(update_fields=["is_enabled", "updated_at"])
         snapshot = garden_snapshot(self.garden)
         self.assertIsNone(snapshot["light_channel"])
         self.assertIsNotNone(snapshot["pump_channel"])
@@ -87,6 +90,18 @@ class RelayChannelAvailabilityTests(TestCase):
         self.assertTrue(command.payload["on"])
         self.assertFalse(command.payload.get("pump", False))
         self.assertFalse(actuator_automation_summary(snapshot)["lighting"]["active"])
+
+    def test_customer_ui_distinguishes_installed_from_uninstalled_light(self):
+        self.client.force_login(self.owner)
+
+        installed = self.client.get(reverse("customer-dashboard"))
+        self.assertContains(installed, "Estado não confirmado")
+        self.assertNotContains(installed, "Hardware não instalado")
+
+        self.light.is_enabled = False
+        self.light.save(update_fields=["is_enabled", "updated_at"])
+        uninstalled = self.client.get(reverse("customer-dashboard"))
+        self.assertContains(uninstalled, "Hardware não instalado")
 
     def _enable_light(self):
         self.light.is_enabled = True

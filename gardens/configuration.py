@@ -130,6 +130,10 @@ def effective_garden_configuration(garden):
                     }
                     for item in crop.lighting_schedules.all()
                 ]
+            # Sem uma recomendação de cultura, a programação cadastrada no
+            # próprio canal é a fonte efetiva, mesmo em hortas legadas que
+            # ainda não possuem o marcador ``source=custom``.
+            uses_custom = uses_custom or bool(custom_schedules and not recommended)
             schedules = custom_schedules if uses_custom else recommended
             if schedules or "lighting" in config:
                 lighting = config.setdefault("lighting", {})

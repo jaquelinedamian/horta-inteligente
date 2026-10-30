@@ -669,7 +669,7 @@ def garden_configuration(request, garden_id):
     ).first()
     soil_channel = controller.channels.filter(metric="soil_moisture").first() if controller else None
     pump_channel = controller.channels.filter(metric="pump_state").first() if controller else None
-    light_channel = controller.channels.filter(metric="light_state").first() if controller else None
+    light_channel = controller.channels.filter(metric="light_state", is_enabled=True).first() if controller else None
     calibration = soil_channel.configuration if soil_channel else {}
     lighting_schedule = light_channel.lighting_schedules.first() if light_channel else None
     lighting_hours = None
