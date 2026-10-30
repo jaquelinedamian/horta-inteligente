@@ -76,6 +76,9 @@ class DeviceApiTests(TestCase):
         self.garden = Garden.objects.create(organization=self.organization, name="Horta", code="horta")
         model = DeviceModel.objects.create(name="Wemos D1 Mini", code="wemos", hardware_platform="ESP8266")
         self.device = Device.objects.create(organization=self.organization, garden=self.garden, model=model, serial_number="ESP-1", name="Controlador")
+        light = self.device.channels.get(metric="light_state")
+        light.is_enabled = True
+        light.save(update_fields=["is_enabled", "updated_at"])
         self.temperature_channel = self.device.channels.get(key="air-temperature")
         self.pressure_channel = self.device.channels.get(key="air-pressure")
         self.actuator = self.device.channels.get(key="pump")
@@ -488,6 +491,8 @@ class ControllerChannelProvisioningTests(TestCase):
         self.assertEqual(device.channels.get(key="air-temperature").metric, "air_temperature")
         self.assertEqual(device.channels.get(key="air-pressure").kind, Channel.Kind.SENSOR)
         self.assertEqual(device.channels.get(key="pump").kind, Channel.Kind.ACTUATOR)
+        self.assertFalse(device.channels.get(key="grow-light").is_enabled)
+        self.assertTrue(device.channels.get(key="grow-light").configuration["active_low"])
 
     def test_ensure_defaults_is_idempotent_and_preserves_custom_channels(self):
         from devices.services import ensure_controller_default_channels

@@ -40,6 +40,8 @@ class LightingConfigurationInheritanceTests(TestCase):
             serial_number="LIGHT-CONTROLLER-1", name="Controlador",
         )
         self.light = self.device.channels.get(metric="light_state")
+        self.light.is_enabled = True
+        self.light.save(update_fields=["is_enabled", "updated_at"])
 
     def test_default_is_inherited_dynamically(self):
         config = effective_garden_configuration(self.garden)["lighting"]

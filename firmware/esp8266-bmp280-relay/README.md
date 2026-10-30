@@ -1,6 +1,6 @@
-# Controlador ESP8266 + BMP280 + rele
+# Controlador ESP8266 + BMP280 + rele de 2 canais
 
-Firmware PlatformIO para Wemos D1 mini (ESP8266), BMP280 I2C e modulo rele.
+Firmware PlatformIO para Wemos D1 mini (ESP8266), BMP280 I2C e modulo rele de 2 canais.
 
 ## Ligacoes
 
@@ -11,11 +11,12 @@ conecte tensao de rede sem caixa, isolacao e instalacao profissional.
 |---|---|---|
 | BMP280 | VCC / GND | 3V3 / G |
 | BMP280 | SCL / SDA | D1 / D2 |
-| Rele | IN / GND | D5 / G |
+| Rele canal 1 - bomba | IN1 / GND | D5 / G |
+| Rele canal 2 - iluminacao | IN2 / GND | D6 / G |
 | Rele | VCC | conforme a especificacao do modulo |
 
-O sensor e detectado em `0x76` ou `0x77`. O rele e ativo em nivel baixo e
-sempre inicia desligado. Comandos `safe_preset` desligam a bomba automaticamente
+O sensor e detectado em `0x76` ou `0x77`. Os dois reles sao ativos em nivel baixo
+e sempre iniciam desligados. Comandos `safe_preset` desligam a bomba automaticamente
 apos o tempo definido por `SAFE_PUMP_DURATION_MS` (10 segundos no exemplo).
 
 ## Configurar e gravar
@@ -29,7 +30,9 @@ apos o tempo definido por `SAFE_PUMP_DURATION_MS` (10 segundos no exemplo).
 Emita o token em **Gestao > Dispositivos > dispositivo > Gerar e rotacionar
 credencial**. A plataforma cria automaticamente os canais `air-temperature`
 (sensor, `air_temperature`, I2C), `air-pressure` (sensor, `air_pressure`, I2C)
-e `pump` (atuador, `pump_state`, D5). O firmware envia telemetria/heartbeat e busca comandos nas
+e `pump` (atuador, `pump_state`, D5). O canal `grow-light` (`light_state`, D6)
+e cadastrado desabilitado e so deve ser habilitado depois da instalacao e teste
+do segundo canal fisico. O firmware envia telemetria/heartbeat e busca comandos nas
 rotas existentes em `/api/v1/device/`.
 
 O BMP280 nao mede umidade. `air-humidity` exige BME280, SHT3x ou equivalente.
@@ -42,16 +45,15 @@ portal local do WiFiManager; a senha fica somente no flash do ESP8266 e nunca é
 enviada ao Django. Depois de conectado, o firmware consulta
 `GET /api/device/config/` e guarda a última resposta válida no LittleFS.
 
-A agenda de irrigação armazenada continua acionando o relé D5 sem internet. O
-tempo é limitado a 300 segundos por execução. Iluminação e fertilização só
-podem ser automatizadas após definir e documentar o hardware/pinos desses
-atuadores; nenhuma pinagem foi inventada neste firmware.
+A agenda de irrigação armazenada continua acionando somente o relé D5 sem internet.
+O tempo é limitado a 300 segundos por execução. A iluminação em D6 só é executada
+quando o canal correspondente estiver habilitado no backend.
 
 ## Dispositivo independente
 
 O controlador não se comunica com a ESP32-CAM. Ele possui Wi-Fi, identidade e
 credencial próprios e continua com sensores e automação local mesmo quando a
-câmera está desligada. D6 e D7 permanecem livres, sem função definida.
+câmera está desligada. D7 permanece livre, sem função definida.
 
 ## Reset de Wi-Fi
 
@@ -62,7 +64,7 @@ Instale um botão momentâneo entre **D0/GPIO16 e GND**. Mantenha-o pressionado 
 
 ## Umidade do solo e iluminacao
 
-O firmware 1.2 usa `A0` para o sensor analogico de umidade do solo e `D6`
+O firmware 1.3 usa `A0` para o sensor analogico de umidade do solo e `D6`
 para o segundo canal do rele (iluminacao). A bomba permanece em `D5`; ambos os
 reles sao tratados como active-low e iniciam desligados. Os valores seco e
 molhado sao recebidos em `soil_moisture.dry_raw` e `soil_moisture.wet_raw`.

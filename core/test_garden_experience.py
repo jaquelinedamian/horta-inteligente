@@ -30,6 +30,9 @@ class GardenExperienceTests(TestCase):
         self.device = Device.objects.create(organization=self.org, garden=self.garden, model=hardware, serial_number="EXPERIENCE-1", name="Controlador")
         self.temperature = self.device.channels.get(metric="air_temperature")
         self.pump = self.device.channels.get(metric="pump_state")
+        light = self.device.channels.get(metric="light_state")
+        light.is_enabled = True
+        light.save(update_fields=["is_enabled", "updated_at"])
 
     def _configuration_payload(self, **overrides):
         data = {"light_hours": "10", "irrigation_frequency_count": "3", "irrigation_frequency_period": "day", "pump_duration_seconds": "25", "photos_per_day": "4", "monitoring_interval_minutes": "60"}

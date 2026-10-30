@@ -18,14 +18,15 @@ namespace {
 // PINOS
 // ============================================================
 
-constexpr uint8_t RELAY_PIN = D5;
+constexpr uint8_t PUMP_RELAY_PIN = D5;
 constexpr uint8_t LIGHT_RELAY_PIN = D6;
 constexpr uint8_t SOIL_SENSOR_PIN = A0;
 
-constexpr bool RELAY_ACTIVE_LOW = true;
+constexpr bool PUMP_RELAY_ACTIVE_LOW = true;
+constexpr bool LIGHT_RELAY_ACTIVE_LOW = true;
 
 constexpr char FIRMWARE_VERSION[] =
-    "horta-esp8266-1.2.0";
+    "horta-esp8266-1.3.0";
 
 // ============================================================
 // SENSOR / ESTADO
@@ -34,7 +35,7 @@ constexpr char FIRMWARE_VERSION[] =
 Adafruit_BMP280 bmp;
 
 bool bmpReady = false;
-bool relayOn = false;
+bool pumpRelayOn = false;
 bool lightRelayOn = false;
 int soilRaw = 0;
 float soilPercent = 0.0F;
@@ -88,19 +89,18 @@ void resetAllWifi() {
 // RELE / BOMBA
 // ============================================================
 
-void setRelay(bool on) {
-
-  relayOn = on;
-
-  digitalWrite(
-      RELAY_PIN,
-      (on == RELAY_ACTIVE_LOW) ? LOW : HIGH
-  );
+uint8_t relayLevel(bool on, bool activeLow) {
+  return on == activeLow ? LOW : HIGH;
 }
 
-void setLight(bool on) {
+void setPumpState(bool on) {
+  pumpRelayOn = on;
+  digitalWrite(PUMP_RELAY_PIN, relayLevel(on, PUMP_RELAY_ACTIVE_LOW));
+}
+
+void setLightState(bool on) {
   lightRelayOn = on;
-  digitalWrite(LIGHT_RELAY_PIN, (on == RELAY_ACTIVE_LOW) ? LOW : HIGH);
+  digitalWrite(LIGHT_RELAY_PIN, relayLevel(on, LIGHT_RELAY_ACTIVE_LOW));
 }
 
 float calibratedSoilPercent(int raw) {
@@ -563,8 +563,8 @@ void sendHeartbeat() {
       bmpReady;
 
   doc["diagnostics"]["relay_on"] =
-      relayOn;
-  doc["diagnostics"]["relay_pump_on"] = relayOn;
+      pumpRelayOn;
+  doc["diagnostics"]["relay_pump_on"] = pumpRelayOn;
   doc["diagnostics"]["relay_light_on"] = lightRelayOn;
   doc["diagnostics"]["soil_moisture_raw"] = soilRaw;
   doc["diagnostics"]["soil_moisture_percent"] = soilPercent;
@@ -723,7 +723,7 @@ void pollCommands() {
           command["payload"]["on"]
               .as<bool>();
 
-      setRelay(on);
+      setPumpState(on);
 
 
       uint32_t durationSeconds = command["payload"]["duration_seconds"] | (SAFE_PUMP_DURATION_MS / 1000UL);
@@ -734,7 +734,7 @@ void pollCommands() {
           id,
           true,
           "relay atualizado",
-          relayOn
+          pumpRelayOn
       );
     }
 
@@ -743,7 +743,7 @@ void pollCommands() {
         type == "set_state" &&
         command["payload"]["on"].is<bool>()
     ) {
-      setLight(command["payload"]["on"].as<bool>());
+      setLightState(command["payload"]["on"].as<bool>());
       acknowledge(id, true, "iluminacao atualizada", lightRelayOn);
     }
     else {
@@ -1024,7 +1024,7 @@ void runOfflineAutomation() {
       for (JsonVariant day : schedule["days"].as<JsonArray>()) validDay = validDay || day.as<int>() == weekday;
       if ((schedule["enabled"] | true) && validDay && schedule["time"].as<String>() == current && lastIrrigationBucket != bucket) {
         uint32_t duration = constrain(schedule["duration_seconds"] | 10UL, 1UL, 300UL);
-        setRelay(true);
+        setPumpState(true);
         pumpStopAt = millis() + duration * 1000UL;
         lastIrrigationBucket = bucket;
         started = true;
@@ -1035,7 +1035,7 @@ void runOfflineAutomation() {
     if (!started) for (JsonVariant value : irrigation["times"].as<JsonArray>()) {
       if (value.as<String>() == current && lastIrrigationBucket != bucket) {
         uint32_t duration = constrain(irrigation["duration_seconds"] | 10UL, 1UL, 300UL);
-        setRelay(true);
+        setPumpState(true);
         pumpStopAt = millis() + duration * 1000UL;
         lastIrrigationBucket = bucket;
         break;
@@ -1062,7 +1062,7 @@ void runOfflineAutomation() {
         ? today && minutesNow >= startMinutes && minutesNow < endMinutes
         : (today && minutesNow >= startMinutes) || (previous && minutesNow < endMinutes));
     }
-    setLight(shouldBeOn);
+    setLightState(shouldBeOn);
     lastLightingBucket = bucket;
   }
 }
@@ -1095,15 +1095,13 @@ void setup() {
   );
 
 
-  pinMode(
-      RELAY_PIN,
-      OUTPUT
-  );
+  // Precarrega o nivel seguro antes de habilitar as saidas, evitando pulsos.
+  digitalWrite(PUMP_RELAY_PIN, relayLevel(false, PUMP_RELAY_ACTIVE_LOW));
+  digitalWrite(LIGHT_RELAY_PIN, relayLevel(false, LIGHT_RELAY_ACTIVE_LOW));
+  pinMode(PUMP_RELAY_PIN, OUTPUT);
   pinMode(LIGHT_RELAY_PIN, OUTPUT);
-
-
-  setRelay(false);
-  setLight(false);
+  setPumpState(false);
+  setLightState(false);
 
 
   // SDA = D2
@@ -1232,7 +1230,7 @@ void loop() {
       ) >= 0
   ) {
 
-    setRelay(false);
+    setPumpState(false);
 
     pumpStopAt = 0;
 

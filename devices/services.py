@@ -46,7 +46,8 @@ CONTROLLER_DEFAULT_CHANNELS = (
         "key": "grow-light", "name": "Iluminação",
         "kind": Channel.Kind.ACTUATOR, "metric": "light_state", "unit": "",
         "value_type": Channel.ValueType.BOOLEAN, "pin": "D6",
-        "configuration": {"component": "relay_2ch", "active_low": False},
+        "configuration": {"component": "relay_2ch", "active_low": True},
+        "is_enabled": False,
     },
 )
 
@@ -193,6 +194,8 @@ def queue_actuator_command(*, user, channel, action, duration_seconds=None):
     """Fila única e autorizada para comandos humanos de bomba e iluminação."""
     if channel.kind != Channel.Kind.ACTUATOR or channel.metric not in {"pump_state", "light_state"}:
         raise ValueError("canal de atuador inválido")
+    if not channel.is_enabled:
+        raise ValueError("canal de atuador não está habilitado")
     garden = channel.device.assigned_garden()
     if not garden or not user_can_access_garden(user, garden):
         from django.core.exceptions import PermissionDenied

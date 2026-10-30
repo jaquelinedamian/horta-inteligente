@@ -223,14 +223,14 @@
           <div class="automation-summary-head">
             <div>
               <span>Iluminação</span>
-              <strong>{% if panel.snapshot.light_channel %}Controle disponível{% else %}Não configurada{% endif %}</strong>
+              <strong>{% if panel.snapshot.light_channel %}Controle disponível{% else %}Hardware de iluminação não instalado{% endif %}</strong>
             </div>
             <span class="state-indicator {% if panel.snapshot.light_channel %}is-active{% endif %}"></span>
           </div>
           <dl>
             <div><dt>Iluminação diária</dt><dd>{{ panel.lighting.hours_per_day|default:"Não configurada" }}{% if panel.lighting.hours_per_day %} h/dia{% endif %}</dd></div>
           </dl>
-          {% if panel.snapshot.light_channel %}<form method="post" action="{% url 'device-action' %}" class="automation-actions">{% csrf_token %}<input type="hidden" name="channel" value="{{ panel.snapshot.light_channel.id }}"><input type="hidden" name="next" value="{{ request.get_full_path }}"><button class="btn btn-brand" type="submit" name="action" value="on">Ligar</button><button class="btn btn-light" type="submit" name="action" value="off">Desligar</button></form>{% else %}<span class="text-muted">Iluminação ainda não configurada</span>{% endif %}
+          {% if panel.snapshot.light_channel %}<form method="post" action="{% url 'device-action' %}" class="automation-actions">{% csrf_token %}<input type="hidden" name="channel" value="{{ panel.snapshot.light_channel.id }}"><input type="hidden" name="next" value="{{ request.get_full_path }}"><button class="btn btn-brand" type="submit" name="action" value="on">Ligar</button><button class="btn btn-light" type="submit" name="action" value="off">Desligar</button></form>{% else %}<span class="text-muted">Iluminação ainda não disponível.</span>{% endif %}
         </article>
       </div>
     </section>
