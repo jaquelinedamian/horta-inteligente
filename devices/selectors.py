@@ -48,7 +48,7 @@ def _next_lighting_action(schedules, now):
     return min(candidates, key=lambda item: item[0]) if candidates else None
 
 
-def _confirmed_actuator_state(channel, controller, diagnostic_key, freshness_minutes):
+def _confirmed_actuator_state(channel, controller, diagnostic_keys, freshness_minutes):
     """Retorna somente estado informado pelo dispositivo, nunca o solicitado."""
     candidates = []
     reading = channel.readings.filter(boolean_value__isnull=False).order_by("-recorded_at").first() if channel else None
@@ -56,13 +56,29 @@ def _confirmed_actuator_state(channel, controller, diagnostic_key, freshness_min
         candidates.append((reading.recorded_at, bool(reading.boolean_value), "telemetry"))
     heartbeat = controller.latest_heartbeat if controller else None
     diagnostics = heartbeat.diagnostics if heartbeat and isinstance(heartbeat.diagnostics, dict) else {}
-    if diagnostic_key in diagnostics:
-        candidates.append((heartbeat.recorded_at, bool(diagnostics[diagnostic_key]), "heartbeat"))
+    for diagnostic_key in diagnostic_keys:
+        if diagnostic_key in diagnostics:
+            candidates.append((heartbeat.recorded_at, bool(diagnostics[diagnostic_key]), "heartbeat"))
+            break
     if not candidates:
         return {"state": None, "last_state": None, "confirmed_at": None, "source": None, "is_recent": False}
     confirmed_at, state, source = max(candidates, key=lambda item: item[0])
     is_recent = bool(controller and controller.is_online and timezone.now() - confirmed_at <= timedelta(minutes=freshness_minutes))
     return {"state": state if is_recent else None, "last_state": state, "confirmed_at": confirmed_at, "source": source, "is_recent": is_recent}
+
+
+def _command_feedback(channel, confirmed_at):
+    """Estado transitório do comando, sem convertê-lo em estado físico."""
+    if not channel:
+        return {"updating": False, "confirmation_failed": False, "command": None}
+    latest = channel.commands.order_by("-created_at").first()
+    if not latest or (confirmed_at and latest.created_at <= confirmed_at):
+        return {"updating": False, "confirmation_failed": False, "command": latest}
+    return {
+        "updating": latest.status in {DeviceCommand.Status.PENDING, DeviceCommand.Status.DELIVERED},
+        "confirmation_failed": latest.status in {DeviceCommand.Status.FAILED, DeviceCommand.Status.EXPIRED},
+        "command": latest,
+    }
 
 
 def actuator_automation_summary(snapshot):
@@ -78,8 +94,14 @@ def actuator_automation_summary(snapshot):
     last_light_off = light.commands.filter(status=DeviceCommand.Status.SUCCEEDED, payload__on=False).order_by("-acknowledged_at").first() if light else None
     config = effective_garden_configuration(snapshot["garden"])
     freshness_minutes = max(2, int((config.get("monitoring") or {}).get("interval_minutes") or 60) * 2)
-    pump_confirmation = _confirmed_actuator_state(pump, controller, "pump_on", freshness_minutes)
-    light_confirmation = _confirmed_actuator_state(light, controller, "lamp_on", freshness_minutes)
+    pump_confirmation = _confirmed_actuator_state(
+        pump, controller, ("pump_on", "relay_pump_on", "relay_on"), freshness_minutes
+    )
+    light_confirmation = _confirmed_actuator_state(
+        light, controller, ("lamp_on", "relay_light_on"), freshness_minutes
+    )
+    pump_feedback = _command_feedback(pump, pump_confirmation["confirmed_at"])
+    light_feedback = _command_feedback(light, light_confirmation["confirmed_at"])
     pump_state = pump_confirmation["state"] is True
     light_state = light_confirmation["state"] is True
     pump_duration = last_pump_on.payload.get("duration_seconds") if last_pump_on else None
@@ -112,6 +134,8 @@ def actuator_automation_summary(snapshot):
             "state": pump_confirmation["state"], "last_state": pump_confirmation["last_state"],
             "confirmed_at": pump_confirmation["confirmed_at"], "state_source": pump_confirmation["source"],
             "state_is_recent": pump_confirmation["is_recent"],
+            "updating": pump_feedback["updating"],
+            "confirmation_failed": pump_feedback["confirmation_failed"],
             "mode": _command_origin(last_pump_on) if pump_state and last_pump_on else ("Automático" if pump_schedules else "Manual"),
             "schedules": pump_schedules, "daily_count": max_irrigations,
             "next_at": next_irrigation[0] if next_irrigation else None,
@@ -124,6 +148,8 @@ def actuator_automation_summary(snapshot):
             "state": light_confirmation["state"], "last_state": light_confirmation["last_state"],
             "confirmed_at": light_confirmation["confirmed_at"], "state_source": light_confirmation["source"],
             "state_is_recent": light_confirmation["is_recent"],
+            "updating": light_feedback["updating"],
+            "confirmation_failed": light_feedback["confirmation_failed"],
             "mode": _command_origin(last_light_on) if light_state and last_light_on else ("Automático" if light_schedules else "Manual"),
             "schedules": light_schedules, "hours_per_day": max_light_seconds / 3600 if max_light_seconds else None,
             "next_at": next_light[0] if next_light else None, "next_action": next_light[1] if next_light else None,

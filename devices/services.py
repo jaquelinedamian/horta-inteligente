@@ -122,12 +122,18 @@ def ingest_readings(device, readings):
     # Sensores e atuadores usam a mesma trilha temporal. Para atuadores, a
     # leitura booleana representa o estado confirmado pelo controlador, não
     # apenas o estado solicitado por um comando.
-    channels = {c.key: c for c in device.channels.filter(is_enabled=True)}
+    channels = {c.key: c for c in device.channels.all()}
     results = []
     for item in readings:
         channel = channels.get(item.get("channel"))
         if not channel:
             raise ValueError(f"canal desconhecido ou desabilitado: {item.get('channel')}")
+        # Um firmware único pode reportar todos os GPIOs. Canais conhecidos,
+        # mas ainda não instalados/habilitados, são ignorados sem invalidar as
+        # demais leituras do mesmo lote.
+        if not channel.is_enabled:
+            results.append({"id": None, "created": False, "ignored": True})
+            continue
         key = str(item.get("idempotency_key", "")).strip()
         if not key:
             raise ValueError("idempotency_key é obrigatório")

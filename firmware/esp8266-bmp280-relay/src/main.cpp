@@ -24,6 +24,8 @@ constexpr uint8_t SOIL_SENSOR_PIN = A0;
 
 constexpr bool PUMP_RELAY_ACTIVE_LOW = true;
 constexpr bool LIGHT_RELAY_ACTIVE_LOW = true;
+constexpr uint8_t RELAY_ON = LOW;
+constexpr uint8_t RELAY_OFF = HIGH;
 
 constexpr char FIRMWARE_VERSION[] =
     "horta-esp8266-1.3.0";
@@ -37,6 +39,7 @@ Adafruit_BMP280 bmp;
 bool bmpReady = false;
 bool pumpRelayOn = false;
 bool lightRelayOn = false;
+bool actuatorStateDirty = true;
 int soilRaw = 0;
 float soilPercent = 0.0F;
 
@@ -90,15 +93,18 @@ void resetAllWifi() {
 // ============================================================
 
 uint8_t relayLevel(bool on, bool activeLow) {
-  return on == activeLow ? LOW : HIGH;
+  if (activeLow) return on ? RELAY_ON : RELAY_OFF;
+  return on ? HIGH : LOW;
 }
 
 void setPumpState(bool on) {
+  if (pumpRelayOn != on) actuatorStateDirty = true;
   pumpRelayOn = on;
   digitalWrite(PUMP_RELAY_PIN, relayLevel(on, PUMP_RELAY_ACTIVE_LOW));
 }
 
 void setLightState(bool on) {
+  if (lightRelayOn != on) actuatorStateDirty = true;
   lightRelayOn = on;
   digitalWrite(LIGHT_RELAY_PIN, relayLevel(on, LIGHT_RELAY_ACTIVE_LOW));
 }
@@ -405,26 +411,7 @@ void sendTelemetry() {
 
   String recordedAt = utcNow();
 
-  if (
-      !bmpReady ||
-      recordedAt.isEmpty()
-  ) {
-
-    return;
-  }
-
-
-  float temperature =
-      bmp.readTemperature();
-
-  float pressure =
-      bmp.readPressure() / 100.0F;
-
-
-  if (
-      !isfinite(temperature) ||
-      !isfinite(pressure)
-  ) {
+  if (recordedAt.isEmpty()) {
 
     return;
   }
@@ -436,36 +423,23 @@ void sendTelemetry() {
       doc["readings"].to<JsonArray>();
 
 
-  JsonObject temperatureItem =
-      readings.add<JsonObject>();
+  if (bmpReady) {
+    float temperature = bmp.readTemperature();
+    float pressure = bmp.readPressure() / 100.0F;
+    if (isfinite(temperature) && isfinite(pressure)) {
+      JsonObject temperatureItem = readings.add<JsonObject>();
+      temperatureItem["channel"] = "air-temperature";
+      temperatureItem["value"] = temperature;
+      temperatureItem["recorded_at"] = recordedAt;
+      temperatureItem["idempotency_key"] = nextKey("temperature");
 
-  temperatureItem["channel"] =
-      "air-temperature";
-
-  temperatureItem["value"] =
-      temperature;
-
-  temperatureItem["recorded_at"] =
-      recordedAt;
-
-  temperatureItem["idempotency_key"] =
-      nextKey("temperature");
-
-
-  JsonObject pressureItem =
-      readings.add<JsonObject>();
-
-  pressureItem["channel"] =
-      "air-pressure";
-
-  pressureItem["value"] =
-      pressure;
-
-  pressureItem["recorded_at"] =
-      recordedAt;
-
-  pressureItem["idempotency_key"] =
-      nextKey("pressure");
+      JsonObject pressureItem = readings.add<JsonObject>();
+      pressureItem["channel"] = "air-pressure";
+      pressureItem["value"] = pressure;
+      pressureItem["recorded_at"] = recordedAt;
+      pressureItem["idempotency_key"] = nextKey("pressure");
+    }
+  }
 
   soilRaw = analogRead(SOIL_SENSOR_PIN);
   soilPercent = calibratedSoilPercent(soilRaw);
@@ -476,6 +450,18 @@ void sendTelemetry() {
   soilItem["recorded_at"] = recordedAt;
   soilItem["idempotency_key"] = nextKey("soil");
   soilItem["raw"]["raw"] = soilRaw;
+
+  JsonObject pumpItem = readings.add<JsonObject>();
+  pumpItem["channel"] = "pump";
+  pumpItem["value"] = pumpRelayOn;
+  pumpItem["recorded_at"] = recordedAt;
+  pumpItem["idempotency_key"] = nextKey("pump-state");
+
+  JsonObject lightItem = readings.add<JsonObject>();
+  lightItem["channel"] = "grow-light";
+  lightItem["value"] = lightRelayOn;
+  lightItem["recorded_at"] = recordedAt;
+  lightItem["idempotency_key"] = nextKey("light-state");
 
 
   String body;
@@ -503,6 +489,8 @@ void sendTelemetry() {
         "telemetry: HTTP %d\n",
         status
     );
+
+    if (status >= 200 && status < 300) actuatorStateDirty = false;
 
     if (status == HTTP_CODE_BAD_REQUEST) {
 
@@ -566,6 +554,8 @@ void sendHeartbeat() {
       pumpRelayOn;
   doc["diagnostics"]["relay_pump_on"] = pumpRelayOn;
   doc["diagnostics"]["relay_light_on"] = lightRelayOn;
+  doc["diagnostics"]["pump_on"] = pumpRelayOn;
+  doc["diagnostics"]["lamp_on"] = lightRelayOn;
   doc["diagnostics"]["soil_moisture_raw"] = soilRaw;
   doc["diagnostics"]["soil_moisture_percent"] = soilPercent;
   doc["diagnostics"]["wifi_rssi"] = WiFi.RSSI();
@@ -1274,6 +1264,7 @@ void loop() {
   // ==========================================================
 
   if (
+      actuatorStateDirty ||
       !lastTelemetryAt ||
       now - lastTelemetryAt
           >= TELEMETRY_INTERVAL_MS
