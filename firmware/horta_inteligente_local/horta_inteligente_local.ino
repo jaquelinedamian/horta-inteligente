@@ -100,6 +100,48 @@ String cachedConfiguration = "{}";
 String lastIrrigationBucket;
 String lastLightingBucket;
 
+constexpr uint8_t EXECUTED_COMMAND_CACHE_SIZE = 8;
+
+struct ExecutedCommand {
+  String id;
+  bool succeeded = false;
+  String detail;
+};
+
+ExecutedCommand executedCommands[EXECUTED_COMMAND_CACHE_SIZE];
+uint8_t executedCommandCursor = 0;
+
+ExecutedCommand* findExecutedCommand(const String& id) {
+  if (id.isEmpty()) return nullptr;
+  for (uint8_t index = 0; index < EXECUTED_COMMAND_CACHE_SIZE; ++index) {
+    if (executedCommands[index].id == id) return &executedCommands[index];
+  }
+  return nullptr;
+}
+
+void rememberExecutedCommand(
+    const String& id,
+    bool succeeded,
+    const String& detail
+) {
+  ExecutedCommand& entry = executedCommands[executedCommandCursor];
+  entry.id = id;
+  entry.succeeded = succeeded;
+  entry.detail = detail;
+  executedCommandCursor = (executedCommandCursor + 1) % EXECUTED_COMMAND_CACHE_SIZE;
+}
+
+void logRelaySnapshot(const __FlashStringHelper* label) {
+  Serial.print(label);
+  Serial.printf(
+      " | D5=%s | D6=%s | pumpOn=%s | lampOn=%s\n",
+      digitalRead(PUMP_RELAY_PIN) == HIGH ? "HIGH" : "LOW",
+      digitalRead(LAMP_RELAY_PIN) == HIGH ? "HIGH" : "LOW",
+      pumpOn ? "ON" : "OFF",
+      lampOn ? "ON" : "OFF"
+  );
+}
+
 // ============================================================
 // SENSOR DE UMIDADE DO SOLO
 // ============================================================
@@ -1382,6 +1424,23 @@ void pollCommands() {
         command["payload"]["duration_seconds"]
         | 0UL;
 
+    Serial.print(F("COMMAND ID: "));
+    Serial.println(id);
+    Serial.print(F("CHANNEL: "));
+    Serial.println(channel);
+    Serial.print(F("REQUESTED STATE: "));
+    Serial.println(on ? F("ON") : F("OFF"));
+    logRelaySnapshot(F("RELAY STATE BEFORE"));
+
+    ExecutedCommand* previous = findExecutedCommand(id);
+    if (previous) {
+      Serial.println(F("COMMAND DUPLICATE - action not repeated"));
+      Serial.println(F("DUPLICATE COMMAND | ACTION SKIPPED | ACK RETRY"));
+      logRelaySnapshot(F("RELAY STATE UNCHANGED"));
+      acknowledge(id, previous->succeeded, previous->detail);
+      continue;
+    }
+
     // ----------------------------------------------------------
     // BOMBA
     // ----------------------------------------------------------
@@ -1447,13 +1506,15 @@ void pollCommands() {
             0;
       }
 
+      const String pumpDetail = on ? "bomba ligada" : "bomba desligada";
+      rememberExecutedCommand(id, true, pumpDetail);
       acknowledge(
           id,
           true,
-          on
-              ? "bomba ligada"
-              : "bomba desligada"
+          pumpDetail
       );
+
+      logRelaySnapshot(F("RELAY STATE AFTER PUMP"));
 
       Serial.println(F("COMMAND LATENCY"));
       Serial.printf("recebido -> rele acionado: %lu ms\n", relayActuatedAt - commandReceivedAt);
@@ -1556,13 +1617,17 @@ void pollCommands() {
             0;
       }
 
+      const String lampDetail = gpioMatchesRequest
+          ? (on ? "lampada ligada" : "lampada desligada")
+          : "nivel do GPIO da lampada divergiu do comando";
+      rememberExecutedCommand(id, gpioMatchesRequest, lampDetail);
       acknowledge(
           id,
           gpioMatchesRequest,
-          gpioMatchesRequest
-              ? (on ? "lampada ligada" : "lampada desligada")
-              : "nivel do GPIO da lampada divergiu do comando"
+          lampDetail
       );
+
+      logRelaySnapshot(F("RELAY STATE AFTER LAMP"));
 
       Serial.print(F("ACK: "));
       Serial.println(gpioMatchesRequest ? F("success") : F("failed"));

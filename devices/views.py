@@ -133,7 +133,11 @@ def acknowledge_command(request, command_id):
         command = DeviceCommand.objects.select_for_update().filter(id=command_id, device=request.device).first()
         if not command:
             return api_error("comando não encontrado", 404)
-        if command.status not in {DeviceCommand.Status.DELIVERED, *allowed}:
+        if command.status in allowed:
+            # ACKs podem ser repetidos quando a resposta anterior se perde.
+            # Um comando terminal nunca volta nem troca para outro estado.
+            return JsonResponse({"id": str(command.id), "status": command.status})
+        if command.status != DeviceCommand.Status.DELIVERED:
             return api_error("comando não está aguardando confirmação", 409)
         command.status = status
         result = payload.get("result", {})

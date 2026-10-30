@@ -16,6 +16,13 @@ from devices.models import Channel, Device, DeviceCommand, DeviceCredential, Dev
 
 
 class FirmwareLightingCommandContractTests(TestCase):
+    @staticmethod
+    def firmware_source():
+        return (
+            Path(__file__).resolve().parents[1]
+            / "firmware" / "horta_inteligente_local" / "horta_inteligente_local.ino"
+        ).read_text(encoding="utf-8")
+
     def test_grow_light_set_state_on_is_accepted_and_acknowledged(self):
         firmware = (
             Path(__file__).resolve().parents[1]
@@ -69,6 +76,36 @@ class FirmwareLightingCommandContractTests(TestCase):
         self.assertIn('F("COMMAND COUNT: ")', firmware)
         loop = firmware[firmware.index("void loop()") :]
         self.assertLess(loop.index("pollCommands();"), loop.index("sendTelemetry();"))
+
+    def test_duplicate_command_retries_ack_without_restarting_actions(self):
+        firmware = self.firmware_source()
+        duplicate = firmware[firmware.index("ExecutedCommand* previous") : firmware.index("// BOMBA")]
+        self.assertIn("findExecutedCommand(id)", duplicate)
+        self.assertIn("COMMAND DUPLICATE - action not repeated", duplicate)
+        self.assertIn("ACK RETRY", duplicate)
+        self.assertIn("acknowledge(id, previous->succeeded, previous->detail)", duplicate)
+        self.assertNotIn("setPump(", duplicate)
+        self.assertNotIn("setLamp(", duplicate)
+        self.assertNotIn("pumpStopAt =", duplicate)
+        self.assertNotIn("lampStopAt =", duplicate)
+
+    def test_pump_command_does_not_change_lamp(self):
+        firmware = self.firmware_source()
+        pump = firmware[firmware.index("// BOMBA", firmware.index("void pollCommands()")) : firmware.index("// LAMPADA", firmware.index("void pollCommands()"))]
+        self.assertIn("setPump(", pump)
+        self.assertIn("pumpStopAt =", pump)
+        self.assertNotIn("setLamp(", pump)
+        self.assertNotIn("lampStopAt =", pump)
+        self.assertNotIn("lampOn =", pump)
+        self.assertNotIn("digitalWrite(LAMP_RELAY_PIN", pump)
+
+    def test_executed_command_is_cached_before_ack(self):
+        firmware = self.firmware_source()
+        pump = firmware[firmware.index("// BOMBA", firmware.index("void pollCommands()")) : firmware.index("// LAMPADA", firmware.index("void pollCommands()"))]
+        lamp_start = firmware.index("// LAMPADA", firmware.index("void pollCommands()"))
+        lamp = firmware[lamp_start : firmware.index('Serial.print(F("ACK: "))', lamp_start)]
+        self.assertLess(pump.index("rememberExecutedCommand"), pump.index("acknowledge("))
+        self.assertLess(lamp.index("rememberExecutedCommand"), lamp.index("acknowledge("))
 
 
 class DeviceApiTests(TestCase):
@@ -256,6 +293,26 @@ class DeviceApiTests(TestCase):
         self.assertEqual(response.json()["commands"], [])
         command.refresh_from_db()
         self.assertEqual(command.status, DeviceCommand.Status.EXPIRED)
+
+    def test_terminal_commands_are_not_redelivered_or_changed_by_ack_retry(self):
+        for status in (DeviceCommand.Status.SUCCEEDED, DeviceCommand.Status.FAILED):
+            command = DeviceCommand.objects.create(
+                device=self.device, channel=self.actuator, command_type="set_state",
+                payload={"on": True}, idempotency_key=f"terminal-{status}",
+                status=status, acknowledged_at=timezone.now(), result={"relay": status == DeviceCommand.Status.SUCCEEDED},
+            )
+            poll = self.client.get(reverse("devices:commands"), **self.command_headers)
+            self.assertNotIn(str(command.id), [item["id"] for item in poll.json()["commands"]])
+
+            opposite = "failed" if status == DeviceCommand.Status.SUCCEEDED else "succeeded"
+            retry = self.client.post(
+                reverse("devices:acknowledge-command", args=[command.id]),
+                json.dumps({"status": opposite, "result": {"relay": opposite == "succeeded"}}),
+                content_type="application/json", **self.command_headers,
+            )
+            self.assertEqual(retry.status_code, 200)
+            command.refresh_from_db()
+            self.assertEqual(command.status, status)
 
     def test_pump_ack_normalizes_physical_state_for_the_ui(self):
         command = DeviceCommand.objects.create(
