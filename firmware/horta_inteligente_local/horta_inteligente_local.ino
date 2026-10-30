@@ -5,7 +5,17 @@
 #include <WiFiClient.h>
 #include <WiFiClientSecure.h>
 #include <Wire.h>
+#if defined(__has_include)
+#if __has_include(<LittleFS.h>)
 #include <LittleFS.h>
+#define HORTA_HAS_LITTLEFS
+#else
+#include <FS.h>
+#endif
+#else
+#include <FS.h>
+#endif
+
 #include <WiFiManager.h>
 #include <Adafruit_BMP280.h>
 #include <time.h>
@@ -53,6 +63,12 @@ X4XSQRjbgbMEHMUfpIBvFSDJ3gyICh3WZlXi/EjJKSZp4A==
 
 
 namespace {
+
+#ifdef HORTA_HAS_LITTLEFS
+auto& FS_IMPL = LittleFS;
+#else
+auto& FS_IMPL = SPIFFS;
+#endif
 
 // ============================================================
 // PINOS
@@ -1692,7 +1708,7 @@ void saveConfiguration(
 ) {
 
   File file =
-      LittleFS.open(
+      FS_IMPL.open(
           "/device_config.json",
           "w"
       );
@@ -1715,12 +1731,12 @@ void saveConfiguration(
 void loadConfiguration() {
 
   if (
-      !LittleFS.begin()
+      !FS_IMPL.begin()
   ) {
 
     Serial.println(
         F(
-          "Falha ao iniciar LittleFS"
+          "Falha ao iniciar filesystem local"
         )
     );
 
@@ -1728,7 +1744,7 @@ void loadConfiguration() {
   }
 
   File file =
-      LittleFS.open(
+      FS_IMPL.open(
           "/device_config.json",
           "r"
       );
