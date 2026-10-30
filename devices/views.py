@@ -1,3 +1,4 @@
+import ipaddress
 import json
 import logging
 
@@ -224,6 +225,8 @@ def photo(request):
             raise ValueError(f"imagem excede o limite de {limit} bytes")
         captured_raw = request.POST.get("captured_at") or request.headers.get("X-Captured-At")
         captured_at = parsed_datetime(captured_raw) if captured_raw else timezone.now()
+        local_ip_raw = request.headers.get("X-Local-IP", "").strip()
+        local_ip = str(ipaddress.ip_address(local_ip_raw)) if local_ip_raw else None
         garden = device_garden(request.device)
         item = GardenPhoto.objects.create(
             garden=garden, device=request.device, captured_at=captured_at,
@@ -231,7 +234,9 @@ def photo(request):
         )
         request.device.last_seen_at = timezone.now()
         request.device.status = request.device.Status.ONLINE
-        request.device.save(update_fields=["last_seen_at", "status", "updated_at"])
+        if local_ip:
+            request.device.local_ip = local_ip
+        request.device.save(update_fields=["last_seen_at", "status", "local_ip", "updated_at"])
         return JsonResponse({"id": str(item.id), "captured_at": item.captured_at.isoformat()}, status=201)
     except PermissionError as exc:
         return JsonResponse({"error": "device_mismatch", "detail": str(exc)}, status=403)

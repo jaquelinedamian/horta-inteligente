@@ -322,6 +322,11 @@ def client_detail(request, user_id):
     garden_panels = []
     for garden in gardens:
         snapshot = garden_snapshot(garden)
+        camera = snapshot["camera"]
+        camera_stream_url = None
+        if camera and camera.local_ip:
+            host = f"[{camera.local_ip}]" if ":" in camera.local_ip else camera.local_ip
+            camera_stream_url = f"http://{host}/stream"
         config = effective_garden_configuration(garden)
         lighting_schedule = None
         if snapshot["light_channel"]:
@@ -341,6 +346,7 @@ def client_detail(request, user_id):
         garden_panels.append({
             "garden": garden,
             "snapshot": snapshot,
+            "camera_stream_url": camera_stream_url,
             "configuration": config,
             "irrigation": irrigation,
             "irrigation_duration": irrigation_duration,

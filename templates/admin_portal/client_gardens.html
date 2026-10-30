@@ -121,7 +121,10 @@
             <p class="eyebrow">Desenvolvimento</p>
             <h3>Imagem mais recente</h3>
           </div>
-          <span class="inline-actions"><a href="{% url 'garden-gallery' panel.garden.pk %}">Ver desenvolvimento</a><a href="{% url 'garden-reports' panel.garden.pk %}">Ver relatórios</a></span>
+          <span class="inline-actions">
+            <a class="btn btn-sm btn-outline-brand" href="{% url 'garden-gallery' panel.garden.pk %}?period=all&amp;order=asc&amp;limit=all">Ver desenvolvimento</a>
+            <button class="btn btn-sm btn-brand" type="button" data-bs-toggle="modal" data-bs-target="#liveCameraModal-{{ panel.garden.pk }}" {% if not panel.snapshot.camera.is_online or not panel.camera_stream_url %}disabled{% endif %}>Ver ao vivo</button>
+          </span>
         </div>
         {% if panel.snapshot.latest_photo %}
           <figure>
@@ -135,7 +138,33 @@
             <p>A próxima captura aparecerá aqui quando a câmera enviar uma foto.</p>
           </div>
         {% endif %}
+        {% if not panel.snapshot.camera.is_online %}
+          <p class="small text-muted mt-2 mb-0">Câmera offline no momento</p>
+        {% elif not panel.camera_stream_url %}
+          <p class="small text-muted mt-2 mb-0">Endereço local da câmera indisponível</p>
+        {% endif %}
+        <a class="d-inline-block mt-2" href="{% url 'garden-reports' panel.garden.pk %}">Ver relatórios</a>
       </section>
+    </div>
+
+    <div class="modal fade live-camera-modal" id="liveCameraModal-{{ panel.garden.pk }}" tabindex="-1" aria-labelledby="liveCameraTitle-{{ panel.garden.pk }}" aria-hidden="true" data-live-camera-modal data-stream-url="{{ panel.camera_stream_url|default:'' }}">
+      <div class="modal-dialog modal-xl modal-dialog-centered">
+        <div class="modal-content">
+          <div class="modal-header">
+            <div><h2 class="modal-title fs-5" id="liveCameraTitle-{{ panel.garden.pk }}">Câmera ao vivo</h2><small class="text-muted">{{ panel.garden.name }}</small></div>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fechar"></button>
+          </div>
+          <div class="modal-body">
+            <div class="live-camera-frame">
+              <div class="live-camera-loading" data-live-camera-loading><span class="spinner-border" aria-hidden="true"></span><span>Conectando à câmera...</span></div>
+              <img class="d-none" data-live-camera-image alt="Transmissão ao vivo da câmera da horta {{ panel.garden.name }}">
+              <div class="live-camera-error d-none" data-live-camera-error role="alert"><i class="bi bi-wifi-off" aria-hidden="true"></i><strong>Não foi possível abrir a transmissão.</strong><span>Confirme se este dispositivo está na mesma rede local da câmera.</span><button class="btn btn-outline-brand" type="button" data-live-camera-retry>Tentar novamente</button></div>
+            </div>
+            <div class="d-flex flex-wrap align-items-center gap-2 mt-3"><span class="status-pill is-online" data-live-camera-status><i class="bi bi-broadcast"></i> Conectando</span><small class="text-muted">Visualização temporária; nenhum frame é salvo.</small></div>
+          </div>
+          <div class="modal-footer"><button type="button" class="btn btn-light" data-bs-dismiss="modal">Fechar</button></div>
+        </div>
+      </div>
     </div>
 
     <section class="content-card garden-crops-section">

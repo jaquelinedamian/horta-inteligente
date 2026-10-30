@@ -6,7 +6,7 @@ from django.urls import reverse
 
 from accounts.models import Membership, Organization, User
 from crops.models import Crop, Cultivar, PlantingCycle
-from devices.models import Channel, Device, DeviceModel
+from devices.models import Channel, Device, DeviceModel, GardenPhoto
 from gardens.models import Garden, GardenModel, GardenModule, ModuleInstallation, ModuleType
 from gardens.services import install_module, move_module
 from django.core.exceptions import ValidationError
@@ -48,6 +48,31 @@ class ClientCenterTests(TestCase):
             self.assertContains(response, label)
         self.assertContains(response, "Status da horta")
         self.assertContains(response, "Conectividade")
+
+    def test_live_camera_uses_local_stream_without_persisting_photos(self):
+        organization, garden = self._customer_org_garden()
+        camera_model, _ = DeviceModel.objects.get_or_create(name="ESP32-CAM", code="center-camera")
+        Device.objects.create(
+            organization=organization,
+            garden=garden,
+            model=camera_model,
+            serial_number="CENTER-CAM-1",
+            name="Câmera da horta",
+            kind=Device.Kind.CAMERA,
+            status=Device.Status.ONLINE,
+            last_seen_at=timezone.now(),
+            local_ip="192.168.1.42",
+        )
+        photo_count = GardenPhoto.objects.filter(garden=garden).count()
+
+        response = self.client.get(f"{reverse('ops-client-detail', args=[self.customer.pk])}?aba=gardens")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Ver ao vivo")
+        self.assertContains(response, 'data-stream-url="http://192.168.1.42/stream"')
+        self.assertContains(response, "?period=all&amp;order=asc&amp;limit=all")
+        self.assertNotContains(response, "192.168.1.42/capture")
+        self.assertEqual(GardenPhoto.objects.filter(garden=garden).count(), photo_count)
 
     def test_admin_can_open_garden_administration_routes_and_mark_installed(self):
         _, garden = self._customer_org_garden()

@@ -322,6 +322,7 @@ void uploadPhoto() {
   http.setTimeout(15000);
   http.addHeader("Authorization", String("Device ") + DEVICE_API_TOKEN);
   http.addHeader("X-Device-ID", DEVICE_ID);
+  http.addHeader("X-Local-IP", WiFi.localIP().toString());
   http.addHeader("Content-Type", "image/jpeg");
   char capturedAt[32];
   const time_t now = time(nullptr);

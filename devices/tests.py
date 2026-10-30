@@ -281,12 +281,14 @@ class DeviceApiTests(TestCase):
         response = self.client.post(
             reverse("device_api:photo"), b"\xff\xd8jpeg-test\xff\xd9", content_type="image/jpeg",
             HTTP_AUTHORIZATION=f"Device {token}", HTTP_X_DEVICE_ID=str(camera.id),
+            HTTP_X_LOCAL_IP="192.168.1.42",
         )
         self.assertEqual(response.status_code, 201)
         self.assertEqual(GardenPhoto.objects.filter(garden=self.garden, device=camera).count(), 1)
         camera.refresh_from_db()
         self.assertEqual(camera.status, Device.Status.ONLINE)
         self.assertIsNotNone(camera.last_seen_at)
+        self.assertEqual(camera.local_ip, "192.168.1.42")
 
     def test_photo_rejects_wrong_uuid_even_with_valid_camera_token(self):
         model = DeviceModel.objects.create(name="ESP32-CAM UUID", code="camera-uuid", hardware_platform="ESP32")
