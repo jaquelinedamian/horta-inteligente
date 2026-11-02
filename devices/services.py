@@ -240,26 +240,45 @@ def queue_actuator_command(*, user, channel, action, duration_seconds=None):
     # Bloqueia o canal durante a verificação para impedir duplicatas mesmo
     # quando dois requests chegam simultaneamente a processos diferentes.
     channel = Channel.objects.select_for_update().get(pk=channel.pk)
+    now = timezone.now()
+    stale_commands = DeviceCommand.objects.filter(
+        device=channel.device, channel=channel, command_type="set_state",
+        status__in=[DeviceCommand.Status.PENDING, DeviceCommand.Status.DELIVERED],
+        expires_at__lte=now,
+    )
+    stale_count = stale_commands.update(status=DeviceCommand.Status.EXPIRED, updated_at=now)
+    if stale_count:
+        logger.info(
+            "manual_command_stale_expired device_id=%s channel=%s count=%d",
+            channel.device_id, channel.key, stale_count,
+        )
+
+    # Um clique repetido só é duplicado quando representa exatamente a mesma
+    # operação. Duração e modo fazem parte da intenção do comando.
     existing = DeviceCommand.objects.filter(
         device=channel.device, channel=channel, command_type="set_state",
         status__in=[DeviceCommand.Status.PENDING, DeviceCommand.Status.DELIVERED],
-        payload__on=bool(payload.get("on")),
-    ).order_by("created_at").first()
+        payload=payload,
+    ).filter(Q(expires_at__isnull=True) | Q(expires_at__gt=now)).order_by("created_at").first()
     if existing:
         logger.info(
-            "manual_command_deduplicated command_id=%s device_id=%s channel=%s state=%s",
+            "manual_command_deduplicated command_id=%s device_id=%s channel=%s "
+            "state=%s duration_seconds=%s mode=%s",
             existing.id, channel.device_id, channel.key, bool(payload.get("on")),
+            payload.get("duration_seconds"), payload.get("mode"),
         )
         return existing
 
     command = DeviceCommand.objects.create(
         device=channel.device, channel=channel, command_type="set_state", payload=payload,
         idempotency_key=f"web:{user.pk}:{timezone.now().timestamp()}",
-        expires_at=timezone.now() + timedelta(minutes=5),
+        expires_at=now + timedelta(minutes=5),
     )
     logger.info(
-        "manual_command_created command_id=%s device_id=%s channel=%s action=%s created_at=%s",
-        command.id, channel.device_id, channel.key, action, command.created_at.isoformat(),
+        "manual_command_created command_id=%s device_id=%s channel=%s action=%s "
+        "requested_state=%s duration_seconds=%s mode=%s created_at=%s",
+        command.id, channel.device_id, channel.key, action, bool(payload.get("on")),
+        payload.get("duration_seconds"), payload.get("mode"), command.created_at.isoformat(),
     )
     return command
 

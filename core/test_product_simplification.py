@@ -1,3 +1,5 @@
+from datetime import timedelta
+
 from django.core.exceptions import PermissionDenied
 from django.test import TestCase
 from django.urls import reverse
@@ -118,6 +120,30 @@ class ProductSimplificationTests(TestCase):
         first = queue_actuator_command(user=self.owner, channel=self.light, action="on")
         second = queue_actuator_command(user=self.owner, channel=self.light, action="off")
         self.assertNotEqual(first.id, second.id)
+
+    def test_irrigation_with_different_duration_is_not_deduplicated(self):
+        first = queue_actuator_command(
+            user=self.owner, channel=self.pump, action="irrigate", duration_seconds=10
+        )
+        second = queue_actuator_command(
+            user=self.owner, channel=self.pump, action="irrigate", duration_seconds=30
+        )
+        self.assertNotEqual(first.id, second.id)
+        self.assertEqual(second.payload["duration_seconds"], 30)
+
+    def test_expired_delivered_irrigation_does_not_block_new_command(self):
+        old = DeviceCommand.objects.create(
+            device=self.device, channel=self.pump, command_type="set_state",
+            payload={"on": True, "duration_seconds": 10, "mode": "safe_preset"},
+            idempotency_key="old-irrigation", status=DeviceCommand.Status.DELIVERED,
+            expires_at=timezone.now() - timedelta(seconds=1),
+        )
+        current = queue_actuator_command(
+            user=self.owner, channel=self.pump, action="irrigate", duration_seconds=10
+        )
+        old.refresh_from_db()
+        self.assertEqual(old.status, DeviceCommand.Status.EXPIRED)
+        self.assertNotEqual(old.id, current.id)
 
     def test_ack_status_supports_light_and_pump_on_and_off(self):
         self.client.force_login(self.owner)

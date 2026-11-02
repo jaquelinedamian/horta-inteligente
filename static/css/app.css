@@ -126,12 +126,25 @@
 .garden-crop-item span, .empty-inline { color: #64748b; font-size: .8rem; }
 .garden-automation-section { padding-top: .25rem; }
 .automation-summary-card { padding: 1rem; border: 1px solid #e2e8f0; border-radius: .9rem; background: #fff; }
+.automation-summary-card.is-running { border-color: #86c89f; box-shadow: 0 10px 28px rgba(22, 101, 52, .08); }
 .automation-summary-head { display: flex; justify-content: space-between; align-items: center; }
 .automation-summary-head span, .automation-summary-head strong { display: block; }
 .automation-summary-head > div > span { color: #64748b; font-size: .8rem; }
 .automation-summary-head strong { font-size: 1.1rem; }
 .state-indicator { width: .7rem; height: .7rem; border-radius: 50%; background: #cbd5e1; }
 .state-indicator.is-active { background: #22c55e; box-shadow: 0 0 0 5px rgba(34, 197, 94, .12); }
+.state-indicator.is-unknown { background: #94a3b8; }
+.automation-confirmation { margin: .35rem 0 .85rem; color: #64748b; font-size: .76rem; }
+.automation-error { margin: .65rem 0 0; color: #b91c1c; font-size: .8rem; }
+.automation-schedule-list { margin: .8rem 0; padding: .8rem; border-radius: .75rem; background: #f8fafc; }
+.automation-schedule-list > strong { display: block; margin-bottom: .4rem; font-size: .8rem; }
+.automation-schedule-list > div { display: flex; justify-content: space-between; gap: 1rem; padding: .35rem 0; border-top: 1px solid #e8edf2; font-size: .8rem; }
+.automation-schedule-list > div:first-of-type { border-top: 0; }
+.automation-schedule-list p { margin: 0; color: #64748b; font-size: .8rem; }
+.automation-next { display: flex; justify-content: space-between; gap: 1rem; margin-bottom: .85rem; font-size: .82rem; }
+.automation-next span { color: #64748b; }
+.automation-next strong { text-align: right; }
+.command-feedback { flex-basis: 100%; color: #64748b; font-size: .78rem; }
 .automation-summary-card dl { display: grid; gap: .35rem; margin: .85rem 0; }
 .automation-summary-card dl div { display: flex; justify-content: space-between; gap: 1rem; padding-top: .35rem; border-top: 1px solid #f1f5f9; }
 .automation-summary-card dt { color: #64748b; font-weight: 500; }
