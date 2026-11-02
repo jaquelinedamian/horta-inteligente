@@ -413,9 +413,11 @@ def device_action(request):
         messages.error(request, str(exc))
         return redirect(next_url)
     logger.info(
-        "manual_command_request command_id=%s device_id=%s client_clicked_at=%s "
-        "request_received_at=%s action=%s requested_state=%s request_to_create_ms=%d",
-        command.id, channel.device_id, request.POST.get("client_clicked_at", "unavailable"),
+        "manual_command_request command_id=%s device_id=%s channel_id=%s channel=%s metric=%s "
+        "source=manual_web client_clicked_at=%s request_received_at=%s action=%s "
+        "requested_state=%s request_to_create_ms=%d",
+        command.id, channel.device_id, channel.id, channel.key, channel.metric,
+        request.POST.get("client_clicked_at", "unavailable"),
         request_started_at.isoformat(), request.POST.get("action"),
         bool((command.payload or {}).get("on")),
         int((monotonic() - request_started) * 1000),

@@ -31,8 +31,8 @@ class ProductSimplificationTests(TestCase):
             serial_number="ESP-1", name="Controlador", status=Device.Status.ONLINE,
             last_seen_at=timezone.now(),
         )
-        self.pump = Channel.objects.create(device=self.device, key="pump-test", name="Bomba", kind=Channel.Kind.ACTUATOR, metric="pump_state", value_type=Channel.ValueType.BOOLEAN)
-        self.light = Channel.objects.create(device=self.device, key="light-test", name="Luz", kind=Channel.Kind.ACTUATOR, metric="light_state", value_type=Channel.ValueType.BOOLEAN)
+        self.pump = self.device.channels.get(key="pump")
+        self.light = self.device.channels.get(key="grow-light")
 
     def test_model_camera_configuration_and_garden_reference(self):
         self.assertEqual(self.garden.garden_model, self.model)

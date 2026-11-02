@@ -31,12 +31,8 @@ class FirmwareLightingCommandContractTests(TestCase):
             / "horta_inteligente_local.ino"
         ).read_text(encoding="utf-8")
 
-        self.assertRegex(
-            firmware,
-            re.compile(
-                r'channel\s*==\s*"lamp"\s*\|\|\s*channel\s*==\s*"grow-light"'
-            ),
-        )
+        self.assertRegex(firmware, re.compile(r'channel\s*==\s*"grow-light"'))
+        self.assertNotRegex(firmware, re.compile(r'channel\s*==\s*"lamp"'))
         self.assertIn('lightStateItem["channel"] =', firmware)
         self.assertIn('"grow-light"', firmware)
         self.assertIn('lightStateItem["value"] =', firmware)
@@ -54,8 +50,10 @@ class FirmwareLightingCommandContractTests(TestCase):
         self.assertIn("lampOn = getLightState();", firmware)
         self.assertIn("gpioMatchesRequest", firmware)
         self.assertRegex(firmware, re.compile(r"acknowledge\s*\(\s*id\s*,\s*gpioMatchesRequest"))
-        self.assertIn('"LIGHT_PIN: D6 / GPIO %u\\n"', firmware)
+        self.assertIn('"PUMP_PIN: D5 / GPIO %u | LAMP_PIN: D6 / GPIO %u\\n"', firmware)
         self.assertIn('F("LIGHT CHANGE SOURCE: ")', firmware)
+        self.assertRegex(firmware, re.compile(r'doc\["result"\]\["relay"\].*?lampOn', re.S))
+        self.assertRegex(firmware, re.compile(r'doc\["result"\]\["lamp"\].*?lampOn', re.S))
         self.assertLess(
             firmware.index("digitalWrite(LAMP_RELAY_PIN, relayLevel(false, LAMP_RELAY_ACTIVE_LOW));"),
             firmware.index("pinMode(LAMP_RELAY_PIN, OUTPUT);"),
@@ -86,7 +84,7 @@ class FirmwareLightingCommandContractTests(TestCase):
         self.assertIn("findExecutedCommand(id)", duplicate)
         self.assertIn("COMMAND DUPLICATE - action not repeated", duplicate)
         self.assertIn("ACK RETRY", duplicate)
-        self.assertIn("acknowledge(id, previous->succeeded, previous->detail)", duplicate)
+        self.assertIn("acknowledge(id, previous->succeeded, previous->detail, channel)", duplicate)
         self.assertNotIn("setPump(", duplicate)
         self.assertNotIn("setLightState(", duplicate)
         self.assertNotIn("pumpStopAt =", duplicate)
@@ -298,6 +296,52 @@ class DeviceApiTests(TestCase):
         self.assertEqual(command.result["relay"], False)
         confirmation = TelemetryReading.objects.get(channel=light, idempotency_key=f"ack:{command.id}")
         self.assertIs(confirmation.boolean_value, False)
+
+    def test_ack_updates_only_the_command_channel(self):
+        light = self.device.channels.get(key="grow-light")
+        pump = self.device.channels.get(key="pump")
+        command = DeviceCommand.objects.create(
+            device=self.device, channel=light, command_type="set_state",
+            payload={"on": True}, idempotency_key="isolated-light-ack",
+            status=DeviceCommand.Status.DELIVERED,
+            expires_at=timezone.now() + timedelta(minutes=5),
+        )
+
+        response = self.client.post(
+            reverse("devices:acknowledge-command", args=[command.id]),
+            json.dumps({"status": "succeeded", "result": {"relay": True, "lamp": True}}),
+            content_type="application/json", **self.command_headers,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(TelemetryReading.objects.filter(channel=light, idempotency_key=f"ack:{command.id}").exists())
+        self.assertFalse(TelemetryReading.objects.filter(channel=pump, idempotency_key=f"ack:{command.id}").exists())
+
+    def test_inconsistent_actuator_channel_is_rejected_by_telemetry_and_ack(self):
+        light = self.device.channels.get(key="grow-light")
+        light.metric = "pump_state"
+        light.save(update_fields=["metric", "updated_at"])
+        telemetry = self.client.post(
+            reverse("devices:telemetry"),
+            json.dumps({"readings": [{
+                "channel": "grow-light", "value": True,
+                "recorded_at": timezone.now().isoformat(), "idempotency_key": "crossed-light",
+            }]}),
+            content_type="application/json", **self.headers,
+        )
+        command = DeviceCommand.objects.create(
+            device=self.device, channel=light, command_type="set_state", payload={"on": True},
+            idempotency_key="crossed-light-command", status=DeviceCommand.Status.DELIVERED,
+            expires_at=timezone.now() + timedelta(minutes=5),
+        )
+        ack = self.client.post(
+            reverse("devices:acknowledge-command", args=[command.id]),
+            json.dumps({"status": "succeeded", "result": {"relay": True}}),
+            content_type="application/json", **self.command_headers,
+        )
+        self.assertEqual(telemetry.status_code, 400)
+        self.assertEqual(ack.status_code, 400)
+        self.assertFalse(TelemetryReading.objects.filter(channel=light).exists())
 
     def test_light_ack_normalizes_false_string_without_inverting_it(self):
         light = self.device.channels.get(metric="light_state")

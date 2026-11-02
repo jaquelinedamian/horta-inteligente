@@ -1,6 +1,7 @@
 from datetime import datetime, time, timedelta
 from unittest.mock import patch
 from zoneinfo import ZoneInfo
+from pathlib import Path
 
 from django.test import TestCase
 from django.urls import reverse
@@ -93,6 +94,42 @@ class SharedAutomationPanelTests(TestCase):
         self.assertContains(response, f'name="channel" value="{self.light.id}"', count=1)
         self.assertContains(response, 'data-action="on" data-channel="grow-light"')
         self.assertContains(response, 'data-action="off" data-channel="grow-light"')
+
+    def test_light_buttons_post_only_the_grow_light_channel(self):
+        self.client.force_login(self.owner)
+        for action, expected in (("on", True), ("off", False)):
+            response = self.client.post(reverse("device-action"), {
+                "channel": str(self.light.id), "action": action,
+                "next": reverse("customer-dashboard"),
+            })
+            self.assertEqual(response.status_code, 302)
+            command = DeviceCommand.objects.filter(channel=self.light).order_by("-created_at").first()
+            self.assertEqual(command.channel.key, "grow-light")
+            self.assertEqual(command.channel.metric, "light_state")
+            self.assertIs(command.payload["on"], expected)
+            command.status = DeviceCommand.Status.SUCCEEDED
+            command.save(update_fields=["status", "updated_at"])
+        self.assertFalse(DeviceCommand.objects.filter(channel=self.pump).exists())
+
+    def test_irrigation_button_posts_only_the_pump_channel(self):
+        self.client.force_login(self.owner)
+        response = self.client.post(reverse("device-action"), {
+            "channel": str(self.pump.id), "action": "irrigate", "duration_seconds": "10",
+            "next": reverse("customer-dashboard"),
+        })
+        self.assertEqual(response.status_code, 302)
+        command = DeviceCommand.objects.get(channel=self.pump)
+        self.assertEqual(command.channel.key, "pump")
+        self.assertEqual(command.channel.metric, "pump_state")
+        self.assertTrue(command.payload["on"])
+        self.assertFalse(DeviceCommand.objects.filter(channel=self.light).exists())
+
+    def test_javascript_builds_form_data_from_the_submitted_form(self):
+        javascript = (
+            Path(__file__).resolve().parents[1] / "static" / "js" / "device-commands.js"
+        ).read_text(encoding="utf-8")
+        self.assertIn("const data = new FormData(form);", javascript)
+        self.assertIn("event.submitter.name, event.submitter.value", javascript)
 
     def test_confirmed_false_telemetry_displays_light_off(self):
         TelemetryReading.objects.create(

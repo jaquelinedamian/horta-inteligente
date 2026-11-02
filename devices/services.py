@@ -16,6 +16,31 @@ logger = logging.getLogger(__name__)
 
 CAMERA_CAPTURE_COOLDOWN_SECONDS = 30
 
+CANONICAL_ACTUATOR_CHANNELS = {
+    "pump": "pump_state",
+    "grow-light": "light_state",
+}
+
+
+def validate_actuator_channel_contract(channel):
+    """Reject crossed or legacy actuator identities before using the channel."""
+    expected_metric = CANONICAL_ACTUATOR_CHANNELS.get(channel.key)
+    if (
+        channel.kind != Channel.Kind.ACTUATOR
+        or expected_metric is None
+        or channel.metric != expected_metric
+        or channel.device.kind != Device.Kind.CONTROLLER
+    ):
+        logger.error(
+            "invalid_actuator_channel channel_id=%s device_id=%s key=%s metric=%s kind=%s device_kind=%s",
+            channel.pk, channel.device_id, channel.key, channel.metric,
+            channel.kind, channel.device.kind,
+        )
+        raise ValueError(
+            f"canal de atuador inconsistente: {channel.key}/{channel.metric}"
+        )
+    return channel
+
 
 CONTROLLER_DEFAULT_CHANNELS = (
     {
@@ -145,6 +170,8 @@ def ingest_readings(device, readings):
         channel = channels.get(item.get("channel"))
         if not channel:
             raise ValueError(f"canal desconhecido ou desabilitado: {item.get('channel')}")
+        if channel.kind == Channel.Kind.ACTUATOR:
+            validate_actuator_channel_contract(channel)
         key = str(item.get("idempotency_key", "")).strip()
         if not key:
             raise ValueError("idempotency_key é obrigatório")
@@ -209,8 +236,7 @@ def pending_commands(device, limit=20):
 @transaction.atomic
 def queue_actuator_command(*, user, channel, action, duration_seconds=None):
     """Fila única e autorizada para comandos humanos de bomba e iluminação."""
-    if channel.kind != Channel.Kind.ACTUATOR or channel.metric not in {"pump_state", "light_state"}:
-        raise ValueError("canal de atuador inválido")
+    validate_actuator_channel_contract(channel)
     if not channel.is_enabled:
         raise ValueError("canal de atuador não está habilitado")
     garden = channel.device.assigned_garden()
@@ -336,9 +362,19 @@ def schedule_lighting(now=None):
     now = now or timezone.now()
     created = 0
     for schedule in LightingSchedule.objects.filter(enabled=True, actuator__is_enabled=True).select_related("actuator__device"):
+        try:
+            validate_actuator_channel_contract(schedule.actuator)
+        except ValueError:
+            logger.exception(
+                "lighting_schedule_invalid_channel schedule_id=%s channel_id=%s",
+                schedule.pk, schedule.actuator_id,
+            )
+            continue
         local = now.astimezone(ZoneInfo(schedule.timezone))
         enabled_today = local.weekday() in schedule.days_of_week
-        if schedule.start_time <= schedule.end_time:
+        if schedule.start_time == schedule.end_time:
+            should_be_on = enabled_today
+        elif schedule.start_time < schedule.end_time:
             should_be_on = enabled_today and schedule.start_time <= local.time() < schedule.end_time
         else:
             previous_day = (local.weekday() - 1) % 7

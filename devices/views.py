@@ -12,7 +12,8 @@ from django.views.decorators.http import require_GET, require_POST
 from .authentication import device_required
 from gardens.configuration import effective_garden_configuration
 from .models import Channel, DeviceCommand, DeviceHeartbeat, GardenPhoto, TelemetryReading
-from .services import ingest_readings, normalize_semantic_boolean, parsed_datetime, pending_commands
+from .services import (ingest_readings, normalize_semantic_boolean, parsed_datetime,
+                       pending_commands, validate_actuator_channel_contract)
 
 logger = logging.getLogger(__name__)
 
@@ -139,6 +140,8 @@ def acknowledge_command(request, command_id):
             return JsonResponse({"id": str(command.id), "status": command.status})
         if command.status != DeviceCommand.Status.DELIVERED:
             return api_error("comando não está aguardando confirmação", 409)
+        if command.channel and command.channel.kind == Channel.Kind.ACTUATOR:
+            validate_actuator_channel_contract(command.channel)
         command.status = status
         result = payload.get("result", {})
         if not isinstance(result, dict):

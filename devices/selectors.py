@@ -216,7 +216,17 @@ def garden_snapshot(garden):
         contracted_crops = list(checkout.selected_crops.all())
         if not contracted_crops:
             contracted_crops = list({cultivar.crop_id: cultivar.crop for cultivar in checkout.selected_cultures.select_related("crop")}.values())
-    actuator_channels = [channel for device in devices for channel in device.channels.all() if channel.kind == "actuator" and channel.is_enabled]
+    controllers = [
+        device for device in devices
+        if device.kind == Device.Kind.CONTROLLER and device.status != Device.Status.RETIRED
+    ]
+    # Fail closed when more than one controller is linked to the garden. This
+    # prevents using the heartbeat from one device with channels from another.
+    controller = controllers[0] if len(controllers) == 1 else None
+    actuator_channels = [
+        channel for channel in (controller.channels.all() if controller else [])
+        if channel.kind == "actuator" and channel.is_enabled
+    ]
     # Não seleciona o primeiro atuador: chave e métrica precisam corresponder
     # ao mesmo canal físico/semântico antes de chegarem ao front-end.
     pump_channel = next((
@@ -267,7 +277,7 @@ def garden_snapshot(garden):
         "cycle": cycle,
         "cycles": cycles,
         "contracted_crops": contracted_crops,
-        "controller": next((item for item in devices if item.kind == Device.Kind.CONTROLLER), None),
+        "controller": controller,
         "camera": next((item for item in devices if item.kind == Device.Kind.CAMERA), None),
         "pump_channel": pump_channel,
         "light_channel": light_channel,

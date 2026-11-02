@@ -83,13 +83,13 @@ constexpr uint8_t LAMP_RELAY_PIN = D6;
 // NOVO: sensor de umidade do solo
 constexpr uint8_t SOIL_MOISTURE_PIN = A0;
 
-// Os dois canais usam modulos/entradas com polaridades diferentes nesta
-// instalacao. Nao compartilhar a polaridade entre bomba e iluminacao.
+// A polaridade continua declarada por canal, mesmo quando ambas são iguais.
+// Não compartilhe uma única flag: cada carga deve ser validada fisicamente.
 constexpr bool PUMP_RELAY_ACTIVE_LOW = true;
 constexpr bool LAMP_RELAY_ACTIVE_LOW = true;
 
 constexpr char FIRMWARE_VERSION[] =
-    "horta-esp8266-1.3.2-active-low-light";
+    "horta-esp8266-1.3.3-actuator-isolation";
 
 // ============================================================
 // SENSOR / ESTADO
@@ -1285,7 +1285,8 @@ void sendHeartbeat() {
 uint32_t acknowledge(
     const String& id,
     bool succeeded,
-    const String& detail
+    const String& detail,
+    const String& channel = ""
 ) {
 
   const uint32_t ackStartedAt = millis();
@@ -1297,11 +1298,13 @@ uint32_t acknowledge(
           ? "succeeded"
           : "failed";
 
-  doc["result"]["pump"] =
-      pumpOn;
-
-  doc["result"]["lamp"] =
-      lampOn;
+  if (channel == "pump") {
+    doc["result"]["relay"] = pumpOn;
+    doc["result"]["pump"] = pumpOn;
+  } else if (channel == "grow-light") {
+    doc["result"]["relay"] = lampOn;
+    doc["result"]["lamp"] = lampOn;
+  }
 
   doc["result"]["detail"] =
       detail;
@@ -1482,7 +1485,7 @@ void pollCommands() {
       Serial.println(F("COMMAND DUPLICATE - action not repeated"));
       Serial.println(F("DUPLICATE COMMAND | ACTION SKIPPED | ACK RETRY"));
       logRelaySnapshot(F("RELAY STATE UNCHANGED"));
-      acknowledge(id, previous->succeeded, previous->detail);
+      acknowledge(id, previous->succeeded, previous->detail, channel);
       continue;
     }
 
@@ -1493,6 +1496,16 @@ void pollCommands() {
     if (
         channel == "pump"
     ) {
+
+      Serial.println();
+      Serial.println(F("===== PUMP COMMAND ====="));
+      Serial.printf(
+          "PUMP_PIN: D5 / GPIO %u | LAMP_PIN: D6 / GPIO %u\n",
+          static_cast<unsigned int>(PUMP_RELAY_PIN),
+          static_cast<unsigned int>(LAMP_RELAY_PIN)
+      );
+      logRelaySnapshot(F("PUMP BEFORE"));
+      Serial.println(F("executando SOMENTE irrigacao"));
 
       const int gpioBefore =
           digitalRead(
@@ -1556,10 +1569,12 @@ void pollCommands() {
       acknowledge(
           id,
           true,
-          pumpDetail
+          pumpDetail,
+          channel
       );
 
       logRelaySnapshot(F("RELAY STATE AFTER PUMP"));
+      Serial.println(F("========================"));
 
       Serial.println(F("COMMAND LATENCY"));
       Serial.printf("recebido -> rele acionado: %lu ms\n", relayActuatedAt - commandReceivedAt);
@@ -1570,8 +1585,6 @@ void pollCommands() {
     // ----------------------------------------------------------
 
     } else if (
-        channel == "lamp"
-        ||
         channel == "grow-light"
     ) {
 
@@ -1584,9 +1597,12 @@ void pollCommands() {
       Serial.print(F("Requested: "));
       Serial.println(on ? F("ON") : F("OFF"));
       Serial.printf(
-          "LIGHT_PIN: D6 / GPIO %u\n",
+          "PUMP_PIN: D5 / GPIO %u | LAMP_PIN: D6 / GPIO %u\n",
+          static_cast<unsigned int>(PUMP_RELAY_PIN),
           static_cast<unsigned int>(LAMP_RELAY_PIN)
       );
+      logRelaySnapshot(F("LIGHT BEFORE"));
+      Serial.println(F("executando SOMENTE iluminacao"));
 
       const int gpioBefore =
           digitalRead(
@@ -1665,7 +1681,8 @@ void pollCommands() {
       acknowledge(
           id,
           gpioMatchesRequest,
-          lampDetail
+          lampDetail,
+          channel
       );
 
       logRelaySnapshot(F("RELAY STATE AFTER LAMP"));
@@ -1683,7 +1700,8 @@ void pollCommands() {
       acknowledge(
           id,
           false,
-          "canal nao suportado"
+          "canal nao suportado",
+          channel
       );
     }
   }
@@ -2260,6 +2278,12 @@ void runOfflineAutomation() {
     uint32_t duration =
         lightingDuration;
 
+    Serial.printf(
+        "LIGHT AUTOMATION | source=local_schedule | requested=ON | D5=%s | D6=%s\n",
+        digitalRead(PUMP_RELAY_PIN) == HIGH ? "HIGH" : "LOW",
+        digitalRead(LAMP_RELAY_PIN) == HIGH ? "HIGH" : "LOW"
+    );
+
     setLightState(
         true,
         "SCHEDULE"
@@ -2453,7 +2477,7 @@ void setup() {
       F("Telemetria dos sensores: envio a cada 60 segundos")
   );
   Serial.println(
-      F("Controle da lampada: plataforma -> canal lamp -> D6")
+      F("Controle da lampada: plataforma -> canal grow-light -> D6")
   );
   Serial.println(
       F("Comandos da plataforma: consulta a cada 2 segundos")

@@ -91,6 +91,26 @@ class RelayChannelAvailabilityTests(TestCase):
         self.assertFalse(command.payload.get("pump", False))
         self.assertFalse(actuator_automation_summary(snapshot)["lighting"]["active"])
 
+    def test_crossed_canonical_channels_are_rejected(self):
+        self.light.metric = "pump_state"
+        self.light.save(update_fields=["metric", "updated_at"])
+        with self.assertRaisesRegex(ValueError, "canal de atuador inconsistente"):
+            queue_actuator_command(user=self.owner, channel=self.light, action="on")
+
+    def test_snapshot_rejects_multiple_controllers_instead_of_mixing_them(self):
+        second = Device.objects.create(
+            organization=self.organization, garden=self.garden, model=self.device.model,
+            serial_number="RELAY-2", name="Controlador duplicado",
+            kind=Device.Kind.CONTROLLER, last_seen_at=timezone.now(),
+        )
+        second.channels.filter(key="grow-light").update(is_enabled=True)
+
+        snapshot = garden_snapshot(self.garden)
+
+        self.assertIsNone(snapshot["controller"])
+        self.assertIsNone(snapshot["pump_channel"])
+        self.assertIsNone(snapshot["light_channel"])
+
     def test_customer_ui_distinguishes_installed_from_uninstalled_light(self):
         self.client.force_login(self.owner)
 

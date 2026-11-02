@@ -28,7 +28,7 @@ constexpr uint8_t RELAY_ON = LOW;
 constexpr uint8_t RELAY_OFF = HIGH;
 
 constexpr char FIRMWARE_VERSION[] =
-    "horta-esp8266-1.3.0";
+    "horta-esp8266-1.3.1-actuator-isolation";
 
 // ============================================================
 // SENSOR / ESTADO
@@ -1048,10 +1048,18 @@ void runOfflineAutomation() {
         today = today || day.as<int>() == weekday;
         previous = previous || day.as<int>() == ((weekday + 6) % 7);
       }
-      shouldBeOn = shouldBeOn || (startMinutes <= endMinutes
-        ? today && minutesNow >= startMinutes && minutesNow < endMinutes
-        : (today && minutesNow >= startMinutes) || (previous && minutesNow < endMinutes));
+      shouldBeOn = shouldBeOn || (startMinutes == endMinutes
+        ? today
+        : (startMinutes < endMinutes
+          ? today && minutesNow >= startMinutes && minutesNow < endMinutes
+          : (today && minutesNow >= startMinutes) || (previous && minutesNow < endMinutes)));
     }
+    Serial.printf(
+        "LIGHT AUTOMATION | source=local_schedule | requested=%s | D5=%s | D6=%s\n",
+        shouldBeOn ? "ON" : "OFF",
+        digitalRead(PUMP_RELAY_PIN) == HIGH ? "HIGH" : "LOW",
+        digitalRead(LIGHT_RELAY_PIN) == HIGH ? "HIGH" : "LOW"
+    );
     setLightState(shouldBeOn);
     lastLightingBucket = bucket;
   }

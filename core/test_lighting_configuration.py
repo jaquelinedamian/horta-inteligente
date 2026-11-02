@@ -1,11 +1,13 @@
-from datetime import time
+from datetime import datetime, time
+from zoneinfo import ZoneInfo
 
 from django.test import TestCase
 from django.urls import reverse
 
 from accounts.models import Membership, Organization, User
 from crops.models import Crop, CropLightingSchedule, Cultivar, PlantingCycle
-from devices.models import Device, DeviceModel, LightingSchedule
+from devices.models import Device, DeviceCommand, DeviceModel, LightingSchedule
+from devices.services import schedule_lighting
 from gardens.configuration import effective_garden_configuration
 from gardens.models import Garden, GardenModule, ModuleType
 from core.garden_experience import mark_custom_lighting_configuration, restore_crop_lighting_configuration
@@ -96,3 +98,16 @@ class LightingConfigurationInheritanceTests(TestCase):
         self.garden.refresh_from_db()
         self.assertEqual(self.garden.automation_overrides["lighting"]["source"], "custom")
         self.assertEqual(effective_garden_configuration(self.garden)["lighting"]["schedules"][0]["start"], "09:00")
+
+    def test_equal_start_and_end_is_a_24_hour_schedule(self):
+        LightingSchedule.objects.create(
+            actuator=self.light, name="24 horas", start_time=time(16, 45), end_time=time(16, 45),
+            days_of_week=[0], enabled=True,
+        )
+        monday = datetime(2026, 11, 2, 12, 0, tzinfo=ZoneInfo("America/Sao_Paulo"))
+
+        self.assertEqual(schedule_lighting(now=monday), 1)
+
+        command = DeviceCommand.objects.get(channel=self.light)
+        self.assertTrue(command.payload["on"])
+        self.assertEqual(command.payload["source"], "lighting_schedule")
