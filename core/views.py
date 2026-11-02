@@ -42,6 +42,7 @@ from .garden_experience import (garden_report, mark_custom_lighting_configuratio
                                 update_garden_configuration)
 from gardens.configuration import effective_garden_configuration
 from .permissions import customer_required, operations_required, technician_required
+from .automation import automation_panel_context
 
 logger = logging.getLogger(__name__)
 
@@ -231,7 +232,9 @@ def customer_dashboard(request):
     org, gardens, devices = _customer_context(request); garden = gardens.order_by("name").first()
     can_manage = request.membership.role in {Membership.Role.OWNER, Membership.Role.MANAGER}
     snapshot = garden_snapshot(garden) if garden else None
-    automation_summary = actuator_automation_summary(snapshot) if snapshot else None
+    automation_panel = automation_panel_context(
+        user=request.user, garden=garden, snapshot=snapshot, next_url=request.path
+    ) if snapshot else None
     device = next((item for item in (snapshot["devices"] if snapshot else []) if item.kind == Device.Kind.CONTROLLER), None)
     metrics = snapshot["metrics"] if snapshot else {}; schedule = None
     active_subscription = get_customer_subscription(org)
@@ -250,7 +253,7 @@ def customer_dashboard(request):
     overrides = garden.automation_overrides if garden and isinstance(garden.automation_overrides, dict) else {}
     configuration_origins = {section: "Personalizado" if section in overrides else "Padrão HortaViva" for section in ("irrigation", "lighting", "camera", "monitoring")}
     monitoring = garden_report(garden, "24h") if garden else None
-    return render(request, "customer/dashboard.html", {"organization": org, "gardens": gardens, "garden": garden, "snapshot": snapshot, "automation_summary": automation_summary, "monitoring": monitoring, "configuration": configuration, "configuration_origins": configuration_origins, "recent_photos": recent_photos, "has_overrides": bool(overrides), "has_garden": bool(garden), "active_subscription": active_subscription, "device": device, "has_telemetry": has_telemetry, "metrics": metrics, "schedule": schedule, "can_manage": can_manage, "cycles": get_customer_cycles(org).filter(status=PlantingCycle.Status.ACTIVE)[:6], "next_visit": get_customer_visits(org).filter(scheduled_start__gte=timezone.now()).order_by("scheduled_start").first()})
+    return render(request, "customer/dashboard.html", {"organization": org, "gardens": gardens, "garden": garden, "snapshot": snapshot, "automation_panel": automation_panel, "monitoring": monitoring, "configuration": configuration, "configuration_origins": configuration_origins, "recent_photos": recent_photos, "has_overrides": bool(overrides), "has_garden": bool(garden), "active_subscription": active_subscription, "device": device, "has_telemetry": has_telemetry, "metrics": metrics, "schedule": schedule, "can_manage": can_manage, "cycles": get_customer_cycles(org).filter(status=PlantingCycle.Status.ACTIVE)[:6], "next_visit": get_customer_visits(org).filter(scheduled_start__gte=timezone.now()).order_by("scheduled_start").first()})
 
 
 @customer_required
@@ -272,7 +275,7 @@ def customer_section(request, section):
             if camera and camera.local_ip:
                 host = f"[{camera.local_ip}]" if ":" in camera.local_ip else camera.local_ip
                 stream_url = f"http://{host}/stream"
-            panels.append({"garden": garden, "snapshot": snapshot, "camera_stream_url": stream_url, "configuration": config, "configuration_origins": origins, "overrides": overrides, "recent_photos": garden.photos.all()[:7]})
+            panels.append({"garden": garden, "snapshot": snapshot, "camera_stream_url": stream_url, "configuration": config, "configuration_origins": origins, "overrides": overrides, "recent_photos": garden.photos.all()[:7], "automation_panel": automation_panel_context(user=request.user, garden=garden, snapshot=snapshot, next_url=request.path)})
         context["panels"] = panels
     if section == "crops":
         context["active_modules"] = GardenModule.objects.filter(organization=org, status=GardenModule.Status.INSTALLED).count()
@@ -482,7 +485,7 @@ def garden_detail(request, garden_id):
     config = effective_garden_configuration(garden)
     snapshot = garden_snapshot(garden)
     can_manage_credentials = request.user.is_hortaviva_admin
-    return render(request, "shared/garden_detail.html", {"snapshot": snapshot, "automation_summary": actuator_automation_summary(snapshot), "configuration": config, "has_overrides": bool(garden.automation_overrides), "technical": request.user.is_hortaviva_admin or request.user.employee_role == User.EmployeeRole.TECHNICIAN or request.user.memberships.filter(role=Membership.Role.TECHNICIAN, is_active=True).exists(), "can_manage_credentials": can_manage_credentials})
+    return render(request, "shared/garden_detail.html", {"snapshot": snapshot, "automation_panel": automation_panel_context(user=request.user, garden=garden, snapshot=snapshot, next_url=request.path), "configuration": config, "has_overrides": bool(garden.automation_overrides), "technical": request.user.is_hortaviva_admin or request.user.employee_role == User.EmployeeRole.TECHNICIAN or request.user.memberships.filter(role=Membership.Role.TECHNICIAN, is_active=True).exists(), "can_manage_credentials": can_manage_credentials})
 
 
 def _admin_garden(request, garden_id):
@@ -528,6 +531,10 @@ def garden_automation_update(request, garden_id):
         messages.error(request, "Nenhum controlador associado a esta horta.")
         return redirect("garden-configuration", garden_id=garden.pk)
     action = request.POST.get("action")
+    next_url = request.POST.get("next", "")
+    redirect_target = next_url if url_has_allowed_host_and_scheme(
+        next_url, allowed_hosts={request.get_host()}, require_https=request.is_secure()
+    ) else reverse("garden-configuration", args=[garden.pk])
     if action == "calibration":
         channel = get_object_or_404(controller.channels, metric="soil_moisture")
         form = SoilCalibrationForm(request.POST)
@@ -545,6 +552,16 @@ def garden_automation_update(request, garden_id):
             messages.success(request, "Horário de irrigação adicionado.")
         else:
             messages.error(request, "Não foi possível adicionar o horário de irrigação.")
+    elif action == "irrigation_update":
+        item = get_object_or_404(
+            IrrigationSchedule, pk=request.POST.get("schedule_id"), actuator__device=controller
+        )
+        form = IrrigationScheduleForm(request.POST, instance=item)
+        if form.is_valid():
+            form.save()
+            messages.success(request, "Horário de irrigação atualizado.")
+        else:
+            messages.error(request, "Revise o horário de irrigação.")
     elif action == "lighting_add":
         channel = get_object_or_404(controller.channels, metric="light_state")
         item = LightingSchedule(actuator=channel, name="Iluminação")
@@ -554,6 +571,17 @@ def garden_automation_update(request, garden_id):
             mark_custom_lighting_configuration(garden=garden, user=request.user)
             messages.success(request, "Programação personalizada da iluminação atualizada.")
         else: messages.error(request, "Revise a programação da iluminação.")
+    elif action == "lighting_update":
+        item = get_object_or_404(
+            LightingSchedule, pk=request.POST.get("schedule_id"), actuator__device=controller
+        )
+        form = LightingScheduleForm(request.POST, instance=item)
+        if form.is_valid():
+            form.save()
+            mark_custom_lighting_configuration(garden=garden, user=request.user)
+            messages.success(request, "Período de iluminação atualizado.")
+        else:
+            messages.error(request, "Revise o período de iluminação.")
     elif action in {"lighting_toggle", "lighting_delete"}:
         item = get_object_or_404(LightingSchedule, pk=request.POST.get("schedule_id"), actuator__device=controller)
         if action == "lighting_delete": item.delete(); messages.success(request, "Programação removida.")
@@ -570,7 +598,7 @@ def garden_automation_update(request, garden_id):
         if action == "irrigation_delete": item.delete(); messages.success(request, "Horário removido.")
         else:
             item.enabled = not item.enabled; item.save(update_fields=["enabled", "updated_at"]); messages.success(request, "Horário atualizado.")
-    return redirect("garden-configuration", garden_id=garden.pk)
+    return redirect(redirect_target)
 
 
 @login_required

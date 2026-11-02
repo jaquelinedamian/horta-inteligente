@@ -91,6 +91,7 @@ def effective_garden_configuration(garden):
                 {
                     "id": str(item.id), "time": item.start_time.strftime("%H:%M"),
                     "duration_seconds": item.duration_seconds, "days": item.days_of_week,
+                    "timezone": item.timezone,
                     "enabled": item.enabled,
                 }
                 for item in pump.irrigation_schedules.all().order_by("start_time")
@@ -110,6 +111,7 @@ def effective_garden_configuration(garden):
                 {
                     "id": str(item.id), "start": item.start_time.strftime("%H:%M"),
                     "end": item.end_time.strftime("%H:%M"), "days": item.days_of_week,
+                    "timezone": item.timezone,
                     "enabled": item.enabled,
                     "duration_seconds": lighting_duration_seconds(item.start_time, item.end_time),
                 }

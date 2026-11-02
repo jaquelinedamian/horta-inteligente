@@ -1,6 +1,6 @@
 import os
 import base64
-from datetime import datetime, time, timedelta
+from datetime import timedelta
 from io import BytesIO
 
 from django.conf import settings
@@ -23,7 +23,7 @@ from devices.models import Alert, Device, DeviceCredential
 from gardens.models import Garden, GardenModule, ModuleInstallation
 from gardens.selectors import get_active_installations
 from gardens.configuration import effective_garden_configuration
-from devices.selectors import actuator_automation_summary, garden_snapshot
+from devices.selectors import garden_snapshot
 from operations.models import InventoryItem, SupportTicket, Visit, WorkOrder
 from subscriptions.models import CheckoutRequest, Payment, Plan, Subscription
 
@@ -33,6 +33,7 @@ from gardens.services import install_module
 from .guided_flows import PRIMARY_ACTIONS, get_flow
 from .workflow_services import create_customer, run_guided_workflow
 from .permissions import admin_required, operations_required
+from .automation import automation_panel_context
 from .deletion_services import (
     DELETE_POLICIES, DeletionBlocked, can_deactivate, customer_deletion_summary,
     deactivate_object, delete_administrative_object, delete_customer_completely,
@@ -50,91 +51,6 @@ AREAS = {
     "estoque": ("Estoque", "Itens, categorias, fornecedores, lotes e movimentações.", ("inventory", "inventory-categories", "suppliers", "stock-lots", "stock-movements")),
     "administracao": ("Administração", "Equipe e configurações operacionais.", ("employees", "settings")),
 }
-
-
-WEEKDAY_NAMES = ("Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom")
-
-
-def _friendly_days(days):
-    days = sorted({int(day) for day in (days or []) if str(day).isdigit() and 0 <= int(day) <= 6})
-    if days == list(range(7)):
-        return "Todos os dias"
-    if days == list(range(5)):
-        return "Seg–Sex"
-    return ", ".join(WEEKDAY_NAMES[day] for day in days) or "Dias não definidos"
-
-
-def _friendly_next_event(at, action=None):
-    if not at:
-        return None
-    local_at = timezone.localtime(at)
-    today = timezone.localdate()
-    if local_at.date() == today:
-        day = "Hoje"
-    elif local_at.date() == today + timedelta(days=1):
-        day = "Amanhã"
-    else:
-        day = WEEKDAY_NAMES[local_at.weekday()]
-    prefix = f"{action} · " if action else ""
-    return f"{prefix}{day}, {local_at:%H:%M}"
-
-
-def _next_lighting_from_config(schedules):
-    now = timezone.now()
-    zone = timezone.get_current_timezone()
-    candidates = []
-    for item in schedules:
-        try:
-            start_value = time.fromisoformat(item["start"])
-            end_value = time.fromisoformat(item["end"])
-        except (KeyError, TypeError, ValueError):
-            continue
-        days = item.get("days") or list(range(7))
-        local_now = timezone.localtime(now, zone)
-        for offset in range(8):
-            day = local_now.date() + timedelta(days=offset)
-            if day.weekday() not in days:
-                continue
-            start = timezone.make_aware(datetime.combine(day, start_value), zone)
-            end_day = day if end_value > start_value else day + timedelta(days=1)
-            end = timezone.make_aware(datetime.combine(end_day, end_value), zone)
-            if start > now:
-                candidates.append((start, "Ligar"))
-            if end > now:
-                candidates.append((end, "Desligar"))
-    return min(candidates, key=lambda event: event[0]) if candidates else None
-
-
-def _admin_automation_context(config, summary):
-    irrigation_config = config.get("irrigation", {}) if isinstance(config.get("irrigation"), Mapping) else {}
-    lighting_config = config.get("lighting", {}) if isinstance(config.get("lighting"), Mapping) else {}
-    irrigation_rows = [
-        {
-            "time": item.get("time"),
-            "duration_seconds": item.get("duration_seconds"),
-            "days_label": _friendly_days(item.get("days")),
-        }
-        for item in irrigation_config.get("schedules", []) if item.get("enabled")
-    ]
-    lighting_rows = [
-        {
-            "start": item.get("start"), "end": item.get("end"),
-            "days_label": _friendly_days(item.get("days")),
-        }
-        for item in lighting_config.get("schedules", []) if item.get("enabled")
-    ]
-    next_light = _next_lighting_from_config([
-        item for item in lighting_config.get("schedules", []) if item.get("enabled")
-    ])
-    summary["irrigation"]["schedule_rows"] = irrigation_rows
-    summary["irrigation"]["next_label"] = _friendly_next_event(summary["irrigation"].get("next_at"))
-    summary["lighting"]["schedule_rows"] = lighting_rows
-    summary["lighting"]["next_at"] = next_light[0] if next_light else summary["lighting"].get("next_at")
-    summary["lighting"]["next_action"] = next_light[1] if next_light else summary["lighting"].get("next_action")
-    summary["lighting"]["next_label"] = _friendly_next_event(
-        summary["lighting"].get("next_at"), summary["lighting"].get("next_action")
-    )
-    return summary
 
 
 class GardenAdministrationForm(forms.ModelForm):
@@ -413,8 +329,9 @@ def client_detail(request, user_id):
             host = f"[{camera.local_ip}]" if ":" in camera.local_ip else camera.local_ip
             camera_stream_url = f"http://{host}/stream"
         config = effective_garden_configuration(garden)
-        automation_summary = _admin_automation_context(
-            config, actuator_automation_summary(snapshot)
+        automation_panel = automation_panel_context(
+            user=request.user, garden=garden, snapshot=snapshot,
+            next_url=request.get_full_path(),
         )
         lighting_schedule = None
         if snapshot["light_channel"]:
@@ -436,7 +353,7 @@ def client_detail(request, user_id):
             "snapshot": snapshot,
             "camera_stream_url": camera_stream_url,
             "configuration": config,
-            "automation_summary": automation_summary,
+            "automation_panel": automation_panel,
             "irrigation": irrigation,
             "irrigation_duration": irrigation_duration,
             "lighting": config.get("lighting", {}) if isinstance(config.get("lighting"), Mapping) else {},

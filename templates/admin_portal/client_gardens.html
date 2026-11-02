@@ -195,46 +195,7 @@
       </div>
     </section>
 
-    <section class="garden-automation-section">
-      <div class="section-heading compact">
-        <div>
-          <p class="eyebrow">Controle rápido</p>
-          <h3>Automação e comandos manuais</h3>
-        </div>
-        <a href="{% url 'garden-configuration' panel.garden.pk %}">Editar programação</a>
-      </div>
-      <div class="garden-automation-grid">
-        <article class="automation-summary-card {% if panel.automation_summary.irrigation.state == True %}is-running{% endif %}">
-          <div class="automation-summary-head">
-            <div>
-              <span>Irrigação</span>
-              <strong>{% if panel.automation_summary.irrigation.updating %}Atualizando…{% elif panel.automation_summary.irrigation.state == True %}Bomba ligada{% elif panel.automation_summary.irrigation.state == False %}Bomba desligada{% else %}Estado não confirmado{% endif %}</strong>
-            </div>
-            <span class="state-indicator {% if panel.automation_summary.irrigation.state == True %}is-active{% elif panel.automation_summary.irrigation.state == None %}is-unknown{% endif %}"></span>
-          </div>
-          <p class="automation-confirmation">{% if panel.automation_summary.irrigation.confirmed_at %}Confirmado pelo controlador em {{ panel.automation_summary.irrigation.confirmed_at|date:"d/m/Y H:i" }}{% else %}Aguardando a primeira confirmação do controlador{% endif %}</p>
-          {% if panel.automation_summary.irrigation.confirmation_failed %}<p class="automation-error">Não foi possível confirmar o último comando.</p>{% endif %}
-          <div class="automation-schedule-list"><strong>Programação ativa</strong>{% for schedule in panel.automation_summary.irrigation.schedule_rows %}<div><span>{{ schedule.days_label }} · {{ schedule.time }}</span><b>{{ schedule.duration_seconds }} s</b></div>{% empty %}<p>Nenhum horário ativo.</p>{% endfor %}</div>
-          <div class="automation-next"><span>Próxima irrigação</span><strong>{{ panel.automation_summary.irrigation.next_label|default:"Não agendada" }}</strong></div>
-          {% if panel.snapshot.pump_channel %}<form method="post" action="{% url 'device-action' %}" class="automation-actions" data-command-feedback>{% csrf_token %}<input type="hidden" name="channel" value="{{ panel.snapshot.pump_channel.id }}"><input type="hidden" name="duration_seconds" value="{{ panel.irrigation_duration|default:10 }}"><input type="hidden" name="next" value="{{ request.get_full_path }}"><button class="btn btn-brand" type="submit" name="action" value="irrigate" {% if not panel.snapshot.controller.is_online %}disabled title="Controlador offline"{% endif %}>Irrigar agora</button>{% if panel.automation_summary.irrigation.state == True %}<button class="btn btn-outline-danger" type="submit" name="action" value="off">Parar</button>{% endif %}<span class="command-feedback" aria-live="polite"></span></form>{% if not panel.snapshot.controller.is_online %}<p class="automation-error">Controlador offline. Comando indisponível.</p>{% endif %}{% else %}<span class="text-muted">Irrigação não configurada</span>{% endif %}
-        </article>
-
-        <article class="automation-summary-card {% if panel.automation_summary.lighting.state == True %}is-running{% endif %}">
-          <div class="automation-summary-head">
-            <div>
-              <span>Iluminação</span>
-              <strong>{% if panel.automation_summary.lighting.updating %}Atualizando…{% elif panel.automation_summary.lighting.state == True %}Luz ligada{% elif panel.automation_summary.lighting.state == False %}Luz desligada{% else %}Estado não confirmado{% endif %}</strong>
-            </div>
-            <span class="state-indicator {% if panel.automation_summary.lighting.state == True %}is-active{% elif panel.automation_summary.lighting.state == None %}is-unknown{% endif %}"></span>
-          </div>
-          <p class="automation-confirmation">{% if panel.automation_summary.lighting.confirmed_at %}Confirmado pelo controlador em {{ panel.automation_summary.lighting.confirmed_at|date:"d/m/Y H:i" }}{% else %}Aguardando a primeira confirmação do controlador{% endif %}</p>
-          {% if panel.automation_summary.lighting.confirmation_failed %}<p class="automation-error">Não foi possível confirmar o último comando.</p>{% endif %}
-          <div class="automation-schedule-list"><strong>Períodos ativos</strong>{% for schedule in panel.automation_summary.lighting.schedule_rows %}<div><span>{{ schedule.days_label }}</span><b>{{ schedule.start }}–{{ schedule.end }}</b></div>{% empty %}<p>Nenhum período ativo.</p>{% endfor %}</div>
-          <div class="automation-next"><span>Próxima ação</span><strong>{{ panel.automation_summary.lighting.next_label|default:"Não agendada" }}</strong></div>
-          {% if panel.snapshot.light_channel %}<form method="post" action="{% url 'device-action' %}" class="automation-actions" data-command-feedback>{% csrf_token %}<input type="hidden" name="channel" value="{{ panel.snapshot.light_channel.id }}"><input type="hidden" name="next" value="{{ request.get_full_path }}"><button class="btn btn-brand" type="submit" name="action" value="on" {% if not panel.snapshot.controller.is_online %}disabled title="Controlador offline"{% endif %}>Ligar</button><button class="btn btn-light" type="submit" name="action" value="off" {% if not panel.snapshot.controller.is_online %}disabled title="Controlador offline"{% endif %}>Desligar</button><span class="command-feedback" aria-live="polite"></span></form>{% if not panel.snapshot.controller.is_online %}<p class="automation-error">Controlador offline. Comandos indisponíveis.</p>{% endif %}{% else %}<span class="text-muted">Iluminação ainda não disponível.</span>{% endif %}
-        </article>
-      </div>
-    </section>
+    {% include 'components/garden_automation_panel.html' with automation_panel=panel.automation_panel %}
 
     <section class="content-card garden-config-section">
       <div class="section-heading compact">
