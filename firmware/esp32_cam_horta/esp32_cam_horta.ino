@@ -28,6 +28,9 @@ constexpr uint8_t DEFAULT_PHOTOS_PER_DAY = 4;
 constexpr unsigned long CONFIG_REFRESH_INTERVAL_MS = 30UL * 60UL * 1000UL;
 constexpr unsigned long HEARTBEAT_INTERVAL_MS = 60UL * 1000UL;
 constexpr unsigned long COMMAND_POLL_INTERVAL_MS = 5UL * 1000UL;
+constexpr unsigned long WIFI_CONNECT_TIMEOUT_SECONDS = 25UL;
+constexpr unsigned long WIFI_PORTAL_TIMEOUT_SECONDS = 180UL;
+constexpr char WIFI_SETUP_PASSWORD[] = "HortaViva-Setup";
 constexpr unsigned long MILLIS_PER_DAY = 86400000UL;
 unsigned long photoIntervalMs = MILLIS_PER_DAY / DEFAULT_PHOTOS_PER_DAY;
 
@@ -54,6 +57,8 @@ bool sendHeartbeat() {
   document["signal_strength"] = WiFi.RSSI();
   document["free_heap_bytes"] = ESP.getFreeHeap();
   document["local_ip"] = WiFi.localIP().toString();
+  document["diagnostics"]["ssid"] = WiFi.SSID();
+  document["diagnostics"]["setup_ap"] = wifiAccessPointName();
   String body;
   serializeJson(document, body);
 
@@ -111,9 +116,9 @@ bool fetchCameraConfiguration() {
 
 String wifiAccessPointName() {
   uint64_t chipId = ESP.getEfuseMac();
-  char suffix[9];
-  snprintf(suffix, sizeof(suffix), "%08X", static_cast<uint32_t>(chipId));
-  return String("Horta-Camera-") + suffix;
+  char suffix[5];
+  snprintf(suffix, sizeof(suffix), "%04X", static_cast<uint16_t>(chipId));
+  return String("HortaCam-") + suffix;
 }
 
 bool configureWifi() {
@@ -121,10 +126,12 @@ bool configureWifi() {
   WiFi.setSleep(false);
   WiFiManager manager;
   manager.setDebugOutput(true);
+  manager.setConnectTimeout(WIFI_CONNECT_TIMEOUT_SECONDS);
+  manager.setConfigPortalTimeout(WIFI_PORTAL_TIMEOUT_SECONDS);
   String accessPoint = wifiAccessPointName();
   Serial.printf("Conectando ao Wi-Fi salvo; portal alternativo: %s em 192.168.4.1\n",
                 accessPoint.c_str());
-  bool connected = manager.autoConnect(accessPoint.c_str());
+  bool connected = manager.autoConnect(accessPoint.c_str(), WIFI_SETUP_PASSWORD);
   if (!connected) {
     Serial.println("Falha no provisionamento Wi-Fi");
   } else {
@@ -424,6 +431,12 @@ void pollCaptureCommands() {
   for (JsonObject command : document["commands"].as<JsonArray>()) {
     const String commandId = command["id"] | "";
     const String commandType = command["type"] | "";
+    if (commandId.length() && commandType == "enter_wifi_setup") {
+      acknowledgeCaptureCommand(commandId, true);
+      delay(500);
+      resetOwnWifi();
+      return;
+    }
     if (commandId.length() && commandType == "capture_photo") {
       const bool succeeded = uploadPhoto(true);
       acknowledgeCaptureCommand(commandId, succeeded);

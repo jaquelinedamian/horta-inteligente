@@ -114,6 +114,7 @@ def _lighting_hours(schedules):
 
 
 def automation_panel_context(*, user, garden, snapshot, next_url):
+    from .wifi_setup import garden_wifi_context
     config = effective_garden_configuration(garden)
     summary = actuator_automation_summary(snapshot)
     irrigation = config.get("irrigation", {}) if isinstance(config.get("irrigation"), Mapping) else {}
@@ -161,6 +162,7 @@ def automation_panel_context(*, user, garden, snapshot, next_url):
         "next_url": next_url,
         "pump_channel_valid": pump_channel_valid,
         "light_channel_valid": light_channel_valid,
+        "wifi_setup": garden_wifi_context(user, garden, snapshot),
         "irrigation_add_form": IrrigationScheduleForm(auto_id=f"irrigation-{garden.pk}-%s"),
         "lighting_add_form": LightingScheduleForm(auto_id=f"lighting-{garden.pk}-%s"),
         "irrigation_edit_rows": [

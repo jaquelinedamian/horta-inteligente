@@ -43,6 +43,7 @@ from .garden_experience import (garden_report, mark_custom_lighting_configuratio
 from gardens.configuration import effective_garden_configuration
 from .permissions import customer_required, operations_required, technician_required
 from .automation import automation_panel_context
+from .wifi_setup import can_configure_wifi, garden_wifi_context, wifi_device_status
 
 logger = logging.getLogger(__name__)
 
@@ -485,7 +486,46 @@ def garden_detail(request, garden_id):
     config = effective_garden_configuration(garden)
     snapshot = garden_snapshot(garden)
     can_manage_credentials = request.user.is_hortaviva_admin
-    return render(request, "shared/garden_detail.html", {"snapshot": snapshot, "automation_panel": automation_panel_context(user=request.user, garden=garden, snapshot=snapshot, next_url=request.path), "configuration": config, "has_overrides": bool(garden.automation_overrides), "technical": request.user.is_hortaviva_admin or request.user.employee_role == User.EmployeeRole.TECHNICIAN or request.user.memberships.filter(role=Membership.Role.TECHNICIAN, is_active=True).exists(), "can_manage_credentials": can_manage_credentials})
+    return render(request, "shared/garden_detail.html", {"snapshot": snapshot, "automation_panel": automation_panel_context(user=request.user, garden=garden, snapshot=snapshot, next_url=request.path), "wifi_setup": garden_wifi_context(request.user, garden, snapshot), "configuration": config, "has_overrides": bool(garden.automation_overrides), "technical": request.user.is_hortaviva_admin or request.user.employee_role == User.EmployeeRole.TECHNICIAN or request.user.memberships.filter(role=Membership.Role.TECHNICIAN, is_active=True).exists(), "can_manage_credentials": can_manage_credentials})
+
+
+@login_required
+@require_POST
+def garden_wifi_configure(request, garden_id, device_id):
+    garden = get_object_or_404(gardens_for_user(request.user), pk=garden_id)
+    if not can_configure_wifi(request.user, garden):
+        from django.core.exceptions import PermissionDenied
+        raise PermissionDenied
+    device = get_object_or_404(devices_for_garden(garden), pk=device_id)
+    if device.is_online:
+        DeviceCommand.objects.create(
+            device=device,
+            command_type="enter_wifi_setup",
+            payload={"forget_current_network": True},
+            idempotency_key=f"wifi-setup:{device.id}:{timezone.now().timestamp()}",
+            expires_at=timezone.now() + timedelta(minutes=5),
+        )
+    return JsonResponse({
+        "device_id": str(device.id), "online": device.is_online,
+        "setup_ap": wifi_device_status(device)["setup_ap"],
+        "command_queued": device.is_online,
+    }, status=202)
+
+
+@login_required
+@require_GET
+def garden_wifi_status(request, garden_id):
+    garden = get_object_or_404(gardens_for_user(request.user), pk=garden_id)
+    snapshot = garden_snapshot(garden)
+    context = garden_wifi_context(request.user, garden, snapshot)
+    return JsonResponse({
+        key: ({
+            "id": str(item["device"].id), "online": item["online"],
+            "ssid": item["ssid"], "local_ip": item["local_ip"],
+            "last_seen_at": item["last_seen_at"].isoformat() if item["last_seen_at"] else None,
+        } if item else None)
+        for key, item in (("controller", context["controller"]), ("camera", context["camera"]))
+    })
 
 
 def _admin_garden(request, garden_id):

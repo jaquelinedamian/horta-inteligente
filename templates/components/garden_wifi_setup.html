@@ -1,0 +1,25 @@
+<section class="content-card mb-4 garden-wifi-setup" data-wifi-setup data-status-url="{% url 'garden-wifi-status' wifi_setup.garden.pk %}">
+  <div class="section-heading compact">
+    <div><p class="eyebrow">Conectividade</p><h2 class="h4 mb-0">Wi-Fi da horta</h2></div>
+    <span class="text-muted small">Use uma rede Wi-Fi 2,4 GHz.</span>
+  </div>
+  <div class="row g-3">
+    {% for item in wifi_setup.devices %}
+    <div class="col-lg-6"><article class="soft-card h-100 wifi-device" data-device-id="{{ item.device.id }}">
+      <div class="d-flex justify-content-between gap-3"><div><strong>{% if item.device.kind == 'esp32_cam' %}Câmera{% else %}Controlador da horta{% endif %}</strong><small class="d-block text-muted">{{ item.device.name }}</small></div><span class="status-pill {% if item.online %}is-online{% else %}is-offline{% endif %}" data-wifi-online>{% if item.online %}Online{% else %}Offline{% endif %}</span></div>
+      <dl class="automation-facts mt-3"><div><dt>Rede atual</dt><dd data-wifi-ssid>{{ item.ssid }}</dd></div><div><dt>IP local</dt><dd data-wifi-ip>{{ item.local_ip|default:'Não informado' }}</dd></div><div><dt>Último contato</dt><dd>{% if item.last_seen_at %}{{ item.last_seen_at|date:'d/m/Y H:i' }}{% else %}Sem contato{% endif %}</dd></div><div><dt>Sinal</dt><dd>{{ item.signal_label }}{% if item.rssi != None %} <small>({{ item.rssi }} dBm)</small>{% endif %}</dd></div></dl>
+      {% if not item.online %}<p class="small text-muted">Não foi possível encontrar a rede salva. Ligue o dispositivo e conecte o celular à rede <strong>{{ item.setup_ap }}</strong>.</p>{% endif %}
+      {% if wifi_setup.can_configure %}
+      <form method="post" action="{% url 'garden-wifi-configure' wifi_setup.garden.pk item.device.id %}" data-wifi-configure data-setup-ap="{{ item.setup_ap }}" data-device-label="{% if item.device.kind == 'esp32_cam' %}câmera{% else %}controlador{% endif %}">{% csrf_token %}<button class="btn btn-outline-brand" type="submit">Configurar Wi-Fi</button><small class="d-block mt-2 text-muted" data-wifi-feedback></small></form>
+      {% else %}<p class="small text-muted mb-0">Você possui acesso somente para consulta.</p>{% endif %}
+    </article></div>
+    {% endfor %}
+  </div>
+  <div class="wifi-wizard mt-3" data-wifi-wizard hidden>
+    <h3 class="h5">Conectar horta ao Wi-Fi</h3>
+    <ol class="mb-2"><li>Prepare o controlador.</li><li>Conecte o controlador à nova rede.</li><li>Prepare a câmera.</li><li>Conecte a câmera à mesma rede.</li><li>Aguarde a verificação automática.</li></ol>
+    <p class="mb-1">Abra o Wi-Fi do celular e conecte-se a <strong data-setup-ap-name></strong>.</p>
+    <p class="small text-muted">Senha do portal: <strong>HortaViva-Setup</strong>. O portal local abrirá em <strong>192.168.4.1</strong>. A senha da sua rede é enviada somente ao dispositivo e nunca ao HortaViva.</p>
+    <p class="small" data-wizard-status>Aguardando configuração…</p>
+  </div>
+</section>

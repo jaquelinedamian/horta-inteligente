@@ -60,6 +60,9 @@ X4XSQRjbgbMEHMUfpIBvFSDJ3gyICh3WZlXi/EjJKSZp4A==
 #define TELEMETRY_HTTP_TIMEOUT_MS 12000UL
 #define HEARTBEAT_HTTP_TIMEOUT_MS 8000UL
 #define CONFIG_HTTP_TIMEOUT_MS 12000UL
+#define WIFI_CONNECT_TIMEOUT_SECONDS 25
+#define WIFI_PORTAL_TIMEOUT_SECONDS 180
+#define WIFI_SETUP_PASSWORD "HortaViva-Setup"
 
 
 namespace {
@@ -1241,6 +1244,11 @@ void sendHeartbeat() {
   doc["diagnostics"]["soil_moisture_percent"] =
       soilMoisturePercent;
 
+  // Somente o nome da rede e do AP de setup; senha nunca sai do dispositivo.
+  doc["diagnostics"]["ssid"] = WiFi.SSID();
+  doc["diagnostics"]["setup_ap"] =
+      String("Horta-") + String(ESP.getChipId() & 0xFFFF, HEX);
+
   String body;
 
   String response;
@@ -1418,6 +1426,14 @@ void pollCommands() {
     String type =
         command["type"]
         | "";
+
+    if (type == "enter_wifi_setup") {
+      Serial.println(F("Comando recebido: entrar no provisionamento Wi-Fi"));
+      acknowledge(id, true, "reiniciando em modo de configuracao Wi-Fi");
+      delay(500);
+      resetAllWifi();
+      return;
+    }
 
     if (
         type != "set_state"
@@ -2357,16 +2373,13 @@ void setup() {
   WiFiManager manager;
 
   manager.setConfigPortalTimeout(
-      180
+      WIFI_PORTAL_TIMEOUT_SECONDS
   );
+  manager.setConnectTimeout(WIFI_CONNECT_TIMEOUT_SECONDS);
 
-  String accessPoint =
-      String("Horta-")
-      +
-      String(
-          ESP.getChipId(),
-          HEX
-      );
+  char suffix[5];
+  snprintf(suffix, sizeof(suffix), "%04X", ESP.getChipId() & 0xFFFF);
+  String accessPoint = String("Horta-") + suffix;
 
   Serial.print(
       F(
@@ -2380,7 +2393,8 @@ void setup() {
 
   if (
       !manager.autoConnect(
-          accessPoint.c_str()
+          accessPoint.c_str(),
+          WIFI_SETUP_PASSWORD
       )
   ) {
 
