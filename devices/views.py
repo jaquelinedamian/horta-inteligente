@@ -12,7 +12,7 @@ from django.views.decorators.http import require_GET, require_POST
 from .authentication import device_required
 from gardens.configuration import effective_garden_configuration
 from .models import Channel, DeviceCommand, DeviceHeartbeat, GardenPhoto, TelemetryReading
-from .services import ingest_readings, parsed_datetime, pending_commands
+from .services import ingest_readings, normalize_semantic_boolean, parsed_datetime, pending_commands
 
 logger = logging.getLogger(__name__)
 
@@ -145,9 +145,11 @@ def acknowledge_command(request, command_id):
             raise ValueError("result deve ser um objeto")
         if command.channel and "relay" not in result:
             if command.channel.metric == "light_state" and "lamp" in result:
-                result["relay"] = bool(result["lamp"])
+                result["relay"] = normalize_semantic_boolean(result["lamp"])
             elif command.channel.metric == "pump_state" and "pump" in result:
-                result["relay"] = bool(result["pump"])
+                result["relay"] = normalize_semantic_boolean(result["pump"])
+        if command.channel and "relay" in result:
+            result["relay"] = normalize_semantic_boolean(result["relay"])
         command.result = result
         command.acknowledged_at = timezone.now()
         command.save(update_fields=["status", "result", "acknowledged_at", "updated_at"])
@@ -157,7 +159,7 @@ def acknowledge_command(request, command_id):
                 idempotency_key=f"ack:{command.id}",
                 defaults={
                     "recorded_at": command.acknowledged_at,
-                    "boolean_value": bool(result["relay"]),
+                    "boolean_value": result["relay"],
                     "source": "device",
                     "raw": {"source": "command_ack", "command_id": str(command.id)},
                 },

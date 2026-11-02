@@ -46,7 +46,7 @@ CONTROLLER_DEFAULT_CHANNELS = (
         "key": "grow-light", "name": "Iluminação",
         "kind": Channel.Kind.ACTUATOR, "metric": "light_state", "unit": "",
         "value_type": Channel.ValueType.BOOLEAN, "pin": "D6",
-        "configuration": {"component": "relay_2ch", "active_low": False},
+        "configuration": {"component": "relay_2ch", "active_low": True},
         "is_enabled": True,
     },
 )
@@ -78,6 +78,22 @@ def parsed_datetime(value, field_name="recorded_at"):
     return parsed
 
 
+def normalize_semantic_boolean(value):
+    """Normaliza estado lógico; não interpreta nem inverte nível elétrico."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, Decimal)) and not isinstance(value, bool):
+        if value in (0, 1):
+            return bool(value)
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"true", "1", "on"}:
+            return True
+        if normalized in {"false", "0", "off"}:
+            return False
+    raise ValueError("valor booleano semântico inválido")
+
+
 def reading_values(channel, value):
     fields = {"decimal_value": None, "boolean_value": None, "text_value": ""}
     if channel.value_type in (Channel.ValueType.DECIMAL, Channel.ValueType.INTEGER):
@@ -86,9 +102,10 @@ def reading_values(channel, value):
         except (InvalidOperation, TypeError):
             raise ValueError(f"valor inválido para o canal {channel.key}")
     elif channel.value_type == Channel.ValueType.BOOLEAN:
-        if not isinstance(value, bool):
+        try:
+            fields["boolean_value"] = normalize_semantic_boolean(value)
+        except ValueError:
             raise ValueError(f"valor booleano inválido para o canal {channel.key}")
-        fields["boolean_value"] = value
     else:
         fields["text_value"] = str(value)
     return fields

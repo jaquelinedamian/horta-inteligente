@@ -9,6 +9,7 @@ from crops.models import PlantingCycle
 from gardens.configuration import effective_garden_configuration
 from subscriptions.models import CheckoutRequest
 from .models import Alert, Device, DeviceCommand, GardenPhoto
+from .services import normalize_semantic_boolean
 
 
 def _command_state(command, metric):
@@ -58,7 +59,11 @@ def _confirmed_actuator_state(channel, controller, diagnostic_keys, freshness_mi
     diagnostics = heartbeat.diagnostics if heartbeat and isinstance(heartbeat.diagnostics, dict) else {}
     for diagnostic_key in diagnostic_keys:
         if diagnostic_key in diagnostics:
-            candidates.append((heartbeat.recorded_at, bool(diagnostics[diagnostic_key]), "heartbeat"))
+            try:
+                state = normalize_semantic_boolean(diagnostics[diagnostic_key])
+            except ValueError:
+                break
+            candidates.append((heartbeat.recorded_at, state, "heartbeat"))
             break
     if not candidates:
         return {"state": None, "last_state": None, "confirmed_at": None, "source": None, "is_recent": False}

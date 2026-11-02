@@ -43,12 +43,15 @@ class FirmwareLightingCommandContractTests(TestCase):
         self.assertIn('lampOn;', firmware)
         self.assertIn("bool readRelayState(", firmware)
         self.assertIn("constexpr bool PUMP_RELAY_ACTIVE_LOW = true;", firmware)
-        self.assertIn("constexpr bool LAMP_RELAY_ACTIVE_LOW = false;", firmware)
+        self.assertIn("constexpr bool LAMP_RELAY_ACTIVE_LOW = true;", firmware)
         self.assertRegex(firmware, re.compile(r"return activeLow\s*\?\s*!gpioHigh\s*:\s*gpioHigh"))
         self.assertRegex(
             firmware,
-            re.compile(r'setLamp\s*\(\s*on\s*,\s*"COMMAND"\s*\)'),
+            re.compile(r'setLightState\s*\(\s*on\s*,\s*"COMMAND"\s*\)'),
         )
+        self.assertIn("uint8_t getLightRelayElectricalLevel(bool on)", firmware)
+        self.assertIn("bool getLightState()", firmware)
+        self.assertIn("lampOn = getLightState();", firmware)
         self.assertIn("gpioMatchesRequest", firmware)
         self.assertRegex(firmware, re.compile(r"acknowledge\s*\(\s*id\s*,\s*gpioMatchesRequest"))
         self.assertIn('"LIGHT_PIN: D6 / GPIO %u\\n"', firmware)
@@ -85,7 +88,7 @@ class FirmwareLightingCommandContractTests(TestCase):
         self.assertIn("ACK RETRY", duplicate)
         self.assertIn("acknowledge(id, previous->succeeded, previous->detail)", duplicate)
         self.assertNotIn("setPump(", duplicate)
-        self.assertNotIn("setLamp(", duplicate)
+        self.assertNotIn("setLightState(", duplicate)
         self.assertNotIn("pumpStopAt =", duplicate)
         self.assertNotIn("lampStopAt =", duplicate)
 
@@ -94,7 +97,7 @@ class FirmwareLightingCommandContractTests(TestCase):
         pump = firmware[firmware.index("// BOMBA", firmware.index("void pollCommands()")) : firmware.index("// LAMPADA", firmware.index("void pollCommands()"))]
         self.assertIn("setPump(", pump)
         self.assertIn("pumpStopAt =", pump)
-        self.assertNotIn("setLamp(", pump)
+        self.assertNotIn("setLightState(", pump)
         self.assertNotIn("lampStopAt =", pump)
         self.assertNotIn("lampOn =", pump)
         self.assertNotIn("digitalWrite(LAMP_RELAY_PIN", pump)
@@ -106,6 +109,19 @@ class FirmwareLightingCommandContractTests(TestCase):
         lamp = firmware[lamp_start : firmware.index('Serial.print(F("ACK: "))', lamp_start)]
         self.assertLess(pump.index("rememberExecutedCommand"), pump.index("acknowledge("))
         self.assertLess(lamp.index("rememberExecutedCommand"), lamp.index("acknowledge("))
+
+    def test_active_low_light_maps_semantic_on_to_low_and_off_to_high(self):
+        firmware = self.firmware_source()
+        self.assertIn("constexpr bool LAMP_RELAY_ACTIVE_LOW = true;", firmware)
+        self.assertRegex(firmware, re.compile(r"return on == activeLow\s*\?\s*LOW\s*:\s*HIGH"))
+        self.assertRegex(
+            firmware,
+            re.compile(
+                r"getLightRelayElectricalLevel\(bool on\).*?"
+                r"relayLevel\(\s*on,\s*LAMP_RELAY_ACTIVE_LOW\s*\)",
+                re.DOTALL,
+            ),
+        )
 
 
 class DeviceApiTests(TestCase):
@@ -218,6 +234,26 @@ class DeviceApiTests(TestCase):
         self.assertIs(TelemetryReading.objects.get(channel__key="pump").boolean_value, False)
         self.assertIs(TelemetryReading.objects.get(channel__key="grow-light").boolean_value, True)
 
+    def test_telemetry_normalizes_semantic_light_values(self):
+        light = self.device.channels.get(key="grow-light")
+        cases = ((True, True), (False, False), (1, True), (0, False), ("on", True),
+                 ("off", False), ("true", True), ("false", False))
+        for index, (value, expected) in enumerate(cases):
+            payload = {"readings": [{
+                "channel": "grow-light", "value": value,
+                "recorded_at": timezone.now().isoformat(),
+                "idempotency_key": f"normalized-light-{index}",
+            }]}
+            response = self.client.post(
+                reverse("devices:telemetry"), json.dumps(payload),
+                content_type="application/json", **self.headers,
+            )
+            self.assertEqual(response.status_code, 202)
+            reading = TelemetryReading.objects.get(
+                channel=light, idempotency_key=f"normalized-light-{index}",
+            )
+            self.assertIs(reading.boolean_value, expected)
+
     def test_device_can_poll_and_acknowledge_its_command(self):
         command = DeviceCommand.objects.create(
             device=self.device, channel=self.actuator, command_type="set_state",
@@ -262,6 +298,29 @@ class DeviceApiTests(TestCase):
         self.assertEqual(command.result["relay"], False)
         confirmation = TelemetryReading.objects.get(channel=light, idempotency_key=f"ack:{command.id}")
         self.assertIs(confirmation.boolean_value, False)
+
+    def test_light_ack_normalizes_false_string_without_inverting_it(self):
+        light = self.device.channels.get(metric="light_state")
+        command = DeviceCommand.objects.create(
+            device=self.device, channel=light, command_type="set_state",
+            payload={"on": False}, idempotency_key="lamp-off-string",
+            status=DeviceCommand.Status.DELIVERED,
+            expires_at=timezone.now() + timedelta(minutes=5),
+        )
+        response = self.client.post(
+            reverse("devices:acknowledge-command", args=[command.id]),
+            json.dumps({"status": "succeeded", "result": {"lamp": "false"}}),
+            content_type="application/json", **self.command_headers,
+        )
+        self.assertEqual(response.status_code, 200)
+        command.refresh_from_db()
+        self.assertIs(command.result["relay"], False)
+        self.assertIs(
+            TelemetryReading.objects.get(
+                channel=light, idempotency_key=f"ack:{command.id}"
+            ).boolean_value,
+            False,
+        )
 
     def test_unacknowledged_command_is_redelivered_until_ack(self):
         command = DeviceCommand.objects.create(
@@ -550,7 +609,7 @@ class ControllerChannelProvisioningTests(TestCase):
         self.assertEqual(device.channels.get(key="air-pressure").kind, Channel.Kind.SENSOR)
         self.assertEqual(device.channels.get(key="pump").kind, Channel.Kind.ACTUATOR)
         self.assertTrue(device.channels.get(key="grow-light").is_enabled)
-        self.assertFalse(device.channels.get(key="grow-light").configuration["active_low"])
+        self.assertTrue(device.channels.get(key="grow-light").configuration["active_low"])
 
     def test_ensure_defaults_is_idempotent_and_preserves_custom_channels(self):
         from devices.services import ensure_controller_default_channels

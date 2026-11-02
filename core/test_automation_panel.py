@@ -1,4 +1,4 @@
-from datetime import datetime, time
+from datetime import datetime, time, timedelta
 from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
@@ -88,6 +88,25 @@ class SharedAutomationPanelTests(TestCase):
         self.assertNotContains(response, "99 s")
         self.assertContains(response, "Irrigar agora")
         self.assertContains(response, "Configuração de irrigação")
+
+    def test_confirmed_false_telemetry_displays_light_off(self):
+        TelemetryReading.objects.create(
+            channel=self.light, recorded_at=timezone.now() + timedelta(seconds=1),
+            boolean_value=False, idempotency_key="light-panel-off",
+        )
+        self.client.force_login(self.owner)
+        response = self.client.get(reverse("customer-dashboard"))
+        self.assertContains(response, "Luz desligada")
+
+    def test_stale_light_telemetry_displays_unconfirmed_state(self):
+        self.light.readings.all().delete()
+        TelemetryReading.objects.create(
+            channel=self.light, recorded_at=timezone.now() - timedelta(hours=3),
+            boolean_value=True, idempotency_key="light-panel-stale",
+        )
+        self.client.force_login(self.owner)
+        response = self.client.get(reverse("customer-dashboard"))
+        self.assertContains(response, "Estado não confirmado")
 
     def test_viewer_sees_panel_without_operational_or_configuration_controls(self):
         self.client.force_login(self.viewer)

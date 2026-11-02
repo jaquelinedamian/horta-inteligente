@@ -83,10 +83,10 @@ constexpr uint8_t SOIL_MOISTURE_PIN = A0;
 // Os dois canais usam modulos/entradas com polaridades diferentes nesta
 // instalacao. Nao compartilhar a polaridade entre bomba e iluminacao.
 constexpr bool PUMP_RELAY_ACTIVE_LOW = true;
-constexpr bool LAMP_RELAY_ACTIVE_LOW = false;
+constexpr bool LAMP_RELAY_ACTIVE_LOW = true;
 
 constexpr char FIRMWARE_VERSION[] =
-    "horta-esp8266-1.3.1-platform-lamp";
+    "horta-esp8266-1.3.2-active-low-light";
 
 // ============================================================
 // SENSOR / ESTADO
@@ -305,22 +305,35 @@ void setPump(bool on) {
   );
 }
 
-bool setLamp(
+uint8_t getLightRelayElectricalLevel(bool on) {
+
+  return relayLevel(
+      on,
+      LAMP_RELAY_ACTIVE_LOW
+  );
+}
+
+bool getLightState() {
+
+  return readRelayState(
+      LAMP_RELAY_PIN,
+      LAMP_RELAY_ACTIVE_LOW
+  );
+}
+
+bool setLightState(
     bool on,
     const char* source = "SYSTEM"
 ) {
 
-  writeRelay(
+  digitalWrite(
       LAMP_RELAY_PIN,
-      on,
-      LAMP_RELAY_ACTIVE_LOW
+      getLightRelayElectricalLevel(on)
   );
 
-  lampOn =
-      readRelayState(
-          LAMP_RELAY_PIN,
-          LAMP_RELAY_ACTIVE_LOW
-      );
+  // lampOn e o valor semantico da carga, nunca o nivel eletrico bruto.
+  // Em active-low: LOW significa luz ligada e HIGH significa desligada.
+  lampOn = getLightState();
 
   Serial.print(
       F("Lampada: ")
@@ -1573,7 +1586,7 @@ void pollCommands() {
               : F("LOW")
       );
 
-      setLamp(
+      setLightState(
           on,
           "COMMAND"
       );
@@ -1589,11 +1602,7 @@ void pollCommands() {
               LAMP_RELAY_PIN
           );
 
-      lampOn =
-          readRelayState(
-              LAMP_RELAY_PIN,
-              LAMP_RELAY_ACTIVE_LOW
-          );
+      lampOn = getLightState();
 
       const bool gpioMatchesRequest =
           lampOn == on;
@@ -2235,7 +2244,7 @@ void runOfflineAutomation() {
     uint32_t duration =
         lightingDuration;
 
-    setLamp(
+    setLightState(
         true,
         "SCHEDULE"
     );
@@ -2302,7 +2311,7 @@ void setup() {
   pinMode(LAMP_RELAY_PIN, OUTPUT);
 
   setPump(false);
-  setLamp(false, "BOOT");
+  setLightState(false, "BOOT");
 
   // SDA = D2
   // SCL = D1
@@ -2487,7 +2496,7 @@ void loop() {
       >= 0
   ) {
 
-    setLamp(
+    setLightState(
         false,
         "TIMER"
     );
