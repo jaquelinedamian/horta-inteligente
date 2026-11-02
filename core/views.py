@@ -258,6 +258,34 @@ def customer_dashboard(request):
 
 
 @customer_required
+@require_GET
+def garden_camera_stream_info(request, garden_id):
+    """Return the LAN stream address only after checking the customer's garden."""
+    garden = get_object_or_404(
+        get_customer_gardens(request.membership.organization), pk=garden_id
+    )
+    camera = devices_for_garden(garden).filter(kind=Device.Kind.CAMERA).order_by("created_at").first()
+    if not camera or not camera.is_online:
+        response = JsonResponse(
+            {"available": False, "message": "Câmera indisponível."}, status=503
+        )
+    elif not camera.local_ip:
+        response = JsonResponse(
+            {"available": False, "message": "O endereço local da câmera não está disponível."},
+            status=503,
+        )
+    else:
+        host = f"[{camera.local_ip}]" if ":" in camera.local_ip else camera.local_ip
+        response = JsonResponse({
+            "available": True,
+            "stream_url": f"http://{host}/stream",
+            "garden_name": camera.module.name if camera.module_id else garden.name,
+        })
+    response["Cache-Control"] = "no-store"
+    return response
+
+
+@customer_required
 def customer_section(request, section):
     org, gardens, devices = _customer_context(request)
     sections = {"garden": ("Minha horta", gardens), "devices": ("Dispositivos", devices.select_related("garden", "model")), "crops": ("Minhas culturas", get_customer_cycles(org)), "alerts": ("Alertas", Alert.objects.filter(rule__organization=org).select_related("rule", "reading__channel")), "visits": ("Visitas", get_customer_visits(org)), "subscription": ("Assinatura", Subscription.objects.filter(organization=org).select_related("plan_version__plan").prefetch_related("plan_version__entitlements")), "payments": ("Pagamentos", Payment.objects.filter(subscription__organization=org).select_related("subscription__plan_version__plan"))}
