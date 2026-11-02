@@ -121,6 +121,25 @@ class FirmwareLightingCommandContractTests(TestCase):
             ),
         )
 
+    def test_equivalent_esp8266_firmware_reads_active_low_gpio_semantically(self):
+        firmware = (
+            Path(__file__).resolve().parents[1]
+            / "firmware" / "esp8266-bmp280-relay" / "src" / "main.cpp"
+        ).read_text(encoding="utf-8")
+        self.assertIn("constexpr bool LIGHT_RELAY_ACTIVE_LOW = true;", firmware)
+        self.assertRegex(firmware, re.compile(r"return activeLow\s*\?\s*!gpioHigh\s*:\s*gpioHigh"))
+        self.assertIn(
+            "lightRelayOn = readRelayState(LIGHT_RELAY_PIN, LIGHT_RELAY_ACTIVE_LOW);",
+            firmware,
+        )
+        self.assertIn('lightItem["value"] = lightRelayOn;', firmware)
+        self.assertIn('doc["diagnostics"]["lamp_on"] = lightRelayOn;', firmware)
+        self.assertIn('acknowledge(id, true, "iluminacao atualizada", lightRelayOn);', firmware)
+
+        semantic_state = lambda gpio_high, active_low: not gpio_high if active_low else gpio_high
+        self.assertIs(semantic_state(False, True), True)   # D6 LOW -> lampada ligada
+        self.assertIs(semantic_state(True, True), False)   # D6 HIGH -> lampada desligada
+
 
 class DeviceApiTests(TestCase):
     def setUp(self):

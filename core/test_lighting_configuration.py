@@ -111,3 +111,17 @@ class LightingConfigurationInheritanceTests(TestCase):
         command = DeviceCommand.objects.get(channel=self.light)
         self.assertTrue(command.payload["on"])
         self.assertEqual(command.payload["source"], "lighting_schedule")
+
+    def test_24_hour_schedule_stays_on_at_every_time_of_enabled_day(self):
+        schedule = LightingSchedule.objects.create(
+            actuator=self.light, name="24 horas", start_time=time(16, 45), end_time=time(16, 45),
+            days_of_week=[0], enabled=True,
+        )
+        for hour, minute in ((0, 0), (16, 45), (23, 59)):
+            with self.subTest(hour=hour, minute=minute):
+                DeviceCommand.objects.all().delete()
+                now = datetime(2026, 11, 2, hour, minute, tzinfo=ZoneInfo("America/Sao_Paulo"))
+                self.assertEqual(schedule_lighting(now=now), 1)
+                command = DeviceCommand.objects.get(channel=self.light)
+                self.assertTrue(command.payload["on"])
+                self.assertIn(str(schedule.id), command.idempotency_key)

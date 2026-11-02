@@ -97,6 +97,11 @@ uint8_t relayLevel(bool on, bool activeLow) {
   return on ? HIGH : LOW;
 }
 
+bool readRelayState(uint8_t pin, bool activeLow) {
+  const bool gpioHigh = digitalRead(pin) == HIGH;
+  return activeLow ? !gpioHigh : gpioHigh;
+}
+
 void setPumpState(bool on) {
   if (pumpRelayOn != on) actuatorStateDirty = true;
   pumpRelayOn = on;
@@ -104,9 +109,20 @@ void setPumpState(bool on) {
 }
 
 void setLightState(bool on) {
-  if (lightRelayOn != on) actuatorStateDirty = true;
-  lightRelayOn = on;
+  const bool previousState = lightRelayOn;
   digitalWrite(LIGHT_RELAY_PIN, relayLevel(on, LIGHT_RELAY_ACTIVE_LOW));
+  // Estado semantico confirmado no GPIO: em active-low, LOW significa ON.
+  lightRelayOn = readRelayState(LIGHT_RELAY_PIN, LIGHT_RELAY_ACTIVE_LOW);
+  if (previousState != lightRelayOn) actuatorStateDirty = true;
+
+  Serial.println(F("===== LIGHT STATE DIAGNOSTICS ====="));
+  Serial.print(F("D6 electrical level: "));
+  Serial.println(digitalRead(LIGHT_RELAY_PIN) == LOW ? F("LOW") : F("HIGH"));
+  Serial.print(F("active_low: "));
+  Serial.println(LIGHT_RELAY_ACTIVE_LOW ? F("true") : F("false"));
+  Serial.print(F("lampOn: "));
+  Serial.println(lightRelayOn ? F("true") : F("false"));
+  Serial.println(F("==================================="));
 }
 
 float calibratedSoilPercent(int raw) {

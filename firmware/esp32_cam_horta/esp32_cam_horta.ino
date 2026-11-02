@@ -34,6 +34,9 @@ constexpr char WIFI_SETUP_PASSWORD[] = "HortaViva-Setup";
 constexpr unsigned long MILLIS_PER_DAY = 86400000UL;
 unsigned long photoIntervalMs = MILLIS_PER_DAY / DEFAULT_PHOTOS_PER_DAY;
 
+// Declaracoes antecipadas: necessarias porque estas funcoes sao usadas
+// antes de suas definicoes no arquivo.
+String wifiAccessPointName();
 void processSerialCommand();
 
 bool sendHeartbeat() {

@@ -38,11 +38,15 @@ def _next_lighting_action(schedules, now):
             if day.weekday() not in schedule.days_of_week:
                 continue
             start = timezone.make_aware(datetime.combine(day, schedule.start_time), zone)
+            # Inicio igual ao fim e o contrato explicito de 24 h. Nao existe
+            # uma transicao OFF no mesmo horario; a proxima avaliacao semanal
+            # decide o estado conforme os dias habilitados.
+            full_day = schedule.start_time == schedule.end_time
             end_day = day if schedule.end_time > schedule.start_time else day + timedelta(days=1)
             end = timezone.make_aware(datetime.combine(end_day, schedule.end_time), zone)
             if start > now:
                 candidates.append((start, "Ligar"))
-            if end > now:
+            if not full_day and end > now:
                 candidates.append((end, "Desligar"))
             if start > now and end > now:
                 break
