@@ -8,7 +8,7 @@ from django.utils import timezone
 
 from accounts.models import Membership, Organization, User
 from devices.models import (
-    Channel, Device, DeviceModel, IrrigationSchedule, LightingSchedule,
+    Channel, Device, DeviceCommand, DeviceModel, IrrigationSchedule, LightingSchedule,
     TelemetryReading,
 )
 from gardens.models import Garden
@@ -88,6 +88,11 @@ class SharedAutomationPanelTests(TestCase):
         self.assertNotContains(response, "99 s")
         self.assertContains(response, "Irrigar agora")
         self.assertContains(response, "Configuração de irrigação")
+        self.assertContains(response, f'name="channel" value="{self.pump.id}"', count=1)
+        self.assertContains(response, 'data-action="irrigate" data-channel="pump"')
+        self.assertContains(response, f'name="channel" value="{self.light.id}"', count=1)
+        self.assertContains(response, 'data-action="on" data-channel="grow-light"')
+        self.assertContains(response, 'data-action="off" data-channel="grow-light"')
 
     def test_confirmed_false_telemetry_displays_light_off(self):
         TelemetryReading.objects.create(
@@ -108,6 +113,26 @@ class SharedAutomationPanelTests(TestCase):
         response = self.client.get(reverse("customer-dashboard"))
         self.assertContains(response, "Estado não confirmado")
 
+    def test_pending_light_command_keeps_last_confirmed_state_visible(self):
+        DeviceCommand.objects.create(
+            device=self.device, channel=self.light, command_type="set_state",
+            payload={"on": False}, idempotency_key="pending-light-panel",
+            status=DeviceCommand.Status.PENDING,
+            expires_at=timezone.now() + timedelta(minutes=5),
+        )
+        self.client.force_login(self.owner)
+        response = self.client.get(reverse("customer-dashboard"))
+        self.assertContains(response, "Luz ligada")
+        self.assertContains(response, "Aguardando confirmação de novo comando")
+
+    def test_mismatched_channels_do_not_render_crossed_action_buttons(self):
+        self.pump.metric = "light_state"
+        self.pump.save(update_fields=["metric", "updated_at"])
+        self.client.force_login(self.owner)
+        response = self.client.get(reverse("customer-dashboard"))
+        self.assertContains(response, "Canal de irrigação indisponível")
+        self.assertNotContains(response, 'data-action="irrigate" data-channel="pump"')
+
     def test_viewer_sees_panel_without_operational_or_configuration_controls(self):
         self.client.force_login(self.viewer)
         response = self.client.get(reverse("customer-dashboard"))
@@ -119,6 +144,7 @@ class SharedAutomationPanelTests(TestCase):
     def test_technician_and_admin_use_the_same_shared_panel(self):
         self.client.force_login(self.tech)
         technician = self.client.get(reverse("garden-detail", args=[self.garden.pk]))
+        self.assertIn("components/garden_automation_panel.html", [item.name for item in technician.templates])
         self.assertContains(technician, "07:00 · Seg–Sex")
         self.assertContains(technician, "Configuração de iluminação")
 
@@ -126,6 +152,7 @@ class SharedAutomationPanelTests(TestCase):
         admin = self.client.get(
             f"{reverse('ops-client-detail', args=[self.owner.pk])}?aba=gardens"
         )
+        self.assertIn("components/garden_automation_panel.html", [item.name for item in admin.templates])
         self.assertContains(admin, "07:00 · Seg–Sex")
         self.assertContains(admin, "Configuração de iluminação")
 

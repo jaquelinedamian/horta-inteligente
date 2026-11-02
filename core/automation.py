@@ -146,6 +146,12 @@ def automation_panel_context(*, user, garden, snapshot, next_url):
 
     pump = snapshot.get("pump_channel")
     light = snapshot.get("light_channel")
+    pump_channel_valid = bool(
+        pump and pump.key == "pump" and pump.metric == "pump_state" and pump.is_enabled
+    )
+    light_channel_valid = bool(
+        light and light.key == "grow-light" and light.metric == "light_state" and light.is_enabled
+    )
     return {
         "garden": garden,
         "snapshot": snapshot,
@@ -153,6 +159,8 @@ def automation_panel_context(*, user, garden, snapshot, next_url):
         "can_operate": can_operate_automation(user, garden),
         "can_edit": can_edit_automation(user, garden),
         "next_url": next_url,
+        "pump_channel_valid": pump_channel_valid,
+        "light_channel_valid": light_channel_valid,
         "irrigation_add_form": IrrigationScheduleForm(auto_id=f"irrigation-{garden.pk}-%s"),
         "lighting_add_form": LightingScheduleForm(auto_id=f"lighting-{garden.pk}-%s"),
         "irrigation_edit_rows": [

@@ -51,7 +51,7 @@
     const data = new FormData(form);
     data.set('client_clicked_at', new Date().toISOString());
     if (event.submitter?.name) data.set(event.submitter.name, event.submitter.value);
-    if (form.dataset.actuator === 'lighting') {
+    if (form.dataset.channelType === 'light') {
       const action = data.get('action');
       console.info('UI ACTION:', action === 'on' ? 'LIGAR ILUMINAÇÃO' : 'DESLIGAR ILUMINAÇÃO', {
         channel: form.dataset.channelKey,
@@ -70,7 +70,7 @@
       message.setAttribute('aria-live', 'polite');
       form.appendChild(message);
     }
-    message.textContent = 'Enviando comando…';
+    message.textContent = form.dataset.pendingMessage || 'Enviando comando…';
     try {
       const response = await fetch(form.action, {
         method: 'POST', body: data, credentials: 'same-origin',
@@ -78,9 +78,8 @@
       });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || 'Não foi possível enviar o comando.');
-      message.textContent = payload.manual_notice
-        ? `${payload.manual_notice} Aguardando confirmação do controlador…`
-        : 'Aguardando confirmação do controlador…';
+      const sentMessage = form.dataset.sentMessage || payload.manual_notice || 'Comando enviado.';
+      message.textContent = `${sentMessage} Aguardando confirmação do controlador…`;
       await pollCommand(payload.status_url, Date.now(), message);
     } catch (error) {
       message.textContent = error.message.includes('pendente') ? 'Não foi possível confirmar o estado.' : error.message;

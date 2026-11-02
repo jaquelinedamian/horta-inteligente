@@ -101,7 +101,7 @@ class RelayChannelAvailabilityTests(TestCase):
         self.light.is_enabled = False
         self.light.save(update_fields=["is_enabled", "updated_at"])
         uninstalled = self.client.get(reverse("customer-dashboard"))
-        self.assertContains(uninstalled, "Hardware não instalado")
+        self.assertContains(uninstalled, "Canal de iluminação indisponível")
 
     def _enable_light(self):
         self.light.is_enabled = True

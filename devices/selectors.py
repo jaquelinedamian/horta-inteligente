@@ -217,8 +217,16 @@ def garden_snapshot(garden):
         if not contracted_crops:
             contracted_crops = list({cultivar.crop_id: cultivar.crop for cultivar in checkout.selected_cultures.select_related("crop")}.values())
     actuator_channels = [channel for device in devices for channel in device.channels.all() if channel.kind == "actuator" and channel.is_enabled]
-    pump_channel = next((item for item in actuator_channels if item.metric == "pump_state"), None)
-    light_channel = next((item for item in actuator_channels if item.metric == "light_state"), None)
+    # Não seleciona o primeiro atuador: chave e métrica precisam corresponder
+    # ao mesmo canal físico/semântico antes de chegarem ao front-end.
+    pump_channel = next((
+        item for item in actuator_channels
+        if item.key == "pump" and item.metric == "pump_state" and item.is_enabled
+    ), None)
+    light_channel = next((
+        item for item in actuator_channels
+        if item.key == "grow-light" and item.metric == "light_state" and item.is_enabled
+    ), None)
     next_irrigation = None
     if pump_channel:
         now = timezone.now()
