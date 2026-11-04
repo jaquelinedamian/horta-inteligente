@@ -5,9 +5,11 @@ from decimal import Decimal
 from django.contrib.auth.password_validation import validate_password
 from django.db import models, transaction
 from django.forms import modelform_factory
+from django.template.loader import render_to_string
 from django.core.exceptions import FieldDoesNotExist
 from django.utils import timezone
 from django.utils.text import slugify
+from django.utils.safestring import mark_safe
 
 from accounts.models import Address, Membership, Organization, User
 from devices.models import Channel, Device
@@ -212,6 +214,13 @@ class AvailabilityChoiceField(forms.TypedChoiceField):
         return value == "on" or super().valid_value(value)
 
 
+class CropAvailabilitySwitch(forms.CheckboxInput):
+    template_name = "widgets/crop_availability_switch.html"
+
+    def render(self, name, value, attrs=None, renderer=None):
+        return mark_safe(render_to_string(self.template_name, self.get_context(name, value, attrs)))
+
+
 def resource_form_class(resource):
     if resource.model is User:
         return EmployeeForm
@@ -360,12 +369,9 @@ class CropForm(OperationalModelForm):
         label="Duração da bomba", choices=_optional_choices(PUMP_DURATION_CHOICES),
         coerce=int, required=False, empty_value=None,
     )
-    is_available = AvailabilityChoiceField(
-        label="Disponibilizar esta cultura?",
-        choices=((True, "Ativa e disponível"), (False, "Manter inativa")),
-        coerce=lambda value: value in (True, "True", "true", "1", "on"),
-        widget=forms.RadioSelect,
-        help_text="Quando ativa, esta cultura poderá aparecer no catálogo e ser escolhida pelos clientes.",
+    is_available = forms.BooleanField(
+        label="", required=False,
+        widget=CropAvailabilitySwitch,
     )
 
     class Meta:
@@ -387,6 +393,11 @@ class CropForm(OperationalModelForm):
         self.fields["soil_moisture_requirement"].label = "Umidade do solo (referência)"
         self.fields["water_requirement"].label = "Necessidade de água"
         self.fields["drainage_requirement"].label = "Drenagem"
+        self.fields["is_available"].widget.attrs.update({
+            "class": "crop-availability-input",
+            "role": "switch",
+            "aria-describedby": "crop-availability-description crop-availability-status",
+        })
         for name, suffix in (
             ("light_hours", "h · configuração atual"),
             ("irrigation_frequency_count", "vezes · configuração atual"),

@@ -93,6 +93,7 @@ class CropBackofficeUXTests(TestCase):
 
     def test_form_explains_availability(self):
         response = self.client.get(reverse("ops-create", args=["crops"]))
-        self.assertContains(response, "Ativa e disponível")
-        self.assertContains(response, "Manter inativa")
-        self.assertContains(response, "poderá aparecer no catálogo e ser escolhida pelos clientes")
+        self.assertContains(response, "Disponibilidade da cultura")
+        self.assertContains(response, "Disponível para seleção em novos cadastros quando ativada")
+        self.assertContains(response, 'role="switch"', html=False)
+        self.assertNotContains(response, 'type="radio"', html=False)

@@ -79,4 +79,22 @@ class CropImageTests(TestCase):
         self.assertEqual(self.client.get(reverse("ops-detail", args=["crops", self.crop.pk])).status_code, 200)
         self.assertEqual(self.client.get(reverse("ops-edit", args=["crops", self.crop.pk])).status_code, 403)
 
+    def test_availability_switch_loads_current_state_and_saves_only_on_submit(self):
+        self.crop.is_available = True
+        self.crop.save(update_fields=["is_available"])
+        unbound = CropForm(instance=self.crop)
+        self.assertTrue(unbound["is_available"].value())
+        self.assertIn('role="switch"', str(unbound["is_available"]))
+
+        bound = CropForm({
+            "common_name": self.crop.common_name, "scientific_name": self.crop.scientific_name,
+            "code": self.crop.code, "description": self.crop.description,
+            "irrigation_frequency_period": self.crop.irrigation_frequency_period,
+        }, instance=self.crop)
+        self.assertTrue(bound.is_valid(), bound.errors)
+        self.assertTrue(Crop.objects.get(pk=self.crop.pk).is_available)
+        bound.save()
+        self.crop.refresh_from_db()
+        self.assertFalse(self.crop.is_available)
+
 # Create your tests here.

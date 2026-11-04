@@ -1,0 +1,12 @@
+<div class="crop-availability-control">
+  <div class="crop-availability-copy">
+    <label class="crop-availability-title" for="{{ widget.attrs.id }}">Disponibilidade da cultura</label>
+    <p id="crop-availability-description">Disponível para seleção em novos cadastros quando ativada.</p>
+    <span id="crop-availability-status" class="crop-availability-status" data-availability-status aria-live="polite">{% if widget.value %}Ativa{% else %}Inativa{% endif %}</span>
+  </div>
+  <label class="crop-switch" for="{{ widget.attrs.id }}">
+    <input type="checkbox" name="{{ widget.name }}"{% for name, value in widget.attrs.items %}{% if value is not False %} {{ name }}{% if value is not True %}="{{ value }}"{% endif %}{% endif %}{% endfor %}>
+    <span class="crop-switch-track" aria-hidden="true"><span class="crop-switch-thumb"></span></span>
+    <span class="visually-hidden">Alternar disponibilidade da cultura</span>
+  </label>
+</div>
