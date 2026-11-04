@@ -70,13 +70,15 @@ class CropBackofficeUXTests(TestCase):
     def setUp(self):
         self.admin = User.objects.create_superuser(email="crop-admin@example.test", password="Strong-pass-2026!", full_name="Admin")
         self.client.force_login(self.admin)
-        self.active = Crop.objects.create(common_name="Tomilho", code="tomilho-admin", category="Erva", is_available=True)
-        self.inactive = Crop.objects.create(common_name="Sálvia", code="salvia-admin", category="Erva", is_available=False)
+        self.active = Crop.objects.get(code="tomilho")
+        self.inactive = Crop.objects.get(code="coentro")
+        self.inactive.is_available = False
+        self.inactive.save(update_fields=["is_available"])
 
     def test_listing_uses_business_columns_and_status(self):
         response = self.client.get(reverse("ops-collection", args=["crops"]))
-        for heading in ("Cultura", "Categoria", "Variedades", "Disponibilidade", "Cultivos"):
-            self.assertContains(response, heading)
+        for content in ("Tomilho", "Thymus vulgaris", "Ver detalhes", "Editar"):
+            self.assertContains(response, content)
         self.assertContains(response, "ATIVA")
         self.assertContains(response, "INATIVA")
         self.assertNotContains(response, f'<td class="text-muted">{self.active.pk}</td>', html=False)
@@ -84,10 +86,10 @@ class CropBackofficeUXTests(TestCase):
     def test_active_and_inactive_filters(self):
         active = self.client.get(reverse("ops-collection", args=["crops"]), {"status": "active"})
         self.assertContains(active, "Tomilho")
-        self.assertNotContains(active, "Sálvia")
+        self.assertNotContains(active, "Coentro")
         inactive = self.client.get(reverse("ops-collection", args=["crops"]), {"status": "inactive"})
         self.assertNotContains(inactive, "Tomilho")
-        self.assertContains(inactive, "Sálvia")
+        self.assertContains(inactive, "Coentro")
 
     def test_form_explains_availability(self):
         response = self.client.get(reverse("ops-create", args=["crops"]))

@@ -6,7 +6,7 @@ from io import BytesIO
 from django.conf import settings
 from django import forms
 from collections.abc import Mapping
-from django.core.exceptions import ValidationError
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.contrib import messages
 from django.core.management import call_command
 from django.core.paginator import Paginator
@@ -135,6 +135,13 @@ def _form_context(form, section, title, obj=None):
     if section == "inventory":
         spec = (("Identificação", "sku name inventory_category description"), ("Fornecimento", "primary_supplier brand"), ("Controle", "unit tracks_lots tracks_expiration"), ("Estoque", "minimum_quantity reorder_point physical_location"), ("Financeiro", "average_cost_cents reference_price_cents"), ("Status", "is_active"))
         groups = [(label, [form[name] for name in names.split() if name in form.fields]) for label, names in spec]
+    elif section == "crops":
+        spec = (
+            ("Identificação", "image remove_image common_name scientific_name code description is_available"),
+            ("Necessidades de cultivo", "water_requirement light_hours ideal_temperature_min ideal_temperature_max cultivation_guidance drainage_requirement soil_moisture_requirement"),
+            ("Configurações", "irrigation_frequency_count irrigation_frequency_period pump_duration_seconds"),
+        )
+        groups = [(label, [form[name] for name in names.split() if name in form.fields]) for label, names in spec]
     elif section == "visits":
         spec = [("Contexto", "organization garden work_order"), ("Responsável", "technician"), ("Agendamento", "visit_type scheduled_start scheduled_end status")]
         if obj:
@@ -212,7 +219,7 @@ def collection(request, section):
         return render(request, "admin_portal/collection.html", {"title": "Clientes", "section": section, "area": "comercial", "page_obj": page, "objects": page.object_list, "query": query, "resource": resource})
     queryset = resource.model.objects.all().order_by(*resource.ordering)
     if section == "crops":
-        queryset = queryset.annotate(
+        queryset = queryset.filter(code__in=("alface", "tomilho", "coentro")).annotate(
             variety_count=Count("cultivars", distinct=True),
             active_cycle_count=Count("planting_cycles", filter=Q(planting_cycles__status=PlantingCycle.Status.ACTIVE), distinct=True),
             history_count=Count("planting_cycles", distinct=True),
@@ -238,6 +245,11 @@ def collection(request, section):
     if organization and "organization" in field_names:
         queryset = queryset.filter(organization_id=organization)
     page = Paginator(queryset, 25).get_page(request.GET.get("page"))
+    if section == "crops":
+        return render(request, "admin_portal/crop_collection.html", {
+            "title": resource.title, "section": section, "area": SECTION_AREA.get(section),
+            "page_obj": page, "objects": page.object_list, "query": query, "resource": resource,
+        })
     return render(request, "admin_portal/collection.html", {"title": resource.title, "section": section, "area": SECTION_AREA.get(section), "page_obj": page, "objects": page.object_list, "query": query, "resource": resource, "organizations": Organization.objects.filter(is_active=True).order_by("name")})
 
 
@@ -263,7 +275,9 @@ def create(request, section):
     resource = get_resource(section)
     if not resource or resource.readonly or section == "credentials":
         raise Http404
-    form = resource_form_class(resource)(request.POST or None)
+    if section == "crops" and not request.user.is_hortaviva_admin:
+        raise PermissionDenied
+    form = resource_form_class(resource)(request.POST or None, request.FILES or None)
     if request.method == "POST" and form.is_valid():
         if isinstance(form.instance, CropLightingSchedule):
             form.instance.updated_by = request.user
@@ -281,8 +295,10 @@ def edit(request, section, pk):
     resource = get_resource(section)
     if not resource or resource.readonly:
         raise Http404
+    if section == "crops" and not request.user.is_hortaviva_admin:
+        raise PermissionDenied
     obj = get_object_or_404(resource.model, pk=pk)
-    form = resource_form_class(resource)(request.POST or None, instance=obj)
+    form = resource_form_class(resource)(request.POST or None, request.FILES or None, instance=obj)
     if request.method == "POST" and form.is_valid():
         if isinstance(form.instance, CropLightingSchedule):
             form.instance.updated_by = request.user

@@ -1,6 +1,7 @@
 from django.conf import settings
 from django.db import models
 from django.core.exceptions import ValidationError
+from django.urls import reverse
 
 from core.models import BaseModel
 from gardens.models import GardenModule
@@ -49,6 +50,16 @@ class Crop(BaseModel):
     soil_moisture_requirement = models.CharField(max_length=80, blank=True)
     water_requirement = models.CharField(max_length=80, blank=True)
     drainage_requirement = models.CharField(max_length=80, blank=True)
+    cultivation_guidance = models.CharField(max_length=240, blank=True)
+    image_data = models.BinaryField(null=True, blank=True, editable=False)
+    image_content_type = models.CharField(max_length=40, blank=True, editable=False)
+    image_filename = models.CharField(max_length=180, blank=True, editable=False)
+
+    @property
+    def display_image_url(self):
+        if self.image_data:
+            return reverse("crop-image", args=[self.pk])
+        return self.image_url or "/static/img/crop-placeholder.svg"
 
     def __str__(self):
         return self.common_name

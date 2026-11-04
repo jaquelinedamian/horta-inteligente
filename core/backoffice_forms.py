@@ -6,6 +6,7 @@ from django.db import models, transaction
 from django.forms import modelform_factory
 from django.core.exceptions import FieldDoesNotExist
 from django.utils import timezone
+from django.utils.text import slugify
 
 from accounts.models import Address, Membership, Organization, User
 from devices.models import Channel, Device
@@ -295,6 +296,12 @@ class VisitForm(OperationalModelForm):
 
 
 class CropForm(OperationalModelForm):
+    image = forms.ImageField(
+        label="Fotografia da espécie", required=False,
+        help_text="JPG, PNG ou WebP, com no máximo 5 MB. A imagem será redimensionada e otimizada.",
+        widget=forms.ClearableFileInput(attrs={"accept": "image/jpeg,image/png,image/webp", "data-crop-image-input": ""}),
+    )
+    remove_image = forms.BooleanField(label="Remover fotografia atual", required=False)
     light_hours = forms.TypedChoiceField(
         label="Horas de luz por dia",
         choices=_optional_choices(tuple((value, f"{value} h") for value in range(25))),
@@ -325,13 +332,22 @@ class CropForm(OperationalModelForm):
     class Meta:
         model = Crop
         fields = (
-            "common_name", "scientific_name", "code", "description", "image_url", "is_available",
-            "soil_moisture_requirement", "light_hours", "water_requirement", "drainage_requirement",
+            "common_name", "scientific_name", "code", "description", "is_available",
+            "soil_moisture_requirement", "light_hours", "water_requirement", "drainage_requirement", "cultivation_guidance",
+            "ideal_temperature_min", "ideal_temperature_max",
             "irrigation_frequency_count", "irrigation_frequency_period", "pump_duration_seconds",
         )
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self.fields["code"].required = False
+        self.fields["code"].widget = forms.HiddenInput()
+        self.fields["description"].label = "Descrição curta"
+        self.fields["description"].widget.attrs["rows"] = 3
+        self.fields["cultivation_guidance"].label = "Orientação sobre substrato e drenagem"
+        self.fields["soil_moisture_requirement"].label = "Umidade do solo (referência)"
+        self.fields["water_requirement"].label = "Necessidade de água"
+        self.fields["drainage_requirement"].label = "Drenagem"
         for name, suffix in (
             ("light_hours", "h · configuração atual"),
             ("irrigation_frequency_count", "vezes · configuração atual"),
@@ -346,6 +362,47 @@ class CropForm(OperationalModelForm):
         if self.instance.pk and not available and self.instance.is_available:
             self.active_cycle_count = PlantingCycle.objects.filter(crop=self.instance, status=PlantingCycle.Status.ACTIVE).count()
         return available
+
+    def clean_image(self):
+        image = self.cleaned_data.get("image")
+        if not image:
+            return image
+        if image.size > 5 * 1024 * 1024:
+            raise forms.ValidationError("A imagem deve ter no máximo 5 MB.")
+        if image.content_type not in {"image/jpeg", "image/png", "image/webp"}:
+            raise forms.ValidationError("Envie uma imagem JPG, PNG ou WebP.")
+        return image
+
+    def save(self, commit=True):
+        from io import BytesIO
+        from PIL import Image, ImageOps
+
+        crop = super().save(commit=False)
+        if not crop.code:
+            crop.code = slugify(crop.common_name)
+        image = self.cleaned_data.get("image")
+        if self.cleaned_data.get("remove_image"):
+            crop.image_data = None
+            crop.image_content_type = ""
+            crop.image_filename = ""
+            crop.image_url = ""
+        if image:
+            image.seek(0)
+            with Image.open(image) as source:
+                optimized = ImageOps.exif_transpose(source)
+                if optimized.mode not in ("RGB", "RGBA"):
+                    optimized = optimized.convert("RGBA" if "transparency" in optimized.info else "RGB")
+                optimized.thumbnail((1200, 900), Image.Resampling.LANCZOS)
+                output = BytesIO()
+                optimized.save(output, format="WEBP", quality=82, method=6)
+            crop.image_data = output.getvalue()
+            crop.image_content_type = "image/webp"
+            crop.image_filename = f"{crop.code or 'cultura'}.webp"
+            crop.image_url = ""
+        if commit:
+            crop.save()
+            self.save_m2m()
+        return crop
 
 
 class CommercialPlanForm(OperationalModelForm):

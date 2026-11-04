@@ -24,3 +24,4 @@ document.querySelectorAll('[data-guided-wizard]').forEach(wizard=>{
 });
 
 document.querySelectorAll('[data-crop-choice]').forEach(choice=>{const form=choice.form;const counter=form?.querySelector('[data-crop-count]');const update=()=>{if(counter)counter.textContent=form.querySelectorAll('[data-crop-choice]:checked').length};choice.addEventListener('change',update);update()});
+document.querySelectorAll('[data-crop-image-input]').forEach(input=>input.addEventListener('change',()=>{const preview=document.querySelector('[data-crop-image-preview]');const file=input.files?.[0];if(!preview||!file)return;const url=URL.createObjectURL(file);preview.src=url;preview.onload=()=>URL.revokeObjectURL(url)}));

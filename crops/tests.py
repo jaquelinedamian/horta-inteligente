@@ -1,5 +1,12 @@
-from django.test import TestCase
+from io import BytesIO
 
+from django.core.files.uploadedfile import SimpleUploadedFile
+from django.test import TestCase
+from django.urls import reverse
+from PIL import Image
+
+from accounts.models import User
+from core.backoffice_forms import CropForm
 from .models import Crop, Cultivar
 from .selectors import get_available_crops, get_available_cultivars
 
@@ -23,5 +30,53 @@ class SupportedCropCatalogTests(TestCase):
     def test_legacy_crop_detail_is_not_public(self):
         response = self.client.get(f"/culturas/{self.legacy.code}/")
         self.assertEqual(response.status_code, 404)
+
+
+class CropImageTests(TestCase):
+    def setUp(self):
+        self.crop = Crop.objects.get(code="alface")
+
+    def image_upload(self, image_format="PNG", size=(1600, 1200)):
+        output = BytesIO()
+        Image.new("RGB", size, "green").save(output, format=image_format)
+        return SimpleUploadedFile("alface.png", output.getvalue(), content_type="image/png")
+
+    def test_image_is_optimized_and_persisted_in_database(self):
+        form = CropForm({
+            "common_name": self.crop.common_name, "scientific_name": self.crop.scientific_name,
+            "code": self.crop.code, "description": "Alface fresca", "is_available": "True",
+            "light_hours": "13", "irrigation_frequency_period": "day",
+        }, {"image": self.image_upload()}, instance=self.crop)
+        self.assertTrue(form.is_valid(), form.errors)
+        crop = form.save()
+        self.assertEqual(crop.image_content_type, "image/webp")
+        self.assertTrue(crop.image_data)
+        with Image.open(BytesIO(bytes(crop.image_data))) as optimized:
+            self.assertEqual(optimized.format, "WEBP")
+            self.assertLessEqual(optimized.width, 1200)
+        response = self.client.get(reverse("crop-image", args=[crop.pk]))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "image/webp")
+
+    def test_remove_image_keeps_crop_record(self):
+        self.crop.image_data = b"image"
+        self.crop.image_content_type = "image/webp"
+        self.crop.save()
+        form = CropForm({
+            "common_name": self.crop.common_name, "scientific_name": self.crop.scientific_name,
+            "code": self.crop.code, "is_available": "True", "remove_image": "on",
+            "irrigation_frequency_period": "day",
+        }, instance=self.crop)
+        self.assertTrue(form.is_valid(), form.errors)
+        self.assertIsNone(form.save().image_data)
+
+    def test_technician_can_view_but_cannot_edit_botanical_data(self):
+        technician = User.objects.create_user(
+            email="tech-crops@example.test", password="safe-password",
+            full_name="Técnico", employee_role=User.EmployeeRole.TECHNICIAN,
+        )
+        self.client.force_login(technician)
+        self.assertEqual(self.client.get(reverse("ops-detail", args=["crops", self.crop.pk])).status_code, 200)
+        self.assertEqual(self.client.get(reverse("ops-edit", args=["crops", self.crop.pk])).status_code, 403)
 
 # Create your tests here.

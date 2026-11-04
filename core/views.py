@@ -48,8 +48,15 @@ from .wifi_setup import can_configure_wifi, garden_wifi_context, wifi_device_sta
 logger = logging.getLogger(__name__)
 
 
+def _with_display_images(queryset):
+    crops = list(queryset)
+    for crop in crops:
+        crop.image_url = crop.display_image_url
+    return crops
+
+
 def home(request):
-    return render(request, "public/home.html", {"plans": get_public_plans()[:3], "crops": get_public_crops()[:3]})
+    return render(request, "public/home.html", {"plans": get_public_plans()[:3], "crops": _with_display_images(get_public_crops()[:3])})
 
 
 def public_page(request, page):
@@ -77,6 +84,16 @@ def crop_detail(request, code):
     return render(request, "public/crop_detail.html", {
         "crop": get_object_or_404(get_public_crops().prefetch_related("cultivars__requirements"), code=code)
     })
+
+
+def crop_image(request, crop_id):
+    crop = get_object_or_404(Crop.objects.only("image_data", "image_content_type", "updated_at"), pk=crop_id)
+    if not crop.image_data:
+        raise Http404
+    response = HttpResponse(bytes(crop.image_data), content_type=crop.image_content_type or "image/webp")
+    response["Cache-Control"] = "public, max-age=86400"
+    response["ETag"] = f'"{crop.pk}-{int(crop.updated_at.timestamp())}"'
+    return response
 
 
 def signup(request):
@@ -165,7 +182,7 @@ def checkout(request, step):
             request.session["checkout"] = state
             return redirect("checkout", step=min(step + 1, 4))
     selected_crops = Crop.objects.filter(id__in=state.get("cultures", []))
-    return render(request, "public/checkout.html", {"step": step, "state": state, "plans": available_plans, "crops": get_available_crops(), "form": form, "selected_plan": selected_plan, "selected_crops": selected_crops, "module_limit": _plan_module_limit(selected_plan) if selected_plan else None})
+    return render(request, "public/checkout.html", {"step": step, "state": state, "plans": available_plans, "crops": _with_display_images(get_available_crops()), "form": form, "selected_plan": selected_plan, "selected_crops": selected_crops, "module_limit": _plan_module_limit(selected_plan) if selected_plan else None})
 
 
 @login_required
