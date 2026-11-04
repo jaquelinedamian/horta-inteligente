@@ -324,7 +324,11 @@ class CropForm(OperationalModelForm):
 
     class Meta:
         model = Crop
-        fields = ("common_name", "code", "description", "image_url", "is_available", "light_hours", "irrigation_frequency_count", "irrigation_frequency_period", "pump_duration_seconds")
+        fields = (
+            "common_name", "scientific_name", "code", "description", "image_url", "is_available",
+            "soil_moisture_requirement", "light_hours", "water_requirement", "drainage_requirement",
+            "irrigation_frequency_count", "irrigation_frequency_period", "pump_duration_seconds",
+        )
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)

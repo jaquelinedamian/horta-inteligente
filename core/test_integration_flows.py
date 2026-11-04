@@ -29,18 +29,18 @@ class IntegratedProductFlowsTests(TestCase):
             response = self.client.get(url)
             self.assertContains(response, "Essencial Integrado")
 
-    def test_available_crop_is_shared_by_catalog_and_checkout(self):
+    def test_legacy_crop_cannot_reenter_catalog_or_checkout(self):
         plan = Plan.objects.create(name="Plano", code="plano", is_active=True, is_public=True)
         PlanVersion.objects.create(plan=plan, version=1, price_cents=10000, effective_from=timezone.now())
         crop = Crop.objects.create(common_name="Manjericão Integrado", code="manjericao-integrado", is_available=True)
         Cultivar.objects.create(crop=crop, name="Genovese", is_active=True)
-        self.assertContains(self.client.get(reverse("crop-catalog")), "Manjericão Integrado")
+        self.assertNotContains(self.client.get(reverse("crop-catalog")), "Manjericão Integrado")
         self.assertContains(self.client.get(reverse("checkout", args=[1])), "Plano")
         session = self.client.session
         session["checkout"] = {"plan": str(plan.versions.get().pk)}
         session.save()
         checkout = self.client.get(reverse("checkout", args=[2]))
-        self.assertContains(checkout, "Manjericão Integrado")
+        self.assertNotContains(checkout, "Manjericão Integrado")
         self.assertNotContains(checkout, "Genovese")
 
     def test_admin_subscription_is_visible_to_linked_customer(self):

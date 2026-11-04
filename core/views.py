@@ -74,7 +74,9 @@ def crop_catalog(request):
 
 
 def crop_detail(request, code):
-    return render(request, "public/crop_detail.html", {"crop": get_object_or_404(Crop.objects.prefetch_related("cultivars__requirements"), code=code)})
+    return render(request, "public/crop_detail.html", {
+        "crop": get_object_or_404(get_public_crops().prefetch_related("cultivars__requirements"), code=code)
+    })
 
 
 def signup(request):

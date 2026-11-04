@@ -46,6 +46,9 @@ class Crop(BaseModel):
     irrigation_frequency_count = models.PositiveSmallIntegerField(null=True, blank=True)
     irrigation_frequency_period = models.CharField(max_length=10, choices=IrrigationPeriod.choices, default=IrrigationPeriod.DAY)
     pump_duration_seconds = models.PositiveSmallIntegerField(null=True, blank=True)
+    soil_moisture_requirement = models.CharField(max_length=80, blank=True)
+    water_requirement = models.CharField(max_length=80, blank=True)
+    drainage_requirement = models.CharField(max_length=80, blank=True)
 
     def __str__(self):
         return self.common_name

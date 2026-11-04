@@ -15,8 +15,14 @@ class CropCommercialFlowTests(TestCase):
     def setUpTestData(cls):
         plan = Plan.objects.create(name="Essencial", code="essencial-crop-test", is_active=True, is_public=True)
         cls.version = PlanVersion.objects.create(plan=plan, version=1, price_cents=14990, effective_from=timezone.now())
-        cls.lettuce = Crop.objects.create(common_name="Alface", code="alface-flow", category="Folhosa", is_available=True)
-        cls.thyme = Crop.objects.create(common_name="Tomilho", code="tomilho-flow", category="Erva", is_available=True)
+        cls.lettuce = Crop.objects.get(code="alface")
+        cls.lettuce.category = "Folhosa"
+        cls.lettuce.is_available = True
+        cls.lettuce.save(update_fields=["category", "is_available"])
+        cls.thyme = Crop.objects.get(code="tomilho")
+        cls.thyme.category = "Erva"
+        cls.thyme.is_available = True
+        cls.thyme.save(update_fields=["category", "is_available"])
         cls.basil = Crop.objects.create(common_name="Manjericão", code="manjericao-flow", is_available=False)
         for name in ("Crespa", "Americana", "Mimosa"):
             Cultivar.objects.create(crop=cls.lettuce, name=name, is_active=True)

@@ -8,6 +8,7 @@ from django.utils import timezone
 
 from accounts.models import Membership, Organization, User
 from crops.models import Crop, Cultivar
+from crops.selectors import get_available_crops
 from gardens.models import Garden, GardenModel, GardenModule, ModuleType
 from operations.models import ChecklistExecution, Visit
 from subscriptions.models import CheckoutRequest, Payment, Plan, PlanVersion, Subscription
@@ -56,17 +57,18 @@ class CheckoutTests(DemoDataTestCase):
         self.plan.plan.garden_model = self.garden_model
         self.plan.plan.save(update_fields=["garden_model", "updated_at"])
         self.cultivars = list(Cultivar.objects.filter(crop__is_available=True)[:4])
-        self.crops = list(Crop.objects.filter(is_available=True)[:4])
+        self.crops = list(get_available_crops())
 
     def post_step(self, step, data):
         return self.client.post(reverse("checkout", args=[step]), data)
 
-    def test_checkout_rejects_skipped_steps_and_plan_limit(self):
+    def test_checkout_rejects_skipped_steps_and_unsupported_crop(self):
         self.assertEqual(self.client.get(reverse("checkout", args=[7])).status_code, 404)
         self.post_step(1, {"plan": self.plan.id})
-        response = self.post_step(2, {"cultures": [item.id for item in self.crops]})
+        unsupported = Crop.objects.exclude(code__in=("alface", "tomilho", "coentro")).first()
+        response = self.post_step(2, {"cultures": [self.crops[0].id, unsupported.id]})
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "permite até 3 culturas")
+        self.assertContains(response, "não está disponível")
 
     def test_complete_checkout_is_consistent_and_idempotent(self):
         self.assertRedirects(self.post_step(1, {"plan": self.plan.id}), reverse("checkout", args=[2]))

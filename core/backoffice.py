@@ -42,7 +42,7 @@ RESOURCES = {
     "subscriptions": r("Assinaturas", Subscription, "organization plan_version status current_period_start current_period_end contracted_price_cents billing_day next_billing_at auto_renew coupon discount_cents canceled_at cancellation_reason notes provider provider_reference", ("organization__name", "plan_version__plan__name")),
     "subscription-events": Resource("Histórico de assinaturas", SubscriptionEvent, search=("subscription__organization__name", "event_type"), readonly=True),
     "payments": r("Pagamentos", Payment, "subscription competence gross_amount_cents coupon discount_cents amount_cents currency due_at paid_at payment_method status provider_reference notes", ("subscription__organization__name", "provider_reference")),
-    "crops": r("Culturas", Crop, "common_name code description image_url is_available light_hours irrigation_frequency_count irrigation_frequency_period pump_duration_seconds", ("common_name", "code")),
+    "crops": r("Culturas", Crop, "common_name scientific_name code description image_url is_available soil_moisture_requirement light_hours water_requirement drainage_requirement irrigation_frequency_count irrigation_frequency_period pump_duration_seconds", ("common_name", "code")),
     "crop-lighting": r("Padrões de iluminação", CropLightingSchedule, "crop name timezone days_of_week start_time end_time enabled", ("crop__common_name", "name")),
     "cultivars": r("Variedades", Cultivar, "crop name code description size color flavor vigor resistance days_to_harvest specific_characteristics is_active", ("crop__common_name", "name")),
     "crop-requirements": r("Requisitos de cultivo", CropRequirement, "cultivar metric unit minimum maximum target", ("cultivar__name", "metric")),

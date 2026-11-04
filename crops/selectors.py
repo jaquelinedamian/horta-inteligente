@@ -1,9 +1,23 @@
+from django.db.models import Case, IntegerField, Value, When
+
 from .models import Crop, Cultivar, PlantingCycle
+
+
+SUPPORTED_CROP_CODES = ("alface", "tomilho", "coentro")
+
+
+def _supported_crop_order():
+    return Case(
+        *(When(code=code, then=Value(position)) for position, code in enumerate(SUPPORTED_CROP_CODES)),
+        output_field=IntegerField(),
+    )
 
 
 def get_available_crops():
     """Single source of truth for crops offered in new customer journeys."""
-    return Crop.objects.filter(is_available=True).order_by("common_name")
+    return Crop.objects.filter(is_available=True, code__in=SUPPORTED_CROP_CODES).order_by(
+        _supported_crop_order(), "common_name"
+    )
 
 
 def get_public_crops():
@@ -12,7 +26,9 @@ def get_public_crops():
 
 
 def get_available_cultivars(crop=None):
-    queryset = Cultivar.objects.filter(is_active=True, crop__is_available=True).select_related("crop")
+    queryset = Cultivar.objects.filter(
+        is_active=True, crop__is_available=True, crop__code__in=SUPPORTED_CROP_CODES
+    ).select_related("crop")
     return queryset.filter(crop=crop) if crop else queryset
 
 
