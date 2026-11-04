@@ -92,6 +92,36 @@ class GardenExperienceTests(TestCase):
         self.client.force_login(self.other)
         self.assertEqual(self.client.get(reverse("garden-gallery", args=[self.garden.pk])).status_code, 404)
 
+    def test_owner_can_delete_photo_without_affecting_other_photos(self):
+        deleted = GardenPhoto.objects.create(
+            garden=self.garden, device=self.device, captured_at=timezone.now(),
+            image_data=b"delete", byte_size=6,
+        )
+        retained = GardenPhoto.objects.create(
+            garden=self.garden, device=self.device, captured_at=timezone.now() - timedelta(hours=1),
+            image_data=b"retain", byte_size=6,
+        )
+        self.client.force_login(self.owner)
+        gallery = self.client.get(reverse("garden-gallery", args=[self.garden.pk]))
+        self.assertContains(gallery, reverse("garden-photo-delete", args=[deleted.pk]))
+        response = self.client.post(reverse("garden-photo-delete", args=[deleted.pk]), follow=True)
+        self.assertRedirects(response, reverse("garden-gallery", args=[self.garden.pk]))
+        self.assertContains(response, "Fotografia excluída com sucesso")
+        self.assertFalse(GardenPhoto.objects.filter(pk=deleted.pk).exists())
+        self.assertTrue(GardenPhoto.objects.filter(pk=retained.pk).exists())
+
+    def test_photo_delete_requires_owner_or_admin(self):
+        photo = GardenPhoto.objects.create(
+            garden=self.garden, device=self.device, captured_at=timezone.now(),
+            image_data=b"protected", byte_size=9,
+        )
+        self.client.force_login(self.tech)
+        self.assertEqual(self.client.post(reverse("garden-photo-delete", args=[photo.pk])).status_code, 403)
+        self.assertTrue(GardenPhoto.objects.filter(pk=photo.pk).exists())
+        self.client.force_login(self.admin)
+        self.assertEqual(self.client.post(reverse("garden-photo-delete", args=[photo.pk])).status_code, 302)
+        self.assertFalse(GardenPhoto.objects.filter(pk=photo.pk).exists())
+
     def test_customer_edits_own_garden_and_api_reflects_override(self):
         self.client.force_login(self.owner)
         response = self.client.post(reverse("garden-configuration", args=[self.garden.pk]), self._configuration_payload())

@@ -14,7 +14,8 @@ from django.http import Http404, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils.http import url_has_allowed_host_and_scheme
-from django.utils.text import slugify
+from django.utils.html import strip_tags
+from django.utils.text import Truncator, slugify
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 from django.views.decorators.http import require_GET, require_POST
@@ -318,12 +319,28 @@ def customer_section(request, section):
             overrides = garden.automation_overrides if isinstance(garden.automation_overrides, dict) else {}
             origins = {section: "Personalizado" if section in overrides else "Padrão HortaViva" for section in ("irrigation", "lighting", "camera", "monitoring")}
             snapshot = garden_snapshot(garden)
+            cycles_by_crop = {}
+            for cycle in snapshot["cycles"]:
+                crop = cycle.crop or (cycle.cultivar.crop if cycle.cultivar_id else None)
+                if crop and crop.pk not in cycles_by_crop:
+                    cycles_by_crop[crop.pk] = cycle
+            culture_cards = []
+            seen_crops = set()
+            for crop in snapshot["contracted_crops"]:
+                if crop.pk in seen_crops:
+                    continue
+                seen_crops.add(crop.pk)
+                culture_cards.append({
+                    "crop": crop,
+                    "cycle": cycles_by_crop.get(crop.pk),
+                    "description": Truncator(strip_tags(crop.description or crop.short_description or "")).chars(256),
+                })
             camera = snapshot["camera"]
             stream_url = None
             if camera and camera.local_ip:
                 host = f"[{camera.local_ip}]" if ":" in camera.local_ip else camera.local_ip
                 stream_url = f"http://{host}/stream"
-            panels.append({"garden": garden, "snapshot": snapshot, "camera_stream_url": stream_url, "configuration": config, "configuration_origins": origins, "overrides": overrides, "recent_photos": garden.photos.all()[:7], "automation_panel": automation_panel_context(user=request.user, garden=garden, snapshot=snapshot, next_url=request.path)})
+            panels.append({"garden": garden, "snapshot": snapshot, "culture_cards": culture_cards, "camera_stream_url": stream_url, "configuration": config, "configuration_origins": origins, "overrides": overrides, "recent_photos": garden.photos.all()[:7], "automation_panel": automation_panel_context(user=request.user, garden=garden, snapshot=snapshot, next_url=request.path)})
         context["panels"] = panels
     if section == "crops":
         context["active_modules"] = GardenModule.objects.filter(organization=org, status=GardenModule.Status.INSTALLED).count()
@@ -750,7 +767,47 @@ def garden_gallery(request, garden_id):
     limit = request.GET.get("limit", "30")
     if limit in {"7", "30"}:
         photos = photos[:int(limit)]
-    return render(request, "shared/garden_gallery.html", {"garden": garden, "photos": photos, "period": period, "order": order, "limit": limit})
+    can_delete = request.user.is_hortaviva_admin or request.user.memberships.filter(
+        organization=garden.organization, is_active=True, role=Membership.Role.OWNER,
+    ).exists()
+    return render(request, "shared/garden_gallery.html", {"garden": garden, "photos": photos, "period": period, "order": order, "limit": limit, "can_delete": can_delete})
+
+
+@login_required
+@require_POST
+def garden_photo_delete(request, photo_id):
+    photo = get_object_or_404(
+        GardenPhoto.objects.select_related("garden"), pk=photo_id,
+        garden__in=gardens_for_user(request.user),
+    )
+    allowed = request.user.is_hortaviva_admin or request.user.memberships.filter(
+        organization=photo.garden.organization, is_active=True, role=Membership.Role.OWNER,
+    ).exists()
+    if not allowed:
+        from django.core.exceptions import PermissionDenied
+        raise PermissionDenied
+    garden_id = photo.garden_id
+    photo.delete()
+    messages.success(request, "Fotografia excluída com sucesso.")
+    return redirect("garden-gallery", garden_id=garden_id)
+
+
+@customer_required
+def customer_crop_detail(request, garden_id, crop_id):
+    garden = get_object_or_404(get_customer_gardens(request.membership.organization), pk=garden_id)
+    snapshot = garden_snapshot(garden)
+    contracted = {crop.pk: crop for crop in snapshot["contracted_crops"]}
+    crop = contracted.get(crop_id)
+    if not crop:
+        raise Http404
+    cycle = next((
+        item for item in snapshot["cycles"]
+        if (item.crop_id or (item.cultivar.crop_id if item.cultivar_id else None)) == crop.pk
+    ), None)
+    return render(request, "customer/crop_detail.html", {
+        "garden": garden, "crop": crop, "cycle": cycle,
+        "description": strip_tags(crop.description or ""),
+    })
 
 
 @login_required
