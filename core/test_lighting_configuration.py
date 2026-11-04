@@ -11,6 +11,7 @@ from devices.services import schedule_lighting
 from gardens.configuration import effective_garden_configuration
 from gardens.models import Garden, GardenModule, ModuleType
 from core.garden_experience import mark_custom_lighting_configuration, restore_crop_lighting_configuration
+from core.backoffice_forms import CropLightingScheduleForm
 
 
 class LightingConfigurationInheritanceTests(TestCase):
@@ -87,6 +88,35 @@ class LightingConfigurationInheritanceTests(TestCase):
         self.assertEqual(self.client.get(create_url).status_code, 403)
         self.client.force_login(self.admin)
         self.assertEqual(self.client.get(create_url).status_code, 200)
+
+    def test_species_form_calculates_end_time_from_daily_duration(self):
+        lettuce = Crop.objects.get(code="alface")
+        form = CropLightingScheduleForm({
+            "crop": lettuce.pk, "start_time": "06:00", "duration_hours": "12", "enabled": "on",
+        })
+        self.assertTrue(form.is_valid(), form.errors)
+        schedule = form.save()
+        self.assertEqual(schedule.end_time, time(18, 0))
+        self.assertEqual(schedule.days_of_week, list(range(7)))
+        lettuce.refresh_from_db()
+        self.assertEqual(float(lettuce.light_hours), 12)
+
+    def test_species_form_calculates_end_time_after_midnight(self):
+        thyme = Crop.objects.get(code="tomilho")
+        form = CropLightingScheduleForm({
+            "crop": thyme.pk, "start_time": "18:00", "duration_hours": "12", "enabled": "on",
+        })
+        self.assertTrue(form.is_valid(), form.errors)
+        schedule = form.save()
+        self.assertEqual(schedule.end_time, time(6, 0))
+        self.assertEqual(schedule.duration_hours, 12)
+
+    def test_species_form_exposes_only_simplified_portuguese_fields(self):
+        form = CropLightingScheduleForm()
+        self.assertEqual(list(form.fields), ["crop", "start_time", "duration_hours", "enabled"])
+        self.assertEqual(form.fields["crop"].label, "Espécie")
+        for removed in ("name", "timezone", "days_of_week", "end_time"):
+            self.assertNotIn(removed, form.fields)
 
     def test_owner_can_create_custom_period_for_own_garden(self):
         self.client.force_login(self.owner)

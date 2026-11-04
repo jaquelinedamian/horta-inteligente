@@ -93,6 +93,11 @@ class CropLightingSchedule(BaseModel):
     def __str__(self):
         return f"{self.crop.common_name} — {self.start_time:%H:%M}–{self.end_time:%H:%M}"
 
+    @property
+    def duration_hours(self):
+        from gardens.configuration import lighting_duration_seconds
+        return lighting_duration_seconds(self.start_time, self.end_time) / 3600
+
 
 class Cultivar(BaseModel):
     crop = models.ForeignKey(Crop, on_delete=models.CASCADE, related_name="cultivars")

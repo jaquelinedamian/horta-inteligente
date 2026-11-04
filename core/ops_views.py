@@ -275,7 +275,7 @@ def create(request, section):
     resource = get_resource(section)
     if not resource or resource.readonly or section == "credentials":
         raise Http404
-    if section == "crops" and not request.user.is_hortaviva_admin:
+    if section in {"crops", "crop-lighting"} and not request.user.is_hortaviva_admin:
         raise PermissionDenied
     form = resource_form_class(resource)(request.POST or None, request.FILES or None)
     if request.method == "POST" and form.is_valid():
@@ -295,7 +295,7 @@ def edit(request, section, pk):
     resource = get_resource(section)
     if not resource or resource.readonly:
         raise Http404
-    if section == "crops" and not request.user.is_hortaviva_admin:
+    if section in {"crops", "crop-lighting"} and not request.user.is_hortaviva_admin:
         raise PermissionDenied
     obj = get_object_or_404(resource.model, pk=pk)
     form = resource_form_class(resource)(request.POST or None, request.FILES or None, instance=obj)

@@ -1,4 +1,5 @@
 from django import forms
+from django.conf import settings
 from collections.abc import Mapping
 from decimal import Decimal
 from django.contrib.auth.password_validation import validate_password
@@ -230,25 +231,63 @@ def resource_form_class(resource):
 
 
 class CropLightingScheduleForm(OperationalModelForm):
-    days_of_week = forms.TypedMultipleChoiceField(
-        label="Dias da semana",
-        choices=tuple(enumerate(("Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"))),
-        coerce=int,
-        widget=forms.CheckboxSelectMultiple,
+    duration_hours = forms.DecimalField(
+        label="Horas de luz por dia", min_value=1, max_value=24,
+        max_digits=4, decimal_places=1,
+        widget=forms.NumberInput(attrs={"min": "1", "max": "24", "step": "0.5"}),
+        help_text="Informe uma duração entre 1 e 24 horas.",
     )
 
     class Meta:
         model = CropLightingSchedule
-        fields = ("crop", "name", "timezone", "days_of_week", "start_time", "end_time", "enabled")
-        widgets = {
-            "start_time": forms.TimeInput(attrs={"type": "time"}),
-            "end_time": forms.TimeInput(attrs={"type": "time"}),
-        }
+        fields = ("crop", "start_time", "duration_hours", "enabled")
+        widgets = {"start_time": forms.TimeInput(attrs={"type": "time"})}
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.fields["start_time"].label = "Horário de início"
+        self.fields["crop"].label = "Espécie"
+        self.fields["crop"].queryset = Crop.objects.filter(code__in=("alface", "tomilho", "coentro")).order_by("common_name")
+        self.fields["start_time"].label = "Horário de início da iluminação"
         self.fields["enabled"].label = "Ativo"
+        if self.instance and self.instance.pk and self.instance.start_time and self.instance.end_time:
+            start = self.instance.start_time.hour * 60 + self.instance.start_time.minute
+            end = self.instance.end_time.hour * 60 + self.instance.end_time.minute
+            self.initial.setdefault("duration_hours", ((end - start) % 1440 or 1440) / 60)
+        elif self.instance and self.instance.crop_id and self.instance.crop.light_hours:
+            self.initial.setdefault("duration_hours", self.instance.crop.light_hours)
+        else:
+            self.initial.setdefault("duration_hours", 12)
+
+    def save(self, commit=True):
+        from datetime import datetime, timedelta
+
+        schedule = super().save(commit=False)
+        start = datetime.combine(timezone.localdate(), self.cleaned_data["start_time"])
+        minutes = int(self.cleaned_data["duration_hours"] * 60)
+        schedule.end_time = (start + timedelta(minutes=minutes)).time()
+        schedule.name = "Iluminação recomendada"
+        schedule.days_of_week = list(range(7))
+        schedule.timezone = schedule.timezone or settings.TIME_ZONE
+        if commit:
+            schedule.save()
+            if schedule.crop.light_hours != self.cleaned_data["duration_hours"]:
+                schedule.crop.light_hours = self.cleaned_data["duration_hours"]
+                schedule.crop.save(update_fields=["light_hours", "updated_at"])
+        return schedule
+
+    def clean(self):
+        from datetime import datetime, timedelta
+
+        cleaned = super().clean()
+        start_time = cleaned.get("start_time")
+        duration = cleaned.get("duration_hours")
+        if start_time is not None and duration is not None:
+            start = datetime.combine(timezone.localdate(), start_time)
+            self.instance.end_time = (start + timedelta(minutes=int(duration * 60))).time()
+        self.instance.name = "Iluminação recomendada"
+        self.instance.days_of_week = list(range(7))
+        self.instance.timezone = self.instance.timezone or settings.TIME_ZONE
+        return cleaned
 
 
 class DeviceForm(OperationalModelForm):
