@@ -18,6 +18,7 @@
 
 #include <WiFiManager.h>
 #include <Adafruit_BMP280.h>
+#include <Ticker.h>
 #include <time.h>
 
 
@@ -89,7 +90,7 @@ constexpr bool PUMP_RELAY_ACTIVE_LOW = true;
 constexpr bool LAMP_RELAY_ACTIVE_LOW = true;
 
 constexpr char FIRMWARE_VERSION[] =
-    "horta-esp8266-1.3.3-actuator-isolation";
+    "horta-esp8266-1.3.4-pump-safety";
 
 // ============================================================
 // SENSOR / ESTADO
@@ -100,6 +101,7 @@ Adafruit_BMP280 bmp;
 bool bmpReady = false;
 bool pumpOn = false;
 bool lampOn = false;
+bool actuatorStateDirty = true;
 
 // NOVO: valor bruto do sensor de umidade
 int soilMoistureRaw = 0;
@@ -114,6 +116,8 @@ uint32_t lastConfigPollAt = 0;
 
 uint32_t pumpStopAt = 0;
 uint32_t lampStopAt = 0;
+Ticker pumpSafetyTimer;
+volatile bool pumpSafetyCutoffFired = false;
 
 String cachedConfiguration = "{}";
 String lastIrrigationBucket;
@@ -285,6 +289,13 @@ bool readRelayState(
 
 void setPump(bool on) {
 
+  const bool previousState = pumpOn;
+
+  if (!on) {
+    pumpSafetyTimer.detach();
+    pumpStopAt = 0;
+  }
+
   writeRelay(
       PUMP_RELAY_PIN,
       on,
@@ -297,6 +308,8 @@ void setPump(bool on) {
           PUMP_RELAY_ACTIVE_LOW
       );
 
+  if (previousState != pumpOn) actuatorStateDirty = true;
+
   Serial.print(
       F("Bomba: ")
   );
@@ -306,6 +319,22 @@ void setPump(bool on) {
           ? F("LIGADA")
           : F("DESLIGADA")
   );
+}
+
+// Corte de seguranca independente do loop e das operacoes HTTP. O callback
+// apenas coloca D5 no nivel inativo; logs e sincronizacao de estado ficam para
+// o loop, pois callbacks do Ticker nao devem executar operacoes bloqueantes.
+void IRAM_ATTR forcePumpOffFromTimer() {
+  digitalWrite(PUMP_RELAY_PIN, PUMP_RELAY_ACTIVE_LOW ? HIGH : LOW);
+  pumpSafetyCutoffFired = true;
+}
+
+void armPumpSafetyTimer(uint32_t durationSeconds) {
+  durationSeconds = constrain(durationSeconds, 1UL, 300UL);
+  pumpSafetyTimer.detach();
+  pumpSafetyCutoffFired = false;
+  pumpStopAt = millis() + durationSeconds * 1000UL;
+  pumpSafetyTimer.once_ms(durationSeconds * 1000UL, forcePumpOffFromTimer);
 }
 
 uint8_t getLightRelayElectricalLevel(bool on) {
@@ -1145,6 +1174,8 @@ void sendTelemetry() {
         status
     );
 
+    if (status >= 200 && status < 300) actuatorStateDirty = false;
+
     if (
         status
         == HTTP_CODE_BAD_REQUEST
@@ -1541,27 +1572,19 @@ void pollCommands() {
                 300UL
             );
 
-        pumpStopAt =
-            millis()
-            +
-            durationSeconds
-            * 1000UL;
+        armPumpSafetyTimer(durationSeconds);
 
       } else if (
           mode == "safe_preset"
       ) {
 
-        pumpStopAt =
-            millis()
-            +
-            SAFE_PUMP_DURATION_MS;
+        armPumpSafetyTimer(SAFE_PUMP_DURATION_MS / 1000UL);
 
       } else {
 
-        // Ligada manualmente sem temporizador.
-        // Permanecera ligada ate receber comando OFF.
-        pumpStopAt =
-            0;
+        // Toda ativacao da bomba possui limite local, mesmo se um cliente
+        // antigo omitir a duracao no comando.
+        armPumpSafetyTimer(SAFE_PUMP_DURATION_MS / 1000UL);
       }
 
       const String pumpDetail = on ? "bomba ligada" : "bomba desligada";
@@ -2223,11 +2246,7 @@ void runOfflineAutomation() {
         true
     );
 
-    pumpStopAt =
-        millis()
-        +
-        duration
-        * 1000UL;
+    armPumpSafetyTimer(duration);
 
     lastIrrigationBucket =
         bucket;
@@ -2497,7 +2516,7 @@ void loop() {
   // ==========================================================
 
   if (
-      pumpStopAt
+      (pumpSafetyCutoffFired || pumpStopAt)
       &&
       static_cast<int32_t>(
           millis()
@@ -2510,8 +2529,7 @@ void loop() {
         false
     );
 
-    pumpStopAt =
-        0;
+    pumpSafetyCutoffFired = false;
 
     Serial.println(
         F(
@@ -2599,6 +2617,8 @@ void loop() {
   // ==========================================================
 
   if (
+      actuatorStateDirty
+      ||
       !lastTelemetryAt
       ||
       now

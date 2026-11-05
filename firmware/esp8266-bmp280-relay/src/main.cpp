@@ -8,6 +8,7 @@
 #include <LittleFS.h>
 #include <WiFiManager.h>
 #include <Adafruit_BMP280.h>
+#include <Ticker.h>
 #include <time.h>
 
 #include "device_config.h"
@@ -28,7 +29,7 @@ constexpr uint8_t RELAY_ON = LOW;
 constexpr uint8_t RELAY_OFF = HIGH;
 
 constexpr char FIRMWARE_VERSION[] =
-    "horta-esp8266-1.3.1-actuator-isolation";
+    "horta-esp8266-1.3.4-pump-safety";
 
 // ============================================================
 // SENSOR / ESTADO
@@ -52,6 +53,26 @@ uint32_t lastWifiAttemptAt = 0;
 uint32_t lastConfigPollAt = 0;
 
 uint32_t pumpStopAt = 0;
+Ticker pumpSafetyTimer;
+volatile bool pumpSafetyCutoffFired = false;
+
+constexpr uint8_t EXECUTED_COMMAND_CACHE_SIZE = 8;
+String executedCommandIds[EXECUTED_COMMAND_CACHE_SIZE];
+uint8_t executedCommandCursor = 0;
+
+bool wasCommandExecuted(const String& id) {
+  if (id.isEmpty()) return false;
+  for (uint8_t index = 0; index < EXECUTED_COMMAND_CACHE_SIZE; ++index) {
+    if (executedCommandIds[index] == id) return true;
+  }
+  return false;
+}
+
+void rememberExecutedCommand(const String& id) {
+  if (id.isEmpty()) return;
+  executedCommandIds[executedCommandCursor] = id;
+  executedCommandCursor = (executedCommandCursor + 1) % EXECUTED_COMMAND_CACHE_SIZE;
+}
 
 String cachedConfiguration = "{}";
 String lastIrrigationBucket;
@@ -103,9 +124,26 @@ bool readRelayState(uint8_t pin, bool activeLow) {
 }
 
 void setPumpState(bool on) {
+  if (!on) {
+    pumpSafetyTimer.detach();
+    pumpStopAt = 0;
+  }
   if (pumpRelayOn != on) actuatorStateDirty = true;
   pumpRelayOn = on;
   digitalWrite(PUMP_RELAY_PIN, relayLevel(on, PUMP_RELAY_ACTIVE_LOW));
+}
+
+void IRAM_ATTR forcePumpOffFromTimer() {
+  digitalWrite(PUMP_RELAY_PIN, PUMP_RELAY_ACTIVE_LOW ? HIGH : LOW);
+  pumpSafetyCutoffFired = true;
+}
+
+void armPumpSafetyTimer(uint32_t durationSeconds) {
+  durationSeconds = constrain(durationSeconds, 1UL, 300UL);
+  pumpSafetyTimer.detach();
+  pumpSafetyCutoffFired = false;
+  pumpStopAt = millis() + durationSeconds * 1000UL;
+  pumpSafetyTimer.once_ms(durationSeconds * 1000UL, forcePumpOffFromTimer);
 }
 
 void setLightState(bool on) {
@@ -718,6 +756,11 @@ void pollCommands() {
     String type =
         command["type"] | "";
 
+    if (wasCommandExecuted(id)) {
+      acknowledge(id, true, "comando ja executado", channel == "pump" ? pumpRelayOn : lightRelayOn);
+      continue;
+    }
+
 
     if (
         channel == "pump" &&
@@ -729,11 +772,10 @@ void pollCommands() {
           command["payload"]["on"]
               .as<bool>();
 
-      setPumpState(on);
-
-
       uint32_t durationSeconds = command["payload"]["duration_seconds"] | (SAFE_PUMP_DURATION_MS / 1000UL);
-      pumpStopAt = on ? millis() + constrain(durationSeconds, 1UL, 300UL) * 1000UL : 0;
+      setPumpState(on);
+      if (on) armPumpSafetyTimer(durationSeconds);
+      rememberExecutedCommand(id);
 
 
       acknowledge(
@@ -750,6 +792,7 @@ void pollCommands() {
         command["payload"]["on"].is<bool>()
     ) {
       setLightState(command["payload"]["on"].as<bool>());
+      rememberExecutedCommand(id);
       acknowledge(id, true, "iluminacao atualizada", lightRelayOn);
     }
     else {
@@ -1031,7 +1074,7 @@ void runOfflineAutomation() {
       if ((schedule["enabled"] | true) && validDay && schedule["time"].as<String>() == current && lastIrrigationBucket != bucket) {
         uint32_t duration = constrain(schedule["duration_seconds"] | 10UL, 1UL, 300UL);
         setPumpState(true);
-        pumpStopAt = millis() + duration * 1000UL;
+        armPumpSafetyTimer(duration);
         lastIrrigationBucket = bucket;
         started = true;
         break;
@@ -1042,7 +1085,7 @@ void runOfflineAutomation() {
       if (value.as<String>() == current && lastIrrigationBucket != bucket) {
         uint32_t duration = constrain(irrigation["duration_seconds"] | 10UL, 1UL, 300UL);
         setPumpState(true);
-        pumpStopAt = millis() + duration * 1000UL;
+        armPumpSafetyTimer(duration);
         lastIrrigationBucket = bucket;
         break;
       }
@@ -1238,7 +1281,7 @@ void loop() {
   // ==========================================================
 
   if (
-      pumpStopAt &&
+      (pumpSafetyCutoffFired || pumpStopAt) &&
       static_cast<int32_t>(
           millis() - pumpStopAt
       ) >= 0
@@ -1246,7 +1289,7 @@ void loop() {
 
     setPumpState(false);
 
-    pumpStopAt = 0;
+    pumpSafetyCutoffFired = false;
 
     Serial.println(
         F(

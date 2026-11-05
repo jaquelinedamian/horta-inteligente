@@ -131,6 +131,18 @@ class ProductSimplificationTests(TestCase):
         self.assertNotEqual(first.id, second.id)
         self.assertEqual(second.payload["duration_seconds"], 30)
 
+    def test_safe_irrigation_durations_are_sent_unchanged(self):
+        for duration in (5, 10, 20):
+            with self.subTest(duration=duration):
+                command = queue_actuator_command(
+                    user=self.owner, channel=self.pump, action="irrigate",
+                    duration_seconds=duration,
+                )
+                self.assertTrue(command.payload["on"])
+                self.assertEqual(command.payload["duration_seconds"], duration)
+                command.status = DeviceCommand.Status.SUCCEEDED
+                command.save(update_fields=["status", "updated_at"])
+
     def test_expired_delivered_irrigation_does_not_block_new_command(self):
         old = DeviceCommand.objects.create(
             device=self.device, channel=self.pump, command_type="set_state",

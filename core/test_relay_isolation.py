@@ -20,6 +20,10 @@ class RelayFirmwareIsolationTests(TestCase):
             Path(__file__).resolve().parents[1]
             / "firmware" / "esp8266-bmp280-relay" / "src" / "main.cpp"
         ).read_text(encoding="utf-8")
+        cls.local_firmware = (
+            Path(__file__).resolve().parents[1]
+            / "firmware" / "horta_inteligente_local" / "horta_inteligente_local.ino"
+        ).read_text(encoding="utf-8")
 
     def test_relay_pins_and_active_low_are_explicit(self):
         for declaration in (
@@ -55,6 +59,27 @@ class RelayFirmwareIsolationTests(TestCase):
         timeout = self.firmware[self.firmware.index("DESLIGAMENTO DE SEGURANCA DA BOMBA") : self.firmware.index("runOfflineAutomation();")]
         self.assertIn("setPumpState(false)", timeout)
         self.assertNotIn("setLightState", timeout)
+
+    def test_pump_has_async_cutoff_and_duplicate_protection(self):
+        for name, firmware in (("platformio", self.firmware), ("arduino", self.local_firmware)):
+            with self.subTest(firmware=name):
+                self.assertIn("#include <Ticker.h>", firmware)
+                self.assertIn("forcePumpOffFromTimer", firmware)
+                self.assertIn("armPumpSafetyTimer", firmware)
+                self.assertIn("pumpSafetyTimer.once_ms", firmware)
+                self.assertIn("PUMP_RELAY_ACTIVE_LOW ? HIGH : LOW", firmware)
+                self.assertIn("EXECUTED_COMMAND_CACHE_SIZE", firmware)
+
+    def test_every_pump_start_is_locally_time_limited(self):
+        pump_commands = self.local_firmware[
+            self.local_firmware.index("// BOMBA", self.local_firmware.index("void pollCommands()")):
+            self.local_firmware.index("// LAMPADA", self.local_firmware.index("void pollCommands()"))
+        ]
+        self.assertNotIn("Ligada manualmente sem temporizador", pump_commands)
+        self.assertIn("armPumpSafetyTimer(durationSeconds)", self.local_firmware)
+        self.assertIn("armPumpSafetyTimer(duration)", self.local_firmware)
+        self.assertIn("armPumpSafetyTimer(durationSeconds)", self.firmware)
+        self.assertIn("armPumpSafetyTimer(duration)", self.firmware)
 
 
 class RelayChannelAvailabilityTests(TestCase):
