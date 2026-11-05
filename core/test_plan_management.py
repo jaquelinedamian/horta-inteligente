@@ -13,7 +13,7 @@ from core.plan_forms import PlanAdminForm
 from subscriptions.models import Plan, PlanEntitlement, PlanVersion, Subscription
 from accounts.models import Organization
 from gardens.models import GardenModel
-from subscriptions.selectors import plan_publication_diagnostics
+from subscriptions.selectors import get_plan_price_state, plan_publication_diagnostics
 from subscriptions.selectors import get_current_plan_version
 
 
@@ -151,6 +151,52 @@ class PlanManagementTests(TestCase):
         form.save(); self.plan.refresh_from_db()
         self.assertFalse(self.plan.is_featured)
         self.assertTrue(other.is_featured)
+
+    def test_future_price_is_reported_as_scheduled_and_keeps_current_until_then(self):
+        future = timezone.now() + timedelta(days=5)
+        self.client.force_login(self.admin)
+        response = self.client.post(reverse("ops-plan-price-update", args=[self.plan.pk]), {
+            "monthly_price": "180.00", "installation_fee": "90.00", "effective_from": future.strftime("%Y-%m-%dT%H:%M"),
+        })
+        self.assertEqual(response.status_code, 302)
+        state = get_plan_price_state(self.plan)
+        self.assertEqual(state["status"], "current")
+        self.assertEqual(state["current"].pk, self.version.pk)
+        self.assertEqual(state["scheduled"].price_cents, 18000)
+        self.version.refresh_from_db()
+        self.assertAlmostEqual(self.version.retired_at, state["scheduled"].effective_from, delta=timedelta(minutes=1))
+
+    def test_quick_price_update_creates_no_duplicate_for_same_value(self):
+        self.client.force_login(self.admin)
+        payload = {"monthly_price": "150.00", "installation_fee": "100.00", "apply_immediately": "on"}
+        self.client.post(reverse("ops-plan-price-update", args=[self.plan.pk]), payload)
+        count = self.plan.versions.count()
+        self.client.post(reverse("ops-plan-price-update", args=[self.plan.pk]), payload)
+        self.assertEqual(self.plan.versions.count(), count)
+        self.assertEqual(get_plan_price_state(self.plan)["current"].price_cents, 15000)
+
+    def test_publish_valid_plan_and_unpublish_without_touching_subscription(self):
+        model = GardenModel.objects.create(name="Modelo válido", code="modelo-valido", capacity=3, reservoir_liters=5, height_cm=65)
+        self.plan.garden_model = model; self.plan.description = "Plano comercial"; self.plan.is_public = False; self.plan.save()
+        organization = Organization.objects.create(name="Contrato", slug="contrato-publicacao")
+        subscription = Subscription.objects.create(organization=organization, plan_version=self.version, contracted_price_cents=10000, status=Subscription.Status.ACTIVE, current_period_start=timezone.now(), current_period_end=timezone.now() + timedelta(days=30))
+        self.client.force_login(self.admin)
+        self.client.post(reverse("ops-plan-publish", args=[self.plan.pk]), {"action": "publish"})
+        self.plan.refresh_from_db(); self.assertTrue(self.plan.is_public); self.assertContains(self.client.get(reverse("plans")), self.plan.name)
+        self.client.post(reverse("ops-plan-publish", args=[self.plan.pk]), {"action": "unpublish"})
+        self.plan.refresh_from_db(); subscription.refresh_from_db()
+        self.assertFalse(self.plan.is_public)
+        self.assertEqual(subscription.plan_version_id, self.version.pk)
+        response = self.client.get(reverse("plans"))
+        self.assertEqual(list(response.context["plans"]), [])
+
+    def test_publish_is_blocked_with_clear_pending_requirements(self):
+        self.plan.is_public = False; self.plan.description = ""; self.plan.short_copy = ""; self.plan.commercial_title = ""; self.plan.save()
+        self.client.force_login(self.admin)
+        response = self.client.post(reverse("ops-plan-publish", args=[self.plan.pk]), {"action": "publish"}, follow=True)
+        self.plan.refresh_from_db()
+        self.assertFalse(self.plan.is_public)
+        self.assertContains(response, "Associe um modelo de horta")
 
     def test_deactivation_keeps_versions(self):
         self.client.force_login(self.admin)

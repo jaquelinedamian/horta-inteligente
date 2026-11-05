@@ -5,6 +5,7 @@ from django import forms
 from django.forms import inlineformset_factory
 from django.utils import timezone
 from django.db import transaction
+from django.db.models import Max, Q
 
 from subscriptions.models import Plan, PlanEntitlement, PlanVersion
 
@@ -12,7 +13,7 @@ from subscriptions.models import Plan, PlanEntitlement, PlanVersion
 class PlanAdminForm(forms.ModelForm):
     monthly_price = forms.DecimalField(label="Mensalidade (R$)", min_value=0.01, max_digits=10, decimal_places=2)
     installation_fee = forms.DecimalField(label="Taxa de instalação (R$)", min_value=0, max_digits=10, decimal_places=2, required=False)
-    effective_from = forms.DateTimeField(label="Início da vigência", required=False, widget=forms.DateTimeInput(attrs={"type": "datetime-local"}))
+    effective_from = forms.DateTimeField(label="Início da vigência", required=False, input_formats=["%Y-%m-%dT%H:%M"], widget=forms.DateTimeInput(format="%Y-%m-%dT%H:%M", attrs={"type": "datetime-local"}))
     image = forms.ImageField(label="Imagem do plano", required=False, help_text="JPG, PNG ou WebP; máximo de 5 MB.")
     remove_image = forms.BooleanField(label="Remover imagem atual", required=False)
 
@@ -87,15 +88,68 @@ class PlanAdminForm(forms.ModelForm):
 
     def create_version(self, plan, source=None):
         effective = self.cleaned_data.get("effective_from") or timezone.now()
-        if source:
-            source.retired_at = effective
-            source.save(update_fields=["retired_at", "updated_at"])
+        previous = plan.versions.filter(effective_from__lte=effective).filter(Q(retired_at__isnull=True) | Q(retired_at__gt=effective)).order_by("-effective_from", "-version").first()
+        if previous:
+            previous.retired_at = effective
+            previous.save(update_fields=["retired_at", "updated_at"])
+        next_start = plan.versions.filter(effective_from__gt=effective).order_by("effective_from").values_list("effective_from", flat=True).first()
         version = (plan.versions.order_by("-version").values_list("version", flat=True).first() or 0) + 1
         return PlanVersion.objects.create(
             plan=plan, version=version, price_cents=int(self.cleaned_data["monthly_price"] * 100),
-            effective_from=effective, installation_fee_cents=plan.installation_fee_cents,
+            effective_from=effective, retired_at=next_start, installation_fee_cents=plan.installation_fee_cents,
             commercial_snapshot={"name": plan.name, "title": plan.commercial_title, "short_copy": plan.short_copy},
         )
+
+
+class PlanPriceForm(forms.Form):
+    monthly_price = forms.DecimalField(label="Novo preço mensal (R$)", min_value=0.01, max_digits=10, decimal_places=2)
+    installation_fee = forms.DecimalField(label="Taxa de instalação (R$)", min_value=0, max_digits=10, decimal_places=2, required=False)
+    effective_from = forms.DateTimeField(label="Início da vigência", required=False, input_formats=["%Y-%m-%dT%H:%M"], widget=forms.DateTimeInput(format="%Y-%m-%dT%H:%M", attrs={"type": "datetime-local"}))
+    apply_immediately = forms.BooleanField(label="Aplicar imediatamente", required=False, initial=True)
+
+    def clean(self):
+        cleaned = super().clean()
+        if not cleaned.get("apply_immediately") and not cleaned.get("effective_from"):
+            self.add_error("effective_from", "Informe quando o novo preço começará a valer.")
+        if cleaned.get("effective_from") and cleaned["effective_from"] < timezone.now() and not cleaned.get("apply_immediately"):
+            self.add_error("effective_from", "Para agendar, escolha uma data futura.")
+        return cleaned
+
+
+@transaction.atomic
+def save_plan_price(plan, cleaned_data):
+    effective = timezone.now() if cleaned_data.get("apply_immediately") else cleaned_data["effective_from"]
+    price_cents = int(cleaned_data["monthly_price"] * 100)
+    fee_cents = int((cleaned_data.get("installation_fee") or 0) * 100)
+    current = plan.versions.filter(effective_from__lte=effective).filter(
+        Q(retired_at__isnull=True) | Q(retired_at__gt=effective)
+    ).order_by("-effective_from", "-version").first()
+    if current and current.price_cents == price_cents and current.installation_fee_cents == fee_cents:
+        return current, False
+    same_start = plan.versions.filter(effective_from=effective, subscriptions__isnull=True, checkout_requests__isnull=True).order_by("-version").first()
+    if same_start:
+        same_start.price_cents = price_cents
+        same_start.installation_fee_cents = fee_cents
+        same_start.save(update_fields=["price_cents", "installation_fee_cents", "updated_at"])
+        version = same_start
+        created = False
+    else:
+        next_start = plan.versions.filter(effective_from__gt=effective).order_by("effective_from").values_list("effective_from", flat=True).first()
+        version = PlanVersion.objects.create(
+            plan=plan, version=(plan.versions.aggregate(max_version=Max("version"))["max_version"] or 0) + 1,
+            price_cents=price_cents, installation_fee_cents=fee_cents, effective_from=effective,
+            retired_at=next_start, commercial_snapshot={"name": plan.name, "title": plan.commercial_title, "short_copy": plan.short_copy},
+        )
+        created = True
+    previous = plan.versions.filter(effective_from__lt=effective).filter(
+        Q(retired_at__isnull=True) | Q(retired_at__gt=effective)
+    ).exclude(pk=version.pk).order_by("-effective_from", "-version").first()
+    if previous:
+        previous.retired_at = effective
+        previous.save(update_fields=["retired_at", "updated_at"])
+    plan.installation_fee_cents = fee_cents
+    plan.save(update_fields=["installation_fee_cents", "updated_at"])
+    return version, created
 
 
 class PlanEntitlementForm(forms.ModelForm):

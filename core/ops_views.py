@@ -38,7 +38,7 @@ from gardens.services import install_module
 from .guided_flows import PRIMARY_ACTIONS, get_flow
 from .workflow_services import create_customer, run_guided_workflow
 from .permissions import admin_required, operations_required
-from .plan_forms import PlanAdminForm, PlanEntitlementFormSet
+from .plan_forms import PlanAdminForm, PlanEntitlementFormSet, PlanPriceForm, save_plan_price
 from .automation import automation_panel_context
 from .deletion_services import (
     DELETE_POLICIES, DeletionBlocked, can_deactivate, customer_deletion_summary,
@@ -81,10 +81,13 @@ def plan_management(request):
         diagnostic = plan_publication_diagnostics(plan)
         plan.publication_issues = diagnostic["issues"]
         plan.is_published = diagnostic["is_published"]
+        plan.publication_state = diagnostic["publication_state"]
+        plan.price_state = diagnostic["price"]
+        plan.displayed_version = diagnostic["price"]["displayed"]
         plan.monthly_visits = None
-        if diagnostic["version"]:
-            plan.monthly_visits = diagnostic["version"].entitlements.filter(benefit_type="maintenance-visits", is_included=True).first()
-        rows.append((plan, diagnostic["version"]))
+        if diagnostic["price"]["displayed"]:
+            plan.monthly_visits = diagnostic["price"]["displayed"].entitlements.filter(benefit_type="maintenance-visits", is_included=True).first()
+        rows.append((plan, diagnostic["price"]["displayed"]))
     subscriptions = Subscription.objects.select_related("organization", "plan_version__plan").order_by("-created_at")[:100]
     return render(request, "admin_portal/plan_management.html", {"plan_rows": rows, "subscriptions": subscriptions})
 
@@ -125,7 +128,8 @@ def plan_edit(request, plan_id):
 def plan_detail_admin(request, plan_id):
     plan = get_object_or_404(Plan.objects.select_related("garden_model"), pk=plan_id)
     versions = plan.versions.prefetch_related("entitlements").order_by("-version")
-    return render(request, "admin_portal/plan_detail.html", {"plan": plan, "versions": versions, "current": versions.filter(retired_at__isnull=True).first()})
+    diagnostic = plan_publication_diagnostics(plan)
+    return render(request, "admin_portal/plan_detail.html", {"plan": plan, "versions": versions, "current": diagnostic["price"]["current"], "scheduled": diagnostic["price"]["scheduled"]})
 
 
 @admin_required
@@ -135,6 +139,66 @@ def plan_toggle(request, plan_id):
     plan.is_active = not plan.is_active
     plan.save(update_fields=["is_active", "updated_at"])
     messages.success(request, "Plano ativado." if plan.is_active else "Plano desativado para novas contratações; assinaturas existentes foram mantidas.")
+    return redirect("ops-plan-management")
+
+
+def _publication_requirements(plan):
+    problems = []
+    diagnostic = plan_publication_diagnostics(plan)
+    if not plan.name or not plan.code:
+        problems.append("Defina o nome e o código do plano.")
+    if not plan.garden_model_id:
+        problems.append("Associe um modelo de horta.")
+    else:
+        model = plan.garden_model
+        if not model.capacity:
+            problems.append("Defina a capacidade de mudas do modelo.")
+        if not model.reservoir_liters:
+            problems.append("Defina a capacidade do reservatório.")
+        if not model.height_cm:
+            problems.append("Defina a altura do modelo.")
+    if not (plan.commercial_title or plan.short_copy or plan.description):
+        problems.append("Preencha os dados comerciais do plano.")
+    price = diagnostic["price"]
+    if not price["current"] and not price["scheduled"]:
+        problems.append("Defina uma versão de preço vigente ou agendada.")
+    return problems
+
+
+@admin_required
+@require_POST
+def plan_publish(request, plan_id):
+    plan = get_object_or_404(Plan.objects.select_related("garden_model"), pk=plan_id)
+    action = request.POST.get("action", "publish")
+    if action == "unpublish":
+        plan.is_public = False
+        plan.save(update_fields=["is_public", "updated_at"])
+        messages.success(request, f"{plan.name} deixou de ser oferecido para novas contratações.")
+        return redirect("ops-plan-management")
+    problems = _publication_requirements(plan)
+    if problems:
+        messages.error(request, f"Não foi possível publicar {plan.name}: " + " ".join(problems))
+        return redirect("ops-plan-management")
+    plan.is_active = True
+    plan.is_public = True
+    plan.save(update_fields=["is_active", "is_public", "updated_at"])
+    diagnostic = plan_publication_diagnostics(plan)
+    label = "agendado" if diagnostic["publication_state"] == "scheduled" else "publicado"
+    messages.success(request, f"{plan.name} foi {label} com sucesso.")
+    return redirect("ops-plan-management")
+
+
+@admin_required
+@require_POST
+def plan_price_update(request, plan_id):
+    plan = get_object_or_404(Plan, pk=plan_id)
+    form = PlanPriceForm(request.POST)
+    if not form.is_valid():
+        errors = " ".join(message for values in form.errors.values() for message in values)
+        messages.error(request, f"Não foi possível alterar o preço de {plan.name}: {errors}")
+        return redirect("ops-plan-management")
+    version, created = save_plan_price(plan, form.cleaned_data)
+    messages.success(request, f"Preço de {plan.name} salvo na versão {version.version}." if created else f"Preço de {plan.name} já estava configurado ou foi atualizado sem duplicação.")
     return redirect("ops-plan-management")
 
 
