@@ -73,6 +73,21 @@ class PlanManagementTests(TestCase):
         self.assertEqual(plan.versions.get().price_cents, 14990)
         self.assertEqual(plan.versions.get().entitlements.get().name, "Suporte técnico")
 
+    def test_create_plan_persists_physical_features_on_selected_model(self):
+        model = GardenModel.objects.create(name="Modelo de criacao", code="modelo-criacao", capacity=4)
+        self.client.force_login(self.admin)
+        payload = self._plan_payload(garden_model=str(model.pk), **{
+            "features-TOTAL_FORMS": "1", "features-INITIAL_FORMS": "0", "features-MIN_NUM_FORMS": "0", "features-MAX_NUM_FORMS": "1000",
+            "features-0-name": "Material", "features-0-value": "PLA/PETG", "features-0-unit": "",
+            "features-0-icon": "bi-box", "features-0-display_order": "0", "features-0-is_visible": "on",
+        })
+        response = self.client.post(reverse("ops-plan-create"), payload)
+        self.assertEqual(response.status_code, 302)
+        created_plan = Plan.objects.get(code="plano-visual")
+        self.assertEqual(created_plan.garden_model_id, model.pk)
+        persisted = GardenModelFeature.objects.get(garden_model_id=model.pk, name="Material")
+        self.assertEqual(persisted.value, "PLA/PETG")
+
     def test_image_upload_replace_and_remove(self):
         def uploaded(color):
             output = BytesIO(); Image.new("RGB", (32, 32), color).save(output, "PNG")
@@ -157,6 +172,7 @@ class PlanManagementTests(TestCase):
         untouched = GardenModelFeature.objects.create(garden_model=untouched_model, name="Peso", value="4,5", unit="kg")
         self.plan.garden_model = model
         self.plan.save(update_fields=["garden_model", "updated_at"])
+        shared_plan = Plan.objects.create(name="Plano compartilhado", code="plano-compartilhado", garden_model=model)
         self.client.force_login(self.admin)
         payload = self._plan_payload(
             name=self.plan.name, code=self.plan.code, garden_model=str(model.pk), monthly_price="100.00",
@@ -186,8 +202,38 @@ class PlanManagementTests(TestCase):
         self.assertEqual(response.status_code, 302)
         height.refresh_from_db(); untouched.refresh_from_db()
         self.assertEqual(height.value, "70")
+        self.assertEqual(shared_plan.garden_model.physical_features.get(name="Altura").value, "70")
         self.assertEqual(untouched.value, "4,5")
         self.assertContains(self.client.get(reverse("plans")), "70 cm")
+
+        reservoir_index = next(index for index, feature in enumerate(model.physical_features.order_by("display_order")) if feature.name == "ReservatÃ³rio")
+        payload[f"features-{reservoir_index}-DELETE"] = "on"
+        response = self.client.post(reverse("ops-plan-edit", args=[self.plan.pk]), payload)
+        self.assertEqual(response.status_code, 302)
+        self.assertFalse(GardenModelFeature.objects.filter(garden_model=model, name="ReservatÃ³rio").exists())
+        self.assertEqual(GardenModelFeature.objects.get(pk=height.pk).value, "70")
+
+    def test_invalid_physical_feature_does_not_partially_save_plan(self):
+        model = GardenModel.objects.create(name="Modelo validaÃ§Ã£o", code="modelo-validacao", capacity=4)
+        feature = GardenModelFeature.objects.create(garden_model=model, name="Altura", value="60", unit="cm", icon="bi-arrows-vertical")
+        self.plan.garden_model = model
+        self.plan.description = "DescriÃ§Ã£o original"
+        self.plan.save(update_fields=["garden_model", "description", "updated_at"])
+        self.client.force_login(self.admin)
+        payload = self._plan_payload(
+            name=self.plan.name, code=self.plan.code, description="NÃ£o deve salvar", garden_model=str(model.pk), monthly_price="100.00",
+            **{
+                "features-TOTAL_FORMS": "1", "features-INITIAL_FORMS": "1", "features-MIN_NUM_FORMS": "0", "features-MAX_NUM_FORMS": "1000",
+                "features-0-id": str(feature.pk), "features-0-garden_model": str(model.pk), "features-0-name": "Altura",
+                "features-0-value": "", "features-0-unit": "cm", "features-0-icon": "bi-arrows-vertical", "features-0-display_order": "0", "features-0-is_visible": "on",
+            },
+        )
+        response = self.client.post(reverse("ops-plan-edit", args=[self.plan.pk]), payload)
+        self.assertEqual(response.status_code, 200)
+        self.plan.refresh_from_db(); feature.refresh_from_db()
+        self.assertEqual(self.plan.description, "DescriÃ§Ã£o original")
+        self.assertEqual(feature.value, "60")
+        self.assertIn("value", response.context["feature_formset"].forms[0].errors)
 
     def test_only_one_plan_remains_featured(self):
         self.plan.is_featured = True; self.plan.save()

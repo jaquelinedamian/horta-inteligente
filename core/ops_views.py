@@ -49,6 +49,39 @@ from .deletion_services import (
 logger = logging.getLogger(__name__)
 
 
+def _save_garden_model_features(formset, garden_model, *, source):
+    submitted = formset.total_form_count()
+    created = updated = removed = valid = 0
+    for feature_form in formset.forms:
+        if not feature_form.cleaned_data:
+            continue
+        deleting = feature_form.cleaned_data.get("DELETE", False)
+        existed = not feature_form.instance._state.adding
+        if deleting and existed:
+            removed += 1
+        elif not deleting and feature_form.cleaned_data.get("name"):
+            valid += 1
+            if existed and feature_form.has_changed():
+                updated += 1
+            elif not existed:
+                created += 1
+    formset.save()
+    persisted = garden_model.physical_features.count()
+    transaction.on_commit(lambda: logger.info(
+        "garden_model_features_saved source=%s model_id=%s submitted=%s valid=%s created=%s updated=%s removed=%s persisted=%s transaction=committed",
+        source, garden_model.pk, submitted, valid, created, updated, removed, persisted,
+    ))
+    return persisted
+
+
+def _log_invalid_garden_model_features(formset, garden_model, *, source):
+    error_forms = sum(bool(form.errors) for form in formset.forms)
+    logger.warning(
+        "garden_model_features_invalid source=%s model_id=%s submitted=%s error_forms=%s non_form_errors=%s transaction=not_started",
+        source, getattr(garden_model, "pk", None), formset.total_form_count(), error_forms, len(formset.non_form_errors()),
+    )
+
+
 def _garden_model_preview_data():
     return list(GardenModel.objects.filter(is_active=True).values("id", "capacity", "reservoir_liters", "height_cm", "module_count"))
 
@@ -100,13 +133,16 @@ def plan_create(request):
     form_valid = form.is_valid() if request.method == "POST" else False
     selected_model = form.cleaned_data.get("garden_model") if form_valid else None
     feature_formset = GardenModelFeatureFormSet(request.POST or None, instance=selected_model, prefix="features") if selected_model else None
-    if request.method == "POST" and form_valid and formset.is_valid() and (feature_formset is None or feature_formset.is_valid()):
+    feature_formset_valid = feature_formset.is_valid() if request.method == "POST" and feature_formset is not None else True
+    if request.method == "POST" and feature_formset is not None and not feature_formset_valid:
+        _log_invalid_garden_model_features(feature_formset, selected_model, source="plan_create")
+    if request.method == "POST" and form_valid and formset.is_valid() and feature_formset_valid:
         plan = form.save(commit=False)
         plan.is_active, plan.is_public = True, False
         plan.save()
         form.save_image(plan)
         if feature_formset is not None:
-            feature_formset.save()
+            _save_garden_model_features(feature_formset, selected_model, source="plan_create")
         version = form.create_version(plan)
         _copy_entitlements(formset, version)
         messages.success(request, "Plano criado como rascunho. Revise os dados antes de publicar.")
@@ -124,11 +160,14 @@ def plan_edit(request, plan_id):
     form_valid = form.is_valid() if request.method == "POST" else False
     selected_model = form.cleaned_data.get("garden_model") if form_valid else plan.garden_model
     feature_formset = GardenModelFeatureFormSet(request.POST or None, instance=selected_model, prefix="features") if selected_model else None
-    if request.method == "POST" and form_valid and formset.is_valid() and (feature_formset is None or feature_formset.is_valid()):
+    feature_formset_valid = feature_formset.is_valid() if request.method == "POST" and feature_formset is not None else True
+    if request.method == "POST" and feature_formset is not None and not feature_formset_valid:
+        _log_invalid_garden_model_features(feature_formset, selected_model, source="plan_edit")
+    if request.method == "POST" and form_valid and formset.is_valid() and feature_formset_valid:
         plan = form.save()
         form.save_image(plan)
         if feature_formset is not None:
-            feature_formset.save()
+            _save_garden_model_features(feature_formset, selected_model, source="plan_edit")
         version = form.create_version(plan, current)
         _copy_entitlements(formset, version)
         messages.success(request, f"Alterações salvas na versão {version.version}; contratos anteriores foram preservados.")
