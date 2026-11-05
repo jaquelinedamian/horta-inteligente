@@ -12,6 +12,8 @@ from core.backoffice_forms import CommercialPlanForm
 from core.plan_forms import PlanAdminForm
 from subscriptions.models import Plan, PlanEntitlement, PlanVersion, Subscription
 from accounts.models import Organization
+from gardens.models import GardenModel
+from subscriptions.selectors import plan_publication_diagnostics
 from subscriptions.selectors import get_current_plan_version
 
 
@@ -117,6 +119,38 @@ class PlanManagementTests(TestCase):
             response = self.client.get(url)
             self.assertContains(response, "Plano Base")
             self.assertContains(response, "Visita mensal")
+
+    def test_numeric_code_opens_the_correct_eligible_plan(self):
+        self.plan.code = "02"; self.plan.save(update_fields=["code"])
+        response = self.client.get(reverse("plan-detail", args=["02"]))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Plano Base")
+        self.assertEqual(self.client.get(reverse("plan-detail", args=["99"])).status_code, 404)
+
+    def test_publication_diagnostics_explain_missing_version_and_model(self):
+        self.version.retired_at = timezone.now() - timedelta(minutes=1); self.version.save()
+        diagnostic = plan_publication_diagnostics(self.plan)
+        self.assertIn("Sem versão de preço vigente", diagnostic["issues"])
+        self.assertIn("Associe um modelo de horta", diagnostic["issues"])
+        self.assertFalse(diagnostic["is_published"])
+
+    def test_garden_model_values_are_reflected_publicly(self):
+        model = GardenModel.objects.create(name="Premium", code="premium-model", capacity=12, reservoir_liters=20, height_cm=260)
+        self.plan.garden_model = model; self.plan.save()
+        response = self.client.get(reverse("plans"))
+        self.assertContains(response, "12 mudas")
+        self.assertContains(response, "20")
+        self.assertContains(response, "260")
+
+    def test_only_one_plan_remains_featured(self):
+        self.plan.is_featured = True; self.plan.save()
+        other = Plan.objects.create(name="Outro", code="outro", is_active=True, is_public=True)
+        PlanVersion.objects.create(plan=other, version=1, price_cents=20000, effective_from=timezone.now())
+        form = PlanAdminForm({**self._plan_payload(), "name": other.name, "code": other.code, "is_featured": "on"}, instance=other)
+        self.assertTrue(form.is_valid(), form.errors)
+        form.save(); self.plan.refresh_from_db()
+        self.assertFalse(self.plan.is_featured)
+        self.assertTrue(other.is_featured)
 
     def test_deactivation_keeps_versions(self):
         self.client.force_login(self.admin)

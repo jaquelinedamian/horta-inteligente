@@ -24,12 +24,13 @@ from django.views.decorators.http import require_POST
 from accounts.models import Membership, Organization, User
 from crops.models import Crop, CropLightingSchedule, Cultivar, PlantingCycle
 from devices.models import Alert, Device, DeviceCredential, GardenPhoto
-from gardens.models import Garden, GardenModule, ModuleInstallation
+from gardens.models import Garden, GardenModel, GardenModule, ModuleInstallation
 from gardens.selectors import get_active_installations
 from gardens.configuration import effective_garden_configuration
 from devices.selectors import garden_snapshot
 from operations.models import InventoryItem, SupportTicket, Visit, WorkOrder
 from subscriptions.models import CheckoutRequest, Payment, Plan, PlanEntitlement, Subscription
+from subscriptions.selectors import plan_publication_diagnostics
 
 from .backoffice import get_resource
 from .backoffice_forms import ClientOnboardingForm, CustomerModuleForm, CustomerModuleInstallationForm, resource_form_class
@@ -48,14 +49,26 @@ from .deletion_services import (
 logger = logging.getLogger(__name__)
 
 
+def _garden_model_preview_data():
+    return list(GardenModel.objects.filter(is_active=True).values("id", "capacity", "reservoir_liters", "height_cm", "module_count"))
+
+
 def _copy_entitlements(formset, version):
     position = 0
     for item_form in formset.forms:
         if not item_form.cleaned_data or item_form.cleaned_data.get("DELETE") or not item_form.cleaned_data.get("name"):
             continue
-        data = {key: item_form.cleaned_data.get(key) for key in ("name", "icon", "description", "quantity", "unit", "display_order", "is_included", "is_featured")}
+        data = {key: item_form.cleaned_data.get(key) for key in ("benefit_type", "name", "icon", "description", "quantity", "unit", "display_order", "is_included", "is_featured")}
         data["display_order"] = data["display_order"] if data["display_order"] is not None else position
-        data["benefit_type"] = f"item-{position + 1}"
+        if not data["benefit_type"]:
+            searchable = f'{data.get("name", "")} {data.get("unit", "")}'.lower()
+            type_hints = (
+                ("visit", "maintenance-visits"), ("irriga", "automatic-irrigation"),
+                ("ilumina", "programmable-lighting"), ("câmera", "camera-monitoring"),
+                ("camera", "camera-monitoring"), ("sensor", "sensor-monitoring"),
+                ("plataforma", "platform-access"), ("suporte", "technical-support"),
+            )
+            data["benefit_type"] = next((kind for hint, kind in type_hints if hint in searchable), f"item-{position + 1}")
         PlanEntitlement.objects.create(plan_version=version, **data)
         position += 1
 
@@ -65,8 +78,13 @@ def plan_management(request):
     plans = Plan.objects.select_related("garden_model").prefetch_related("versions__entitlements").order_by("display_order", "name")
     rows = []
     for plan in plans:
-        current = plan.versions.filter(retired_at__isnull=True).order_by("-version").first()
-        rows.append((plan, current))
+        diagnostic = plan_publication_diagnostics(plan)
+        plan.publication_issues = diagnostic["issues"]
+        plan.is_published = diagnostic["is_published"]
+        plan.monthly_visits = None
+        if diagnostic["version"]:
+            plan.monthly_visits = diagnostic["version"].entitlements.filter(benefit_type="maintenance-visits", is_included=True).first()
+        rows.append((plan, diagnostic["version"]))
     subscriptions = Subscription.objects.select_related("organization", "plan_version__plan").order_by("-created_at")[:100]
     return render(request, "admin_portal/plan_management.html", {"plan_rows": rows, "subscriptions": subscriptions})
 
@@ -83,7 +101,7 @@ def plan_create(request):
         _copy_entitlements(formset, version)
         messages.success(request, "Plano criado e publicado na versão inicial.")
         return redirect("ops-plan-detail", plan_id=plan.pk)
-    return render(request, "admin_portal/plan_form.html", {"form": form, "formset": formset, "title": "Novo plano"})
+    return render(request, "admin_portal/plan_form.html", {"form": form, "formset": formset, "title": "Novo plano", "garden_model_data": _garden_model_preview_data()})
 
 
 @admin_required
@@ -100,7 +118,7 @@ def plan_edit(request, plan_id):
         _copy_entitlements(formset, version)
         messages.success(request, f"Alterações salvas na versão {version.version}; contratos anteriores foram preservados.")
         return redirect("ops-plan-detail", plan_id=plan.pk)
-    return render(request, "admin_portal/plan_form.html", {"form": form, "formset": formset, "title": f"Editar {plan.name}", "plan": plan})
+    return render(request, "admin_portal/plan_form.html", {"form": form, "formset": formset, "title": f"Editar {plan.name}", "plan": plan, "garden_model_data": _garden_model_preview_data()})
 
 
 @admin_required
@@ -131,6 +149,7 @@ def plan_duplicate(request, plan_id):
     source.code = f"{source.code}-copia-{timezone.now():%H%M%S}"
     source.is_public = False
     source.is_active = False
+    source.is_featured = False
     source.save()
     if current:
         duplicate = source.versions.create(version=1, price_cents=current.price_cents, effective_from=timezone.now(), installation_fee_cents=current.installation_fee_cents, commercial_snapshot=current.commercial_snapshot)

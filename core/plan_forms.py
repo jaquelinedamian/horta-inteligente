@@ -4,6 +4,7 @@ from PIL import Image, ImageOps
 from django import forms
 from django.forms import inlineformset_factory
 from django.utils import timezone
+from django.db import transaction
 
 from subscriptions.models import Plan, PlanEntitlement, PlanVersion
 
@@ -57,8 +58,11 @@ class PlanAdminForm(forms.ModelForm):
         plan = super().save(commit=False)
         plan.installation_fee_cents = int((self.cleaned_data.get("installation_fee") or 0) * 100)
         if commit:
-            plan.save()
-            self.save_m2m()
+            with transaction.atomic():
+                plan.save()
+                if plan.is_featured:
+                    Plan.objects.filter(is_featured=True).exclude(pk=plan.pk).update(is_featured=False, updated_at=timezone.now())
+                self.save_m2m()
         return plan
 
     def save_image(self, plan):
@@ -95,14 +99,25 @@ class PlanAdminForm(forms.ModelForm):
 
 
 class PlanEntitlementForm(forms.ModelForm):
+    BENEFIT_TYPES = (
+        ("maintenance-visits", "Visitas de manutenção"), ("automatic-irrigation", "Irrigação automática"),
+        ("programmable-lighting", "Iluminação programável"), ("sensor-monitoring", "Monitoramento por sensores"),
+        ("camera-monitoring", "Monitoramento por câmera"), ("platform-access", "Acesso à plataforma"),
+        ("technical-support", "Suporte técnico"), ("other", "Outro serviço"),
+    )
+    benefit_type = forms.ChoiceField(label="Tipo", choices=BENEFIT_TYPES, required=False)
+
     class Meta:
         model = PlanEntitlement
-        fields = ("name", "icon", "description", "quantity", "unit", "display_order", "is_included", "is_featured")
+        fields = ("benefit_type", "name", "icon", "description", "quantity", "unit", "display_order", "is_included", "is_featured")
         labels = {"name": "Benefício", "icon": "Ícone", "description": "Descrição", "quantity": "Quantidade", "unit": "Unidade", "display_order": "Ordem", "is_included": "Incluído", "is_featured": "Destaque"}
         widgets = {"description": forms.Textarea(attrs={"rows": 2}), "icon": forms.TextInput(attrs={"placeholder": "Ex.: bi-tools"})}
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        current_type = getattr(self.instance, "benefit_type", "")
+        if current_type and current_type not in dict(self.BENEFIT_TYPES):
+            self.fields["benefit_type"].choices = (*self.BENEFIT_TYPES, (current_type, f"Outro serviço ({current_type})"))
         for field in self.fields.values():
             if not isinstance(field.widget, forms.CheckboxInput):
                 field.widget.attrs.setdefault("class", "form-control")

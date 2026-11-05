@@ -25,6 +25,25 @@ def get_current_plan_version(plan, at=None):
     return plan.versions.filter(effective_from__lte=at).filter(Q(retired_at__isnull=True) | Q(retired_at__gt=at)).order_by("-version", "-effective_from").first()
 
 
+def plan_publication_diagnostics(plan, at=None):
+    """Explain why a plan is or is not available without changing its data."""
+    at = at or timezone.now()
+    issues = []
+    if not plan.is_active:
+        issues.append("Plano inativo")
+    if not plan.is_public:
+        issues.append("Plano oculto no site")
+    version = get_current_plan_version(plan, at)
+    if not version:
+        issues.append("Sem versão de preço vigente")
+    elif version.price_cents <= 0:
+        issues.append("Preço vigente inválido")
+    if not plan.garden_model_id:
+        issues.append("Associe um modelo de horta")
+    eligible = plan.is_active and plan.is_public and version is not None and version.price_cents > 0
+    return {"version": version, "issues": issues, "is_published": eligible}
+
+
 def get_customer_subscription(organization):
     return Subscription.objects.filter(
         organization=organization,

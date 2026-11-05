@@ -75,7 +75,9 @@ def plans(request):
         for benefit in version.entitlements.all():
             if benefit.name not in benefit_names:
                 benefit_names.append(benefit.name)
-        version.monthly_visits = next((item for item in version.entitlements.all() if item.unit.lower() in {"visita/mês", "visitas/mês"}), None)
+        version.monthly_visits = next((item for item in version.entitlements.all() if item.benefit_type == "maintenance-visits"), None)
+        if not version.monthly_visits:
+            version.monthly_visits = next((item for item in version.entitlements.all() if item.unit.lower() in {"visita/mês", "visitas/mês"}), None)
     comparison_benefits = []
     for name in benefit_names:
         cells = []
