@@ -69,12 +69,44 @@ def public_page(request, page):
 
 
 def plans(request):
-    return render(request, "public/plans.html", {"plans": get_public_plans()})
+    public_plans = list(get_public_plans())
+    benefit_names = []
+    for version in public_plans:
+        for benefit in version.entitlements.all():
+            if benefit.name not in benefit_names:
+                benefit_names.append(benefit.name)
+        version.monthly_visits = next((item for item in version.entitlements.all() if item.unit.lower() in {"visita/mês", "visitas/mês"}), None)
+    comparison_benefits = []
+    for name in benefit_names:
+        cells = []
+        for version in public_plans:
+            benefit = next((item for item in version.entitlements.all() if item.name == name), None)
+            cells.append({"included": bool(benefit and benefit.is_included), "value": benefit})
+        comparison_benefits.append({"name": name, "cells": cells})
+    return render(request, "public/plans.html", {"plans": public_plans, "comparison_benefits": comparison_benefits})
 
 
 def plan_detail(request, code):
     version = get_object_or_404(get_public_plans(), plan__code=code)
     return render(request, "public/plan_detail.html", {"version": version, "plan": version.plan})
+
+
+def plan_image(request, plan_id):
+    plan = get_object_or_404(Plan.objects.only("image_data", "image_content_type", "updated_at"), pk=plan_id)
+    if not plan.image_data:
+        raise Http404
+    response = HttpResponse(bytes(plan.image_data), content_type=plan.image_content_type or "image/webp")
+    response["Cache-Control"] = "public, max-age=86400"
+    response["ETag"] = f'"{plan.pk}-{int(plan.updated_at.timestamp())}"'
+    return response
+
+
+def select_checkout_plan(request, version_id):
+    version = get_object_or_404(get_public_plans(), pk=version_id)
+    request.session["checkout"] = {"plan": str(version.pk)}
+    if not request.user.is_authenticated:
+        return redirect(f"{reverse('signup')}?next={reverse('checkout', args=[2])}")
+    return redirect("checkout", step=2)
 
 
 def crop_catalog(request):
@@ -222,7 +254,7 @@ def checkout_complete(request):
             number=address_data.get("number", ""),
             defaults=address_data,
         )
-    subscription = Subscription.objects.create(organization=org, plan_version=plan, status=Subscription.Status.TRIALING, current_period_start=timezone.now(), current_period_end=timezone.now() + timedelta(days=30), provider="manual", notes="Assinatura aguardando processamento manual; nenhum pagamento foi simulado.")
+    subscription = Subscription.objects.create(organization=org, plan_version=plan, contracted_price_cents=plan.price_cents, status=Subscription.Status.TRIALING, current_period_start=timezone.now(), current_period_end=timezone.now() + timedelta(days=30), provider="manual", notes="Assinatura aguardando processamento manual; nenhum pagamento foi simulado.")
     checkout_request = CheckoutRequest.objects.create(user=request.user, plan_version=plan, installation_data={"address": address_data}, status=CheckoutRequest.Status.CONFIRMED)
     checkout_request.selected_crops.set(valid_crops)
     model = plan.plan.garden_model

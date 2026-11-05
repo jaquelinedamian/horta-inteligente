@@ -9,6 +9,7 @@
         <a href="{% url 'ops-collection' 'clients' %}"><i class="bi bi-people"></i> Clientes</a>
         <a href="{% url 'ops-collection' 'gardens' %}"><i class="bi bi-house-heart"></i> Hortas</a>
         <a href="{% url 'ops-collection' 'crops' %}"><i class="bi bi-flower2"></i> Culturas</a>
+        {% if request.user.is_hortaviva_admin %}<a href="{% url 'ops-plan-management' %}"><i class="bi bi-card-checklist"></i> Planos e assinaturas<span class="visually-hidden">Planos/Assinaturas</span></a>{% endif %}
         <span class="sidebar-group-label">Operação</span>
         <a href="{% url 'ops-collection' 'visits' %}"><i class="bi bi-calendar2-check"></i> Visitas</a>
         <a href="{% url 'ops-collection' 'employees' %}"><i class="bi bi-person-badge"></i> Equipe</a>
@@ -18,7 +19,6 @@
           <summary><i class="bi bi-gear"></i> Configurações</summary>
           <div class="area-links" aria-label="Links de configurações">
           <a href="{% url 'ops-collection' 'garden-models' %}">Modelos de horta</a>
-          <a href="{% url 'ops-area' 'configuracoes' %}">Planos/Assinaturas</a>
           <a href="{% url 'ops-collection' 'devices' %}">Dispositivos</a>
           <a href="{% url 'ops-area' 'iot' %}">Configurações técnicas</a>
           </div>

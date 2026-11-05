@@ -1,4 +1,4 @@
-from django.db.models import OuterRef, Subquery
+from django.db.models import OuterRef, Q, Subquery
 from django.utils import timezone
 
 from .models import Plan, PlanVersion, Subscription
@@ -9,11 +9,11 @@ def get_available_plan_versions(at=None):
     at = at or timezone.now()
     latest = PlanVersion.objects.filter(
         plan=OuterRef("plan_id"), effective_from__lte=at
-    ).filter(retired_at__isnull=True).order_by("-version", "-effective_from")
+    ).filter(Q(retired_at__isnull=True) | Q(retired_at__gt=at)).order_by("-version", "-effective_from")
     return PlanVersion.objects.filter(
         id=Subquery(latest.values("id")[:1]), plan__is_active=True,
         price_cents__gt=0,
-    ).select_related("plan").prefetch_related("features", "entitlements").order_by("plan__display_order", "price_cents")
+    ).select_related("plan", "plan__garden_model").prefetch_related("features", "entitlements").order_by("plan__display_order", "price_cents")
 
 
 def get_public_plans(at=None):
@@ -22,7 +22,7 @@ def get_public_plans(at=None):
 
 def get_current_plan_version(plan, at=None):
     at = at or timezone.now()
-    return plan.versions.filter(effective_from__lte=at, retired_at__isnull=True).order_by("-version", "-effective_from").first()
+    return plan.versions.filter(effective_from__lte=at).filter(Q(retired_at__isnull=True) | Q(retired_at__gt=at)).order_by("-version", "-effective_from").first()
 
 
 def get_customer_subscription(organization):

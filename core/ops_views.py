@@ -29,7 +29,7 @@ from gardens.selectors import get_active_installations
 from gardens.configuration import effective_garden_configuration
 from devices.selectors import garden_snapshot
 from operations.models import InventoryItem, SupportTicket, Visit, WorkOrder
-from subscriptions.models import CheckoutRequest, Payment, Plan, Subscription
+from subscriptions.models import CheckoutRequest, Payment, Plan, PlanEntitlement, Subscription
 
 from .backoffice import get_resource
 from .backoffice_forms import ClientOnboardingForm, CustomerModuleForm, CustomerModuleInstallationForm, resource_form_class
@@ -37,6 +37,7 @@ from gardens.services import install_module
 from .guided_flows import PRIMARY_ACTIONS, get_flow
 from .workflow_services import create_customer, run_guided_workflow
 from .permissions import admin_required, operations_required
+from .plan_forms import PlanAdminForm, PlanEntitlementFormSet
 from .automation import automation_panel_context
 from .deletion_services import (
     DELETE_POLICIES, DeletionBlocked, can_deactivate, customer_deletion_summary,
@@ -45,6 +46,100 @@ from .deletion_services import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _copy_entitlements(formset, version):
+    position = 0
+    for item_form in formset.forms:
+        if not item_form.cleaned_data or item_form.cleaned_data.get("DELETE") or not item_form.cleaned_data.get("name"):
+            continue
+        data = {key: item_form.cleaned_data.get(key) for key in ("name", "icon", "description", "quantity", "unit", "display_order", "is_included", "is_featured")}
+        data["display_order"] = data["display_order"] if data["display_order"] is not None else position
+        data["benefit_type"] = f"item-{position + 1}"
+        PlanEntitlement.objects.create(plan_version=version, **data)
+        position += 1
+
+
+@admin_required
+def plan_management(request):
+    plans = Plan.objects.select_related("garden_model").prefetch_related("versions__entitlements").order_by("display_order", "name")
+    rows = []
+    for plan in plans:
+        current = plan.versions.filter(retired_at__isnull=True).order_by("-version").first()
+        rows.append((plan, current))
+    subscriptions = Subscription.objects.select_related("organization", "plan_version__plan").order_by("-created_at")[:100]
+    return render(request, "admin_portal/plan_management.html", {"plan_rows": rows, "subscriptions": subscriptions})
+
+
+@admin_required
+@transaction.atomic
+def plan_create(request):
+    form = PlanAdminForm(request.POST or None, request.FILES or None)
+    formset = PlanEntitlementFormSet(request.POST or None, prefix="benefits")
+    if request.method == "POST" and form.is_valid() and formset.is_valid():
+        plan = form.save()
+        form.save_image(plan)
+        version = form.create_version(plan)
+        _copy_entitlements(formset, version)
+        messages.success(request, "Plano criado e publicado na versão inicial.")
+        return redirect("ops-plan-detail", plan_id=plan.pk)
+    return render(request, "admin_portal/plan_form.html", {"form": form, "formset": formset, "title": "Novo plano"})
+
+
+@admin_required
+@transaction.atomic
+def plan_edit(request, plan_id):
+    plan = get_object_or_404(Plan, pk=plan_id)
+    current = plan.versions.filter(retired_at__isnull=True).order_by("-version").first()
+    form = PlanAdminForm(request.POST or None, request.FILES or None, instance=plan)
+    formset = PlanEntitlementFormSet(request.POST or None, instance=current, prefix="benefits") if current else PlanEntitlementFormSet(request.POST or None, prefix="benefits")
+    if request.method == "POST" and form.is_valid() and formset.is_valid():
+        plan = form.save()
+        form.save_image(plan)
+        version = form.create_version(plan, current)
+        _copy_entitlements(formset, version)
+        messages.success(request, f"Alterações salvas na versão {version.version}; contratos anteriores foram preservados.")
+        return redirect("ops-plan-detail", plan_id=plan.pk)
+    return render(request, "admin_portal/plan_form.html", {"form": form, "formset": formset, "title": f"Editar {plan.name}", "plan": plan})
+
+
+@admin_required
+def plan_detail_admin(request, plan_id):
+    plan = get_object_or_404(Plan.objects.select_related("garden_model"), pk=plan_id)
+    versions = plan.versions.prefetch_related("entitlements").order_by("-version")
+    return render(request, "admin_portal/plan_detail.html", {"plan": plan, "versions": versions, "current": versions.filter(retired_at__isnull=True).first()})
+
+
+@admin_required
+@require_POST
+def plan_toggle(request, plan_id):
+    plan = get_object_or_404(Plan, pk=plan_id)
+    plan.is_active = not plan.is_active
+    plan.save(update_fields=["is_active", "updated_at"])
+    messages.success(request, "Plano ativado." if plan.is_active else "Plano desativado para novas contratações; assinaturas existentes foram mantidas.")
+    return redirect("ops-plan-management")
+
+
+@admin_required
+@require_POST
+@transaction.atomic
+def plan_duplicate(request, plan_id):
+    source = get_object_or_404(Plan, pk=plan_id)
+    current = source.versions.filter(retired_at__isnull=True).order_by("-version").first()
+    source.pk = None
+    source.name = f"{source.name} (cópia)"
+    source.code = f"{source.code}-copia-{timezone.now():%H%M%S}"
+    source.is_public = False
+    source.is_active = False
+    source.save()
+    if current:
+        duplicate = source.versions.create(version=1, price_cents=current.price_cents, effective_from=timezone.now(), installation_fee_cents=current.installation_fee_cents, commercial_snapshot=current.commercial_snapshot)
+        for benefit in current.entitlements.all():
+            benefit.pk = None
+            benefit.plan_version = duplicate
+            benefit.save()
+    messages.success(request, "Plano duplicado como rascunho inativo.")
+    return redirect("ops-plan-edit", plan_id=source.pk)
 
 
 AREAS = {

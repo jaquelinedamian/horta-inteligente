@@ -20,12 +20,22 @@ class Plan(BaseModel):
     is_featured = models.BooleanField(default=False)
     display_order = models.PositiveSmallIntegerField(default=0)
     image_url = models.URLField(blank=True)
+    image_data = models.BinaryField(null=True, blank=True, editable=False)
+    image_content_type = models.CharField(max_length=80, blank=True)
+    image_filename = models.CharField(max_length=180, blank=True)
     exclusions = models.TextField(blank=True)
     faq = models.JSONField(default=list, blank=True)
     is_active = models.BooleanField(default=True)
 
     def __str__(self):
         return self.name
+
+    @property
+    def display_image_url(self):
+        if self.image_data:
+            from django.urls import reverse
+            return reverse("plan-image", args=[self.pk])
+        return self.image_url or ""
 
 
 class PlanVersion(BaseModel):
@@ -74,6 +84,8 @@ class PlanEntitlement(BaseModel):
     unlimited = models.BooleanField(default=False)
     carries_balance = models.BooleanField(default=False)
     is_featured = models.BooleanField(default=False)
+    icon = models.CharField(max_length=50, blank=True)
+    is_included = models.BooleanField(default=True)
     display_order = models.PositiveSmallIntegerField(default=0)
 
     def __str__(self):

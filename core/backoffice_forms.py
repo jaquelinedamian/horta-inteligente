@@ -492,8 +492,12 @@ class CommercialPlanForm(OperationalModelForm):
                 current.save(update_fields=["retired_at", "updated_at"])
             current = PlanVersion.objects.create(plan=plan, version=(plan.versions.aggregate(max_version=models.Max("version"))["max_version"] or 0) + 1, price_cents=price_cents, effective_from=effective_from, installation_fee_cents=plan.installation_fee_cents)
         items = [line.strip() for line in self.cleaned_data.get("included_items", "").splitlines() if line.strip()]
+        retained_types = []
         for position, name in enumerate(items):
-            PlanEntitlement.objects.update_or_create(plan_version=current, benefit_type=f"item-{position + 1}", defaults={"name": name, "unlimited": False, "display_order": position})
+            benefit_type = f"item-{position + 1}"
+            retained_types.append(benefit_type)
+            PlanEntitlement.objects.update_or_create(plan_version=current, benefit_type=benefit_type, defaults={"name": name, "unlimited": False, "display_order": position})
+        current.entitlements.filter(benefit_type__startswith="item-").exclude(benefit_type__in=retained_types).delete()
         return plan
 
 
