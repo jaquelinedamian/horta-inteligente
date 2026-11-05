@@ -3,6 +3,7 @@ from django.urls import path, reverse_lazy
 from . import views
 
 urlpatterns = [
+    path("modelos-horta/imagem/<uuid:model_id>/", views.garden_model_image, name="garden-model-image"),
     path("api/v1/gardens/<uuid:garden_id>/measurements/", views.garden_measurements_api, name="garden-measurements-api"),
     path("api/v1/gardens/<uuid:garden_id>/measurements/latest/", views.garden_measurements_latest_api, name="garden-measurements-latest-api"),
     path("api/v1/gardens/<uuid:garden_id>/measurements/summary/", views.garden_measurements_summary_api, name="garden-measurements-summary-api"),

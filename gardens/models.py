@@ -35,6 +35,9 @@ class GardenModel(BaseModel):
     width_cm = models.DecimalField(max_digits=8, decimal_places=2, null=True, blank=True)
     depth_cm = models.DecimalField(max_digits=8, decimal_places=2, null=True, blank=True)
     module_count = models.PositiveSmallIntegerField(null=True, blank=True)
+    image_data = models.BinaryField(null=True, blank=True, editable=False)
+    image_content_type = models.CharField(max_length=80, blank=True)
+    image_filename = models.CharField(max_length=180, blank=True)
     photos_per_day = models.PositiveSmallIntegerField(default=4, validators=[MinValueValidator(1), MaxValueValidator(4)])
     light_hours_per_day = models.DecimalField(max_digits=4, decimal_places=1, null=True, blank=True)
     irrigation_frequency_count = models.PositiveSmallIntegerField(null=True, blank=True)
@@ -45,6 +48,13 @@ class GardenModel(BaseModel):
 
     def __str__(self):
         return self.name
+
+    @property
+    def display_image_url(self):
+        if not self.image_data:
+            return ""
+        from django.urls import reverse
+        return reverse("garden-model-image", args=[self.pk])
 
 
 class Garden(BaseModel):

@@ -8,7 +8,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from accounts.models import User
-from core.backoffice_forms import CommercialPlanForm
+from core.backoffice_forms import CommercialPlanForm, GardenModelForm
 from core.plan_forms import PlanAdminForm
 from subscriptions.models import Plan, PlanEntitlement, PlanVersion, Subscription
 from accounts.models import Organization
@@ -31,12 +31,12 @@ class PlanManagementTests(TestCase):
         form.save()
         self.assertEqual(list(self.version.entitlements.values_list("name", flat=True)), ["Mantido"])
 
-    def test_future_version_does_not_replace_current_early(self):
+    def test_catalog_uses_latest_version_without_date_dependency(self):
         future = timezone.now() + timedelta(days=10)
         self.version.retired_at = future
         self.version.save()
         PlanVersion.objects.create(plan=self.plan, version=2, price_cents=12000, effective_from=future)
-        self.assertEqual(get_current_plan_version(self.plan), self.version)
+        self.assertEqual(get_current_plan_version(self.plan).version, 2)
 
     def test_management_is_admin_only(self):
         user = User.objects.create_user(email="customer-plan@example.test", password="Strong-pass-2026!")
@@ -89,6 +89,15 @@ class PlanManagementTests(TestCase):
         plan = form.save(); form.save_image(plan)
         self.assertIsNone(plan.image_data)
 
+    def test_garden_model_image_is_persistent_and_served(self):
+        output = BytesIO(); Image.new("RGB", (32, 32), "green").save(output, "PNG")
+        image = SimpleUploadedFile("modelo.png", output.getvalue(), content_type="image/png")
+        form = GardenModelForm({"name": "Modelo foto", "code": "modelo-foto", "capacity": 3, "photos_per_day": 4, "monitoring_interval_minutes": 60, "is_active": "on"}, {"image": image})
+        self.assertTrue(form.is_valid(), form.errors)
+        model = form.save(); model.refresh_from_db()
+        self.assertTrue(model.image_data)
+        self.assertEqual(self.client.get(model.display_image_url).status_code, 200)
+
     def test_new_price_version_preserves_existing_contract(self):
         organization = Organization.objects.create(name="Cliente", slug="cliente-plan-version")
         subscription = Subscription.objects.create(organization=organization, plan_version=self.version, contracted_price_cents=10000, status=Subscription.Status.ACTIVE, current_period_start=timezone.now(), current_period_end=timezone.now() + timedelta(days=30))
@@ -130,9 +139,9 @@ class PlanManagementTests(TestCase):
     def test_publication_diagnostics_explain_missing_version_and_model(self):
         self.version.retired_at = timezone.now() - timedelta(minutes=1); self.version.save()
         diagnostic = plan_publication_diagnostics(self.plan)
-        self.assertIn("Sem versão de preço vigente", diagnostic["issues"])
+        self.assertNotIn("Preço não cadastrado", diagnostic["issues"])
         self.assertIn("Associe um modelo de horta", diagnostic["issues"])
-        self.assertFalse(diagnostic["is_published"])
+        self.assertTrue(diagnostic["is_published"])
 
     def test_garden_model_values_are_reflected_publicly(self):
         model = GardenModel.objects.create(name="Premium", code="premium-model", capacity=12, reservoir_liters=20, height_cm=260)
@@ -152,19 +161,26 @@ class PlanManagementTests(TestCase):
         self.assertFalse(self.plan.is_featured)
         self.assertTrue(other.is_featured)
 
-    def test_future_price_is_reported_as_scheduled_and_keeps_current_until_then(self):
-        future = timezone.now() + timedelta(days=5)
+    def test_quick_price_ignores_legacy_date_fields_and_is_immediate(self):
         self.client.force_login(self.admin)
         response = self.client.post(reverse("ops-plan-price-update", args=[self.plan.pk]), {
-            "monthly_price": "180.00", "installation_fee": "90.00", "effective_from": future.strftime("%Y-%m-%dT%H:%M"),
+            "monthly_price": "180.00", "installation_fee": "90.00", "effective_from": "2099-01-01T10:00",
         })
         self.assertEqual(response.status_code, 302)
         state = get_plan_price_state(self.plan)
         self.assertEqual(state["status"], "current")
-        self.assertEqual(state["current"].pk, self.version.pk)
-        self.assertEqual(state["scheduled"].price_cents, 18000)
+        self.assertEqual(state["current"].price_cents, 18000)
+        self.assertIsNone(state["scheduled"])
         self.version.refresh_from_db()
-        self.assertAlmostEqual(self.version.retired_at, state["scheduled"].effective_from, delta=timedelta(minutes=1))
+        self.assertIsNotNone(self.version.retired_at)
+
+    def test_forms_do_not_expose_or_require_effective_dates(self):
+        form = PlanAdminForm(self._plan_payload(), instance=self.plan)
+        self.assertNotIn("effective_from", form.fields)
+        self.assertTrue(form.is_valid(), form.errors)
+        legacy = CommercialPlanForm({"name": self.plan.name, "code": self.plan.code, "monthly_price": "100.00", "is_active": "on", "is_public": "on"}, instance=self.plan)
+        self.assertNotIn("effective_from", legacy.fields)
+        self.assertTrue(legacy.is_valid(), legacy.errors)
 
     def test_quick_price_update_creates_no_duplicate_for_same_value(self):
         self.client.force_login(self.admin)

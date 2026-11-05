@@ -221,11 +221,50 @@ class CropAvailabilitySwitch(forms.CheckboxInput):
         return mark_safe(render_to_string(self.template_name, self.get_context(name, value, attrs)))
 
 
+class GardenModelForm(OperationalModelForm):
+    image = forms.ImageField(label="Imagem principal", required=False, help_text="JPG, PNG ou WebP; máximo de 5 MB.")
+    remove_image = forms.BooleanField(label="Remover imagem atual", required=False)
+
+    class Meta:
+        model = GardenModel
+        fields = ("name", "code", "description", "capacity", "reservoir_liters", "height_cm", "width_cm", "depth_cm", "module_count", "light_hours_per_day", "irrigation_frequency_count", "irrigation_frequency_period", "pump_duration_seconds", "photos_per_day", "monitoring_interval_minutes", "is_active")
+
+    def clean_image(self):
+        image = self.cleaned_data.get("image")
+        if image and image.size > 5 * 1024 * 1024:
+            raise forms.ValidationError("A imagem deve ter no máximo 5 MB.")
+        if image and image.content_type not in {"image/jpeg", "image/png", "image/webp"}:
+            raise forms.ValidationError("Envie uma imagem JPG, PNG ou WebP.")
+        return image
+
+    def save(self, commit=True):
+        from io import BytesIO
+        from PIL import Image, ImageOps
+        model = super().save(commit=False)
+        if self.cleaned_data.get("remove_image"):
+            model.image_data, model.image_content_type, model.image_filename = None, "", ""
+        image = self.cleaned_data.get("image")
+        if image:
+            image.seek(0)
+            with Image.open(image) as source:
+                optimized = ImageOps.exif_transpose(source).convert("RGB")
+                optimized.thumbnail((1400, 1000), Image.Resampling.LANCZOS)
+                output = BytesIO(); optimized.save(output, "WEBP", quality=82, method=6)
+            model.image_data = output.getvalue()
+            model.image_content_type = "image/webp"
+            model.image_filename = f"{model.code or 'modelo'}.webp"
+        if commit:
+            model.save(); self.save_m2m()
+        return model
+
+
 def resource_form_class(resource):
     if resource.model is User:
         return EmployeeForm
     if resource.model is Plan:
         return CommercialPlanForm
+    if resource.model is GardenModel:
+        return GardenModelForm
     if resource.model is Crop:
         return CropForm
     if resource.model is CropLightingSchedule:
@@ -457,7 +496,6 @@ class CropForm(OperationalModelForm):
 
 class CommercialPlanForm(OperationalModelForm):
     monthly_price = forms.DecimalField(label="Preço mensal", max_digits=10, decimal_places=2, min_value=0.01, required=False, help_text="Obrigatório para publicar o plano no site e disponibilizá-lo para novas assinaturas.")
-    effective_from = forms.DateTimeField(label="Início da vigência", required=False, widget=forms.DateTimeInput(attrs={"type": "datetime-local"}), help_text="Se vazio, a nova versão entra em vigor imediatamente.")
     included_items = forms.CharField(label="Itens incluídos", required=False, widget=forms.Textarea(attrs={"rows": 5, "placeholder": "Um benefício por linha. Ex.: 3 módulos"}), help_text="Cria os benefícios da versão atual do plano.")
 
     class Meta:
@@ -469,7 +507,6 @@ class CommercialPlanForm(OperationalModelForm):
         current = self.instance.versions.filter(retired_at__isnull=True).order_by("-version").first() if self.instance.pk else None
         if current and not self.is_bound:
             self.initial["monthly_price"] = current.price_cents / 100
-            self.initial["effective_from"] = current.effective_from
             self.initial["included_items"] = "\n".join(current.entitlements.order_by("display_order").values_list("name", flat=True))
 
     def clean(self):
@@ -484,7 +521,7 @@ class CommercialPlanForm(OperationalModelForm):
         if not self.cleaned_data.get("monthly_price"):
             return plan
         price_cents = int(self.cleaned_data["monthly_price"] * 100)
-        effective_from = self.cleaned_data.get("effective_from") or timezone.now()
+        effective_from = timezone.now()
         current = plan.versions.filter(retired_at__isnull=True).order_by("-version").first()
         if not current or current.price_cents != price_cents:
             if current:

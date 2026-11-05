@@ -33,7 +33,7 @@ FLOWS = {
     "plans": GuidedFlow("plans", "Novo plano de assinatura", "Monte a oferta comercial sem precisar criar versões ou benefícios manualmente.", "bi-bag-heart", (
         step("Identidade", "Como este plano será apresentado?", "Estas informações aparecem na página de planos e no checkout.", "name code commercial_title subtitle short_copy description ideal_for image_url"),
         step("Estrutura", "Defina, em linguagem simples, a capacidade oferecida.", "Os limites deixam claro o que o cliente pode usar.", "included_items"),
-        step("Preço", "Informe as condições comerciais.", "O sistema cria automaticamente a condição comercial vigente.", "monthly_price installation_fee_cents effective_from"),
+        step("Preço", "Informe as condições comerciais.", "O sistema preserva versões anteriores usadas por contratos.", "monthly_price installation_fee_cents"),
         step("Publicação", "Revise onde o plano ficará disponível.", "Planos em rascunho não aparecem para clientes.", "is_public is_featured display_order is_active exclusions"),
     ), (("Ver planos", "plans"), ("Criar cliente", "clients"))),
     "clients": GuidedFlow("clients", "Novo cliente", "Cadastre pessoa, acesso, endereço e assinatura em uma única jornada.", "bi-person-plus", (

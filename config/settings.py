@@ -114,6 +114,8 @@ DATABASE_URL = os.environ.get("DATABASE_URL")
 if DATABASE_URL:
     DATABASES = {"default": dj_database_url.parse(DATABASE_URL, conn_max_age=600, conn_health_checks=True, ssl_require=not DEBUG)}
 else:
+    if RENDER_EXTERNAL_HOSTNAME and not DEBUG:
+        raise ImproperlyConfigured("DATABASE_URL é obrigatória no Render; SQLite local não é persistente entre deploys.")
     sqlite_name = os.environ.get("SQLITE_DB_PATH") or BASE_DIR / "db.sqlite3"
     DATABASES = {"default": {"ENGINE": "django.db.backends.sqlite3", "NAME": sqlite_name}}
 

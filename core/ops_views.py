@@ -98,11 +98,13 @@ def plan_create(request):
     form = PlanAdminForm(request.POST or None, request.FILES or None)
     formset = PlanEntitlementFormSet(request.POST or None, prefix="benefits")
     if request.method == "POST" and form.is_valid() and formset.is_valid():
-        plan = form.save()
+        plan = form.save(commit=False)
+        plan.is_active, plan.is_public = True, False
+        plan.save()
         form.save_image(plan)
         version = form.create_version(plan)
         _copy_entitlements(formset, version)
-        messages.success(request, "Plano criado e publicado na versão inicial.")
+        messages.success(request, "Plano criado como rascunho. Revise os dados antes de publicar.")
         return redirect("ops-plan-detail", plan_id=plan.pk)
     return render(request, "admin_portal/plan_form.html", {"form": form, "formset": formset, "title": "Novo plano", "garden_model_data": _garden_model_preview_data()})
 
@@ -111,7 +113,7 @@ def plan_create(request):
 @transaction.atomic
 def plan_edit(request, plan_id):
     plan = get_object_or_404(Plan, pk=plan_id)
-    current = plan.versions.filter(retired_at__isnull=True).order_by("-version").first()
+    current = plan.versions.order_by("-version", "-created_at").first()
     form = PlanAdminForm(request.POST or None, request.FILES or None, instance=plan)
     formset = PlanEntitlementFormSet(request.POST or None, instance=current, prefix="benefits") if current else PlanEntitlementFormSet(request.POST or None, prefix="benefits")
     if request.method == "POST" and form.is_valid() and formset.is_valid():
@@ -160,8 +162,8 @@ def _publication_requirements(plan):
     if not (plan.commercial_title or plan.short_copy or plan.description):
         problems.append("Preencha os dados comerciais do plano.")
     price = diagnostic["price"]
-    if not price["current"] and not price["scheduled"]:
-        problems.append("Defina uma versão de preço vigente ou agendada.")
+    if not price["current"]:
+        problems.append("Defina o preço do plano.")
     return problems
 
 
@@ -182,9 +184,7 @@ def plan_publish(request, plan_id):
     plan.is_active = True
     plan.is_public = True
     plan.save(update_fields=["is_active", "is_public", "updated_at"])
-    diagnostic = plan_publication_diagnostics(plan)
-    label = "agendado" if diagnostic["publication_state"] == "scheduled" else "publicado"
-    messages.success(request, f"{plan.name} foi {label} com sucesso.")
+    messages.success(request, f"{plan.name} foi publicado com sucesso.")
     return redirect("ops-plan-management")
 
 
@@ -207,7 +207,7 @@ def plan_price_update(request, plan_id):
 @transaction.atomic
 def plan_duplicate(request, plan_id):
     source = get_object_or_404(Plan, pk=plan_id)
-    current = source.versions.filter(retired_at__isnull=True).order_by("-version").first()
+    current = source.versions.order_by("-version", "-created_at").first()
     source.pk = None
     source.name = f"{source.name} (cópia)"
     source.code = f"{source.code}-copia-{timezone.now():%H%M%S}"

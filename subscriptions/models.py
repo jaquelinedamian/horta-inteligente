@@ -35,7 +35,9 @@ class Plan(BaseModel):
         if self.image_data:
             from django.urls import reverse
             return reverse("plan-image", args=[self.pk])
-        return self.image_url or ""
+        if self.image_url:
+            return self.image_url
+        return self.garden_model.display_image_url if self.garden_model_id else ""
 
 
 class PlanVersion(BaseModel):

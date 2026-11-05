@@ -103,6 +103,17 @@ def plan_image(request, plan_id):
     return response
 
 
+def garden_model_image(request, model_id):
+    from gardens.models import GardenModel
+    model = get_object_or_404(GardenModel.objects.only("image_data", "image_content_type", "updated_at"), pk=model_id)
+    if not model.image_data:
+        raise Http404
+    response = HttpResponse(bytes(model.image_data), content_type=model.image_content_type or "image/webp")
+    response["Cache-Control"] = "public, max-age=86400"
+    response["ETag"] = f'"{model.pk}-{int(model.updated_at.timestamp())}"'
+    return response
+
+
 def select_checkout_plan(request, version_id):
     version = get_object_or_404(get_public_plans(), pk=version_id)
     request.session["checkout"] = {"plan": str(version.pk)}
