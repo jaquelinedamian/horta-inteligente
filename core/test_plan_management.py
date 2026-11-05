@@ -12,7 +12,7 @@ from core.backoffice_forms import CommercialPlanForm, GardenModelForm
 from core.plan_forms import PlanAdminForm
 from subscriptions.models import Plan, PlanEntitlement, PlanVersion, Subscription
 from accounts.models import Organization
-from gardens.models import GardenModel
+from gardens.models import GardenModel, GardenModelFeature
 from subscriptions.selectors import get_plan_price_state, plan_publication_diagnostics
 from subscriptions.selectors import get_current_plan_version
 
@@ -150,6 +150,44 @@ class PlanManagementTests(TestCase):
         self.assertContains(response, "12 mudas")
         self.assertContains(response, "20")
         self.assertContains(response, "260")
+
+    def test_plan_editor_persists_and_updates_physical_features(self):
+        model = GardenModel.objects.create(name="Modelo bÃ¡sico", code="modelo-basico", capacity=1)
+        untouched_model = GardenModel.objects.create(name="Outro modelo", code="outro-modelo", capacity=9)
+        untouched = GardenModelFeature.objects.create(garden_model=untouched_model, name="Peso", value="4,5", unit="kg")
+        self.plan.garden_model = model
+        self.plan.save(update_fields=["garden_model", "updated_at"])
+        self.client.force_login(self.admin)
+        payload = self._plan_payload(
+            name=self.plan.name, code=self.plan.code, garden_model=str(model.pk), monthly_price="100.00",
+            **{
+                "features-TOTAL_FORMS": "3", "features-INITIAL_FORMS": "0", "features-MIN_NUM_FORMS": "0", "features-MAX_NUM_FORMS": "1000",
+                "features-0-name": "Quantidade de mudas", "features-0-value": "4", "features-0-unit": "mudas", "features-0-icon": "bi-flower1", "features-0-display_order": "0", "features-0-is_visible": "on",
+                "features-1-name": "ReservatÃ³rio", "features-1-value": "5", "features-1-unit": "L", "features-1-icon": "bi-droplet", "features-1-display_order": "1", "features-1-is_visible": "on",
+                "features-2-name": "Altura", "features-2-value": "60", "features-2-unit": "cm", "features-2-icon": "bi-arrows-vertical", "features-2-display_order": "2", "features-2-is_visible": "on",
+            },
+        )
+        response = self.client.post(reverse("ops-plan-edit", args=[self.plan.pk]), payload)
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(model.physical_features.get(name="Quantidade de mudas").value, "4")
+        self.assertEqual(model.physical_features.get(name="ReservatÃ³rio").value, "5")
+        height = model.physical_features.get(name="Altura")
+        self.assertEqual(height.value, "60")
+        reopened = self.client.get(reverse("ops-plan-edit", args=[self.plan.pk]))
+        self.assertContains(reopened, "60")
+
+        for index, feature in enumerate(model.physical_features.order_by("display_order")):
+            payload[f"features-{index}-id"] = str(feature.pk)
+            payload[f"features-{index}-garden_model"] = str(model.pk)
+        payload["features-INITIAL_FORMS"] = "3"
+        height_index = list(model.physical_features.order_by("display_order")).index(height)
+        payload[f"features-{height_index}-value"] = "70"
+        response = self.client.post(reverse("ops-plan-edit", args=[self.plan.pk]), payload)
+        self.assertEqual(response.status_code, 302)
+        height.refresh_from_db(); untouched.refresh_from_db()
+        self.assertEqual(height.value, "70")
+        self.assertEqual(untouched.value, "4,5")
+        self.assertContains(self.client.get(reverse("plans")), "70 cm")
 
     def test_only_one_plan_remains_featured(self):
         self.plan.is_featured = True; self.plan.save()

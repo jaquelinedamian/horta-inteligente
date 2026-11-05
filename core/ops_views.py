@@ -97,16 +97,21 @@ def plan_management(request):
 def plan_create(request):
     form = PlanAdminForm(request.POST or None, request.FILES or None)
     formset = PlanEntitlementFormSet(request.POST or None, prefix="benefits")
-    if request.method == "POST" and form.is_valid() and formset.is_valid():
+    form_valid = form.is_valid() if request.method == "POST" else False
+    selected_model = form.cleaned_data.get("garden_model") if form_valid else None
+    feature_formset = GardenModelFeatureFormSet(request.POST or None, instance=selected_model, prefix="features") if selected_model else None
+    if request.method == "POST" and form_valid and formset.is_valid() and (feature_formset is None or feature_formset.is_valid()):
         plan = form.save(commit=False)
         plan.is_active, plan.is_public = True, False
         plan.save()
         form.save_image(plan)
+        if feature_formset is not None:
+            feature_formset.save()
         version = form.create_version(plan)
         _copy_entitlements(formset, version)
         messages.success(request, "Plano criado como rascunho. Revise os dados antes de publicar.")
         return redirect("ops-plan-detail", plan_id=plan.pk)
-    return render(request, "admin_portal/plan_form.html", {"form": form, "formset": formset, "title": "Novo plano", "garden_model_data": _garden_model_preview_data()})
+    return render(request, "admin_portal/plan_form.html", {"form": form, "formset": formset, "feature_formset": feature_formset, "selected_model": selected_model, "shared_plan_count": selected_model.plans.exclude(pk=getattr(form.instance, "pk", None)).count() if selected_model else 0, "title": "Novo plano", "garden_model_data": _garden_model_preview_data()})
 
 
 @admin_required
@@ -116,14 +121,19 @@ def plan_edit(request, plan_id):
     current = plan.versions.order_by("-version", "-created_at").first()
     form = PlanAdminForm(request.POST or None, request.FILES or None, instance=plan)
     formset = PlanEntitlementFormSet(request.POST or None, instance=current, prefix="benefits") if current else PlanEntitlementFormSet(request.POST or None, prefix="benefits")
-    if request.method == "POST" and form.is_valid() and formset.is_valid():
+    form_valid = form.is_valid() if request.method == "POST" else False
+    selected_model = form.cleaned_data.get("garden_model") if form_valid else plan.garden_model
+    feature_formset = GardenModelFeatureFormSet(request.POST or None, instance=selected_model, prefix="features") if selected_model else None
+    if request.method == "POST" and form_valid and formset.is_valid() and (feature_formset is None or feature_formset.is_valid()):
         plan = form.save()
         form.save_image(plan)
+        if feature_formset is not None:
+            feature_formset.save()
         version = form.create_version(plan, current)
         _copy_entitlements(formset, version)
         messages.success(request, f"Alterações salvas na versão {version.version}; contratos anteriores foram preservados.")
         return redirect("ops-plan-detail", plan_id=plan.pk)
-    return render(request, "admin_portal/plan_form.html", {"form": form, "formset": formset, "title": f"Editar {plan.name}", "plan": plan, "garden_model_data": _garden_model_preview_data()})
+    return render(request, "admin_portal/plan_form.html", {"form": form, "formset": formset, "feature_formset": feature_formset, "selected_model": selected_model, "shared_plan_count": selected_model.plans.exclude(pk=plan.pk).count() if selected_model else 0, "title": f"Editar {plan.name}", "plan": plan, "garden_model_data": _garden_model_preview_data()})
 
 
 @admin_required
