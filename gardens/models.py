@@ -58,18 +58,7 @@ class GardenModel(BaseModel):
 
     @property
     def visible_physical_features(self):
-        features = self.physical_features.filter(is_visible=True).exclude(value="").order_by("display_order", "created_at")
-        if features.exists():
-            return features
-        from types import SimpleNamespace
-        dimensions = " Ã— ".join(str(value).rstrip("0").rstrip(".") for value in (self.height_cm, self.width_cm, self.depth_cm) if value is not None)
-        legacy = (
-            ("Quantidade de mudas", self.capacity, "mudas", "bi-flower1"),
-            ("Capacidade do reservatÃ³rio", self.reservoir_liters, "L", "bi-droplet"),
-            ("DimensÃµes", dimensions, "cm", "bi-rulers"),
-            ("Quantidade de mÃ³dulos", self.module_count, "mÃ³dulos", "bi-boxes"),
-        )
-        return [SimpleNamespace(name=name, value=value, unit=unit, icon=icon) for name, value, unit, icon in legacy if value not in (None, "")]
+        return self.physical_features.filter(is_visible=True).exclude(value="").order_by("display_order", "created_at")
 
 
 class GardenModelFeature(BaseModel):

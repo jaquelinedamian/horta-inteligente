@@ -177,7 +177,7 @@ def plan_edit(request, plan_id):
 
 @admin_required
 def plan_detail_admin(request, plan_id):
-    plan = get_object_or_404(Plan.objects.select_related("garden_model"), pk=plan_id)
+    plan = get_object_or_404(Plan.objects.select_related("garden_model").prefetch_related("garden_model__physical_features"), pk=plan_id)
     versions = plan.versions.prefetch_related("entitlements").order_by("-version")
     diagnostic = plan_publication_diagnostics(plan)
     return render(request, "admin_portal/plan_detail.html", {"plan": plan, "versions": versions, "current": diagnostic["price"]["current"], "scheduled": diagnostic["price"]["scheduled"]})

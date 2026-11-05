@@ -160,6 +160,9 @@ class PlanManagementTests(TestCase):
 
     def test_garden_model_values_are_reflected_publicly(self):
         model = GardenModel.objects.create(name="Premium", code="premium-model", capacity=12, reservoir_liters=20, height_cm=260)
+        GardenModelFeature.objects.create(garden_model=model, name="Mudas", value="12", unit="mudas", display_order=0)
+        GardenModelFeature.objects.create(garden_model=model, name="Reservatorio", value="20", unit="L", display_order=1)
+        GardenModelFeature.objects.create(garden_model=model, name="Altura", value="260", unit="cm", display_order=2)
         self.plan.garden_model = model; self.plan.save()
         response = self.client.get(reverse("plans"))
         self.assertContains(response, "12 mudas")
@@ -180,7 +183,7 @@ class PlanManagementTests(TestCase):
                 "features-TOTAL_FORMS": "3", "features-INITIAL_FORMS": "0", "features-MIN_NUM_FORMS": "0", "features-MAX_NUM_FORMS": "1000",
                 "features-0-name": "Quantidade de mudas", "features-0-value": "4", "features-0-unit": "mudas", "features-0-icon": "bi-flower1", "features-0-display_order": "0", "features-0-is_visible": "on",
                 "features-1-name": "ReservatÃ³rio", "features-1-value": "5", "features-1-unit": "L", "features-1-icon": "bi-droplet", "features-1-display_order": "1", "features-1-is_visible": "on",
-                "features-2-name": "Altura", "features-2-value": "60", "features-2-unit": "cm", "features-2-icon": "bi-arrows-vertical", "features-2-display_order": "2", "features-2-is_visible": "on",
+                "features-2-name": "Altura", "features-2-value": "70", "features-2-unit": "cm", "features-2-icon": "bi-arrows-vertical", "features-2-display_order": "2", "features-2-is_visible": "on",
             },
         )
         response = self.client.post(reverse("ops-plan-edit", args=[self.plan.pk]), payload)
@@ -188,30 +191,36 @@ class PlanManagementTests(TestCase):
         self.assertEqual(model.physical_features.get(name="Quantidade de mudas").value, "4")
         self.assertEqual(model.physical_features.get(name="ReservatÃ³rio").value, "5")
         height = model.physical_features.get(name="Altura")
-        self.assertEqual(height.value, "60")
+        self.assertEqual(height.value, "70")
         reopened = self.client.get(reverse("ops-plan-edit", args=[self.plan.pk]))
-        self.assertContains(reopened, "60")
+        self.assertContains(reopened, "70")
 
         for index, feature in enumerate(model.physical_features.order_by("display_order")):
             payload[f"features-{index}-id"] = str(feature.pk)
             payload[f"features-{index}-garden_model"] = str(model.pk)
         payload["features-INITIAL_FORMS"] = "3"
         height_index = list(model.physical_features.order_by("display_order")).index(height)
-        payload[f"features-{height_index}-value"] = "70"
+        payload[f"features-{height_index}-value"] = "80"
         response = self.client.post(reverse("ops-plan-edit", args=[self.plan.pk]), payload)
         self.assertEqual(response.status_code, 302)
         height.refresh_from_db(); untouched.refresh_from_db()
-        self.assertEqual(height.value, "70")
-        self.assertEqual(shared_plan.garden_model.physical_features.get(name="Altura").value, "70")
+        self.assertEqual(height.value, "80")
+        self.assertEqual(shared_plan.garden_model.physical_features.get(name="Altura").value, "80")
         self.assertEqual(untouched.value, "4,5")
-        self.assertContains(self.client.get(reverse("plans")), "70 cm")
+        self.assertContains(self.client.get(reverse("plans")), "80 cm")
+        for url in (reverse("ops-plan-detail", args=[self.plan.pk]), reverse("plan-detail", args=[self.plan.code])):
+            detail = self.client.get(url)
+            self.assertContains(detail, "4 mudas")
+            self.assertContains(detail, "80 cm")
 
         reservoir_index = next(index for index, feature in enumerate(model.physical_features.order_by("display_order")) if feature.name == "ReservatÃ³rio")
         payload[f"features-{reservoir_index}-DELETE"] = "on"
         response = self.client.post(reverse("ops-plan-edit", args=[self.plan.pk]), payload)
         self.assertEqual(response.status_code, 302)
         self.assertFalse(GardenModelFeature.objects.filter(garden_model=model, name="ReservatÃ³rio").exists())
-        self.assertEqual(GardenModelFeature.objects.get(pk=height.pk).value, "70")
+        self.assertEqual(GardenModelFeature.objects.get(pk=height.pk).value, "80")
+        for url in (reverse("ops-plan-edit", args=[self.plan.pk]), reverse("ops-plan-detail", args=[self.plan.pk]), reverse("plan-detail", args=[self.plan.code])):
+            self.assertNotContains(self.client.get(url), "5 L")
 
     def test_invalid_physical_feature_does_not_partially_save_plan(self):
         model = GardenModel.objects.create(name="Modelo validaÃ§Ã£o", code="modelo-validacao", capacity=4)

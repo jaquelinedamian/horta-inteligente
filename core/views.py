@@ -85,7 +85,16 @@ def plans(request):
             benefit = next((item for item in version.entitlements.all() if item.name == name), None)
             cells.append({"included": bool(benefit and benefit.is_included), "value": benefit})
         comparison_benefits.append({"name": name, "cells": cells})
-    return render(request, "public/plans.html", {"plans": public_plans, "comparison_benefits": comparison_benefits})
+    feature_names = []
+    feature_maps = []
+    for version in public_plans:
+        features = list(version.plan.garden_model.visible_physical_features[:6]) if version.plan.garden_model_id else []
+        feature_maps.append({feature.name: feature for feature in features})
+        for feature in features:
+            if feature.name not in feature_names and len(feature_names) < 6:
+                feature_names.append(feature.name)
+    comparison_features = [{"name": name, "cells": [feature_map.get(name) for feature_map in feature_maps]} for name in feature_names]
+    return render(request, "public/plans.html", {"plans": public_plans, "comparison_features": comparison_features, "comparison_benefits": comparison_benefits})
 
 
 def plan_detail(request, code):
