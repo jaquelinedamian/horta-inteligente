@@ -4,7 +4,7 @@ from collections.abc import Mapping
 from decimal import Decimal
 from django.contrib.auth.password_validation import validate_password
 from django.db import models, transaction
-from django.forms import modelform_factory
+from django.forms import inlineformset_factory, modelform_factory
 from django.template.loader import render_to_string
 from django.core.exceptions import FieldDoesNotExist
 from django.utils import timezone
@@ -17,7 +17,7 @@ from subscriptions.models import Plan, PlanEntitlement, PlanVersion, Subscriptio
 from subscriptions.selectors import get_available_plan_versions
 from crops.models import Crop, CropLightingSchedule, PlantingCycle
 from crops.selectors import get_available_cultivars
-from gardens.models import Garden, GardenModel, GardenModule, ModuleInstallation
+from gardens.models import Garden, GardenModel, GardenModelFeature, GardenModule, ModuleInstallation
 from operations.models import Visit
 from core.forms import MONITORING_INTERVAL_CHOICES, PUMP_DURATION_CHOICES
 
@@ -255,7 +255,40 @@ class GardenModelForm(OperationalModelForm):
             model.image_filename = f"{model.code or 'modelo'}.webp"
         if commit:
             model.save(); self.save_m2m()
+            if not model.physical_features.exists():
+                dimensions = " Ã— ".join(str(value).rstrip("0").rstrip(".") for value in (model.height_cm, model.width_cm, model.depth_cm) if value is not None)
+                defaults = (
+                    ("Quantidade de mudas", model.capacity, "mudas", "bi-flower1"),
+                    ("Capacidade do reservatÃ³rio", model.reservoir_liters, "L", "bi-droplet"),
+                    ("DimensÃµes", dimensions, "cm", "bi-rulers"),
+                    ("Quantidade de mÃ³dulos", model.module_count, "mÃ³dulos", "bi-boxes"),
+                )
+                GardenModelFeature.objects.bulk_create([
+                    GardenModelFeature(garden_model=model, name=name, value=str(value), unit=unit, icon=icon, display_order=order)
+                    for order, (name, value, unit, icon) in enumerate(defaults) if value not in (None, "")
+                ])
         return model
+
+
+class GardenModelFeatureForm(OperationalModelForm):
+    class Meta:
+        model = GardenModelFeature
+        fields = ("name", "value", "unit", "icon", "display_order", "is_visible")
+        widgets = {
+            "name": forms.TextInput(attrs={"placeholder": "Ex.: Altura"}),
+            "value": forms.TextInput(attrs={"placeholder": "Ex.: 85"}),
+            "unit": forms.TextInput(attrs={"placeholder": "Ex.: cm"}),
+            "display_order": forms.NumberInput(attrs={"min": 0}),
+        }
+
+    def clean_value(self):
+        return self.cleaned_data["value"].strip()
+
+
+GardenModelFeatureFormSet = inlineformset_factory(
+    GardenModel, GardenModelFeature, form=GardenModelFeatureForm,
+    extra=0, can_delete=True, min_num=0, validate_min=False,
+)
 
 
 def resource_form_class(resource):

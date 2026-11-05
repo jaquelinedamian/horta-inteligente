@@ -56,6 +56,45 @@ class GardenModel(BaseModel):
         from django.urls import reverse
         return reverse("garden-model-image", args=[self.pk])
 
+    @property
+    def visible_physical_features(self):
+        features = self.physical_features.filter(is_visible=True).exclude(value="").order_by("display_order", "created_at")
+        if features.exists():
+            return features
+        from types import SimpleNamespace
+        dimensions = " Ã— ".join(str(value).rstrip("0").rstrip(".") for value in (self.height_cm, self.width_cm, self.depth_cm) if value is not None)
+        legacy = (
+            ("Quantidade de mudas", self.capacity, "mudas", "bi-flower1"),
+            ("Capacidade do reservatÃ³rio", self.reservoir_liters, "L", "bi-droplet"),
+            ("DimensÃµes", dimensions, "cm", "bi-rulers"),
+            ("Quantidade de mÃ³dulos", self.module_count, "mÃ³dulos", "bi-boxes"),
+        )
+        return [SimpleNamespace(name=name, value=value, unit=unit, icon=icon) for name, value, unit, icon in legacy if value not in (None, "")]
+
+
+class GardenModelFeature(BaseModel):
+    ICON_CHOICES = (
+        ("bi-flower1", "Plantas"), ("bi-droplet", "ReservatÃ³rio"),
+        ("bi-rulers", "DimensÃµes"), ("bi-boxes", "MÃ³dulos"),
+        ("bi-arrows-vertical", "Altura"), ("bi-arrows", "Largura"),
+        ("bi-box", "Profundidade"), ("bi-speedometer2", "Peso"),
+        ("bi-lightbulb", "IluminaÃ§Ã£o"), ("bi-camera", "CÃ¢mera"),
+        ("bi-water", "IrrigaÃ§Ã£o"), ("bi-info-circle", "InformaÃ§Ã£o"),
+    )
+    garden_model = models.ForeignKey(GardenModel, on_delete=models.CASCADE, related_name="physical_features")
+    name = models.CharField(max_length=100)
+    value = models.CharField(max_length=180)
+    unit = models.CharField(max_length=40, blank=True)
+    icon = models.CharField(max_length=40, choices=ICON_CHOICES, default="bi-info-circle")
+    display_order = models.PositiveSmallIntegerField(default=0)
+    is_visible = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ("display_order", "created_at")
+
+    def __str__(self):
+        return f"{self.name}: {self.value} {self.unit}".strip()
+
 
 class Garden(BaseModel):
     class Status(models.TextChoices):

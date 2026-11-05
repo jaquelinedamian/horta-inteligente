@@ -33,7 +33,7 @@ from subscriptions.models import CheckoutRequest, Payment, Plan, PlanEntitlement
 from subscriptions.selectors import plan_publication_diagnostics
 
 from .backoffice import get_resource
-from .backoffice_forms import ClientOnboardingForm, CustomerModuleForm, CustomerModuleInstallationForm, resource_form_class
+from .backoffice_forms import ClientOnboardingForm, CustomerModuleForm, CustomerModuleInstallationForm, GardenModelFeatureFormSet, resource_form_class
 from gardens.services import install_module
 from .guided_flows import PRIMARY_ACTIONS, get_flow
 from .workflow_services import create_customer, run_guided_workflow
@@ -604,13 +604,19 @@ def create(request, section):
     resource = get_resource(section)
     if not resource or resource.readonly or section == "credentials":
         raise Http404
-    if section in {"crops", "crop-lighting"} and not request.user.is_hortaviva_admin:
+    if section in {"crops", "crop-lighting", "garden-models"} and not request.user.is_hortaviva_admin:
         raise PermissionDenied
     form = resource_form_class(resource)(request.POST or None, request.FILES or None)
-    if request.method == "POST" and form.is_valid():
+    feature_formset = GardenModelFeatureFormSet(request.POST or None, prefix="features") if section == "garden-models" else None
+    form.feature_formset = feature_formset
+    if request.method == "POST" and form.is_valid() and (feature_formset is None or feature_formset.is_valid()):
         if isinstance(form.instance, CropLightingSchedule):
             form.instance.updated_by = request.user
-        obj = run_guided_workflow(section, form)
+        with transaction.atomic():
+            obj = run_guided_workflow(section, form)
+            if feature_formset is not None:
+                feature_formset.instance = obj
+                feature_formset.save()
         messages.success(request, "Registro criado com sucesso.")
         return redirect("ops-detail", section=section, pk=obj.pk)
     flow = get_flow(section)
@@ -624,14 +630,19 @@ def edit(request, section, pk):
     resource = get_resource(section)
     if not resource or resource.readonly:
         raise Http404
-    if section in {"crops", "crop-lighting"} and not request.user.is_hortaviva_admin:
+    if section in {"crops", "crop-lighting", "garden-models"} and not request.user.is_hortaviva_admin:
         raise PermissionDenied
     obj = get_object_or_404(resource.model, pk=pk)
     form = resource_form_class(resource)(request.POST or None, request.FILES or None, instance=obj)
-    if request.method == "POST" and form.is_valid():
+    feature_formset = GardenModelFeatureFormSet(request.POST or None, instance=obj, prefix="features") if section == "garden-models" else None
+    form.feature_formset = feature_formset
+    if request.method == "POST" and form.is_valid() and (feature_formset is None or feature_formset.is_valid()):
         if isinstance(form.instance, CropLightingSchedule):
             form.instance.updated_by = request.user
-        form.save()
+        with transaction.atomic():
+            form.save()
+            if feature_formset is not None:
+                feature_formset.save()
         if section == "crops" and getattr(form, "active_cycle_count", 0):
             messages.warning(request, f"Esta cultura possui {form.active_cycle_count} cultivo(s) ativo(s). Ela deixou de aparecer para novas escolhas, mas os cultivos existentes continuam funcionando.")
         messages.success(request, "Alterações salvas.")

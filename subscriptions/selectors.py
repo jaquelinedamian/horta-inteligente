@@ -8,7 +8,7 @@ def get_available_plan_versions(at=None):
     latest = PlanVersion.objects.filter(plan=OuterRef("plan_id")).order_by("-version", "-created_at")
     return PlanVersion.objects.filter(
         id=Subquery(latest.values("id")[:1]), plan__is_active=True, price_cents__gt=0,
-    ).select_related("plan", "plan__garden_model").prefetch_related("features", "entitlements").order_by("plan__display_order", "price_cents")
+    ).select_related("plan", "plan__garden_model").prefetch_related("features", "entitlements", "plan__garden_model__physical_features").order_by("plan__display_order", "price_cents")
 
 
 def get_public_plans(at=None):
