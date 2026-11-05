@@ -256,12 +256,12 @@ class GardenModelForm(OperationalModelForm):
         if commit:
             model.save(); self.save_m2m()
             if not model.physical_features.exists():
-                dimensions = " Ã— ".join(str(value).rstrip("0").rstrip(".") for value in (model.height_cm, model.width_cm, model.depth_cm) if value is not None)
+                dimensions = " × ".join(str(value).rstrip("0").rstrip(".") for value in (model.height_cm, model.width_cm, model.depth_cm) if value is not None)
                 defaults = (
                     ("Quantidade de mudas", model.capacity, "mudas", "bi-flower1"),
-                    ("Capacidade do reservatÃ³rio", model.reservoir_liters, "L", "bi-droplet"),
-                    ("DimensÃµes", dimensions, "cm", "bi-rulers"),
-                    ("Quantidade de mÃ³dulos", model.module_count, "mÃ³dulos", "bi-boxes"),
+                    ("Capacidade do reservatório", model.reservoir_liters, "L", "bi-droplet"),
+                    ("Dimensões", dimensions, "cm", "bi-rulers"),
+                    ("Quantidade de módulos", model.module_count, "módulos", "bi-boxes"),
                 )
                 GardenModelFeature.objects.bulk_create([
                     GardenModelFeature(garden_model=model, name=name, value=str(value), unit=unit, icon=icon, display_order=order)

@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 560" role="img" aria-labelledby="title desc">
+  <title id="title">Imagem do produto indisponível</title>
+  <desc id="desc">Ilustração neutra de uma horta vertical HortaViva</desc>
+  <rect width="800" height="560" rx="40" fill="#edf5ef"/>
+  <rect x="260" y="90" width="280" height="390" rx="28" fill="#fff" stroke="#174c2d" stroke-width="16"/>
+  <path d="M310 190h180M310 290h180M310 390h180" stroke="#8bb69a" stroke-width="18" stroke-linecap="round"/>
+  <path d="M350 190c-42-55-85 8-36 45 28 21 52-5 36-45Zm100 100c42-55 85 8 36 45-28 21-52-5-36-45Zm-100 100c-42-55-85 8-36 45 28 21 52-5 36-45Z" fill="#398454"/>
+  <circle cx="400" cy="130" r="18" fill="#174c2d"/>
+</svg>

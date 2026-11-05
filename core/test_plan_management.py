@@ -134,6 +134,74 @@ class PlanManagementTests(TestCase):
         plan = form.save(); form.save_image(plan)
         self.assertIsNone(plan.image_data)
 
+    def test_plan_image_accepts_jpeg_png_and_webp_and_is_served_after_reload(self):
+        formats = (("JPEG", "image/jpeg", "foto.jpg"), ("PNG", "image/png", "foto.png"), ("WEBP", "image/webp", "foto.webp"))
+        for image_format, content_type, filename in formats:
+            with self.subTest(image_format=image_format):
+                output = BytesIO()
+                Image.new("RGB", (48, 36), "green").save(output, image_format)
+                upload = SimpleUploadedFile(filename, output.getvalue(), content_type=content_type)
+                form = PlanAdminForm({**self._plan_payload(), "code": self.plan.code, "name": self.plan.name}, {"image": upload}, instance=self.plan)
+                self.assertTrue(form.is_valid(), form.errors)
+                saved = form.save(); form.save_image(saved)
+                persisted = Plan.objects.get(pk=self.plan.pk)
+                self.assertTrue(persisted.image_data)
+                self.assertEqual(persisted.image_content_type, "image/webp")
+                image_response = self.client.get(persisted.display_image_url)
+                self.assertEqual(image_response.status_code, 200)
+                self.assertEqual(image_response["Content-Type"], "image/webp")
+
+    def test_plan_image_falls_back_to_persistent_garden_model_image(self):
+        output = BytesIO(); Image.new("RGB", (40, 40), "green").save(output, "PNG")
+        model_form = GardenModelForm(
+            {"name": "Modelo com imagem", "code": "modelo-com-imagem", "capacity": 4, "photos_per_day": 4, "monitoring_interval_minutes": 60, "is_active": "on"},
+            {"image": SimpleUploadedFile("modelo.png", output.getvalue(), content_type="image/png")},
+        )
+        self.assertTrue(model_form.is_valid(), model_form.errors)
+        model = model_form.save()
+        self.plan.garden_model = model; self.plan.image_data = None; self.plan.image_url = ""; self.plan.save()
+        persisted = Plan.objects.select_related("garden_model").get(pk=self.plan.pk)
+        self.assertEqual(persisted.display_image_url, model.display_image_url)
+        self.assertContains(self.client.get(reverse("plan-detail", args=[self.plan.code])), model.display_image_url)
+
+    def test_empty_benefit_row_does_not_block_plan_save(self):
+        self.client.force_login(self.admin)
+        payload = self._plan_payload(name="Plano com linha vazia", code=self.plan.code, **{
+            "benefits-TOTAL_FORMS": "2",
+            "benefits-1-benefit_type": "", "benefits-1-name": "", "benefits-1-icon": "", "benefits-1-description": "",
+            "benefits-1-quantity": "", "benefits-1-unit": "", "benefits-1-display_order": "0", "benefits-1-is_included": "on",
+        })
+        response = self.client.post(reverse("ops-plan-edit", args=[self.plan.pk]), payload)
+        self.assertEqual(response.status_code, 302, getattr(response, "context", None))
+        self.assertEqual(Plan.objects.get(pk=self.plan.pk).name, "Plano com linha vazia")
+        self.assertEqual(self.plan.versions.order_by("-version").first().entitlements.count(), 1)
+
+    def test_partially_filled_benefit_requires_name_and_rolls_back(self):
+        self.client.force_login(self.admin)
+        version_count = self.plan.versions.count()
+        payload = self._plan_payload(name="Nao deve persistir", code=self.plan.code, **{
+            "benefits-TOTAL_FORMS": "2", "benefits-1-benefit_type": "camera-monitoring",
+            "benefits-1-name": "", "benefits-1-description": "Sem nome", "benefits-1-display_order": "1", "benefits-1-is_included": "on",
+        })
+        response = self.client.post(reverse("ops-plan-edit", args=[self.plan.pk]), payload)
+        self.assertEqual(response.status_code, 200)
+        self.plan.refresh_from_db()
+        self.assertEqual(self.plan.name, "Plano Base")
+        self.assertEqual(self.plan.versions.count(), version_count)
+        self.assertIn("name", response.context["formset"].forms[1].errors)
+
+    def test_plan_pages_render_utf8_without_mojibake(self):
+        self.plan.commercial_title = "Essencial para sua família"
+        self.plan.description = "Cultivo, iluminação e câmera"
+        self.plan.save()
+        self.client.force_login(self.admin)
+        for url in (reverse("ops-plan-edit", args=[self.plan.pk]), reverse("ops-plan-detail", args=[self.plan.pk]), reverse("plans"), reverse("plan-detail", args=[self.plan.code])):
+            response = self.client.get(url)
+            self.assertEqual(response.status_code, 200)
+            text = response.content.decode("utf-8")
+            for marker in ("Ã§", "Ã£", "Ã¡", "Ã©", "Â·", "â€”", "ðŸ", "�"):
+                self.assertNotIn(marker, text)
+
     def test_garden_model_image_is_persistent_and_served(self):
         output = BytesIO(); Image.new("RGB", (32, 32), "green").save(output, "PNG")
         image = SimpleUploadedFile("modelo.png", output.getvalue(), content_type="image/png")

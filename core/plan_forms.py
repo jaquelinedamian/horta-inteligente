@@ -128,6 +128,7 @@ def save_plan_price(plan, cleaned_data):
 
 class PlanEntitlementForm(forms.ModelForm):
     BENEFIT_TYPES = (
+        ("", "Selecione o tipo"),
         ("maintenance-visits", "Visitas de manutenção"), ("automatic-irrigation", "Irrigação automática"),
         ("programmable-lighting", "Iluminação programável"), ("sensor-monitoring", "Monitoramento por sensores"),
         ("camera-monitoring", "Monitoramento por câmera"), ("platform-access", "Acesso à plataforma"),

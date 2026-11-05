@@ -63,12 +63,12 @@ class GardenModel(BaseModel):
 
 class GardenModelFeature(BaseModel):
     ICON_CHOICES = (
-        ("bi-flower1", "Plantas"), ("bi-droplet", "ReservatÃ³rio"),
-        ("bi-rulers", "DimensÃµes"), ("bi-boxes", "MÃ³dulos"),
+        ("bi-flower1", "Plantas"), ("bi-droplet", "Reservatório"),
+        ("bi-rulers", "Dimensões"), ("bi-boxes", "Módulos"),
         ("bi-arrows-vertical", "Altura"), ("bi-arrows", "Largura"),
         ("bi-box", "Profundidade"), ("bi-speedometer2", "Peso"),
-        ("bi-lightbulb", "IluminaÃ§Ã£o"), ("bi-camera", "CÃ¢mera"),
-        ("bi-water", "IrrigaÃ§Ã£o"), ("bi-info-circle", "InformaÃ§Ã£o"),
+        ("bi-lightbulb", "Iluminação"), ("bi-camera", "Câmera"),
+        ("bi-water", "Irrigação"), ("bi-info-circle", "Informação"),
     )
     garden_model = models.ForeignKey(GardenModel, on_delete=models.CASCADE, related_name="physical_features")
     name = models.CharField(max_length=100)
