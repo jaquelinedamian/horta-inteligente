@@ -45,6 +45,36 @@ class PlanManagementTests(TestCase):
         self.client.force_login(self.admin)
         self.assertEqual(self.client.get(reverse("ops-plan-management")).status_code, 200)
 
+    def test_legacy_plan_crud_routes_use_the_transactional_editor(self):
+        self.client.force_login(self.admin)
+        self.assertRedirects(self.client.get(reverse("ops-collection", args=["plans"])), reverse("ops-plan-management"))
+        self.assertRedirects(self.client.get(reverse("ops-create", args=["plans"])), reverse("ops-plan-create"))
+        self.assertRedirects(self.client.get(reverse("ops-edit", args=["plans", self.plan.pk])), reverse("ops-plan-edit", args=[self.plan.pk]))
+        self.assertRedirects(self.client.get(reverse("ops-detail", args=["plans", self.plan.pk])), reverse("ops-plan-detail", args=[self.plan.pk]))
+
+    def test_subscription_edit_persists_after_new_database_query(self):
+        organization = Organization.objects.create(name="Assinante", slug="assinante-persistencia")
+        subscription = Subscription.objects.create(
+            organization=organization, plan_version=self.version, status=Subscription.Status.TRIALING,
+            current_period_start=timezone.now(), current_period_end=timezone.now() + timedelta(days=30),
+            contracted_price_cents=10000, billing_day=5, notes="Antes",
+        )
+        self.client.force_login(self.admin)
+        response = self.client.post(reverse("ops-edit", args=["subscriptions", subscription.pk]), {
+            "organization": str(organization.pk), "plan_version": str(self.version.pk), "status": Subscription.Status.ACTIVE,
+            "current_period_start": subscription.current_period_start.strftime("%Y-%m-%dT%H:%M"),
+            "current_period_end": subscription.current_period_end.strftime("%Y-%m-%dT%H:%M"),
+            "contracted_price_cents": "12500", "billing_day": "12", "next_billing_at": "",
+            "auto_renew": "on", "coupon": "", "discount_cents": "0", "canceled_at": "",
+            "cancellation_reason": "", "notes": "Alteracao persistida", "provider": "manual", "provider_reference": "TEST-SUB-1",
+        })
+        self.assertEqual(response.status_code, 302, getattr(response, "context", None))
+        persisted = Subscription.objects.get(pk=subscription.pk)
+        self.assertEqual(persisted.status, Subscription.Status.ACTIVE)
+        self.assertEqual(persisted.contracted_price_cents, 12500)
+        self.assertEqual(persisted.billing_day, 12)
+        self.assertEqual(persisted.notes, "Alteracao persistida")
+
     def test_admin_create_and_edit_forms_render(self):
         self.client.force_login(self.admin)
         self.assertEqual(self.client.get(reverse("ops-plan-create")).status_code, 200)

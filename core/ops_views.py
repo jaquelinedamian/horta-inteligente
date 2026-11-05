@@ -581,6 +581,8 @@ def dashboard(request):
 
 @operations_required
 def collection(request, section):
+    if section == "plans":
+        return redirect("ops-plan-management")
     resource = get_resource(section)
     if not resource:
         if section == "qrcodes":
@@ -633,6 +635,8 @@ def collection(request, section):
 
 @operations_required
 def detail(request, section, pk):
+    if section == "plans":
+        return redirect("ops-plan-detail", plan_id=pk)
     resource = get_resource(section)
     if not resource:
         raise Http404
@@ -650,6 +654,8 @@ def detail(request, section, pk):
 
 @operations_required
 def create(request, section):
+    if section == "plans":
+        return redirect("ops-plan-create")
     resource = get_resource(section)
     if not resource or resource.readonly or section == "credentials":
         raise Http404
@@ -676,6 +682,8 @@ def create(request, section):
 
 @operations_required
 def edit(request, section, pk):
+    if section == "plans":
+        return redirect("ops-plan-edit", plan_id=pk)
     resource = get_resource(section)
     if not resource or resource.readonly:
         raise Http404
