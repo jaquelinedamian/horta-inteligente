@@ -184,6 +184,24 @@
   .garden-ops-actions .btn { flex: 1 1 45%; }
 }
 
+.calibration-modes { display: grid; grid-template-columns: repeat(3, 1fr); gap: .75rem; }
+.calibration-mode { display: flex; gap: .65rem; padding: 1rem; border: 1px solid #dbe5dc; border-radius: 1rem; cursor: pointer; }
+.calibration-mode:has(input:checked) { border-color: #198754; background: #f0f9f2; box-shadow: 0 0 0 2px rgba(25, 135, 84, .1); }
+.calibration-mode small { display: block; margin-top: .25rem; color: #64748b; }
+.calibration-compare { position: relative; overflow: hidden; aspect-ratio: 4 / 3; border-radius: 1rem; background: #17211a; }
+.calibration-compare > img, .calibration-corrected, .calibration-corrected img { width: 100%; height: 100%; object-fit: cover; }
+.calibration-corrected { position: absolute; inset: 0; clip-path: inset(0 50% 0 0); }
+.calibration-divider { position: absolute; top: 0; bottom: 0; left: 50%; width: 3px; transform: translateX(-50%); background: #fff; box-shadow: 0 0 0 1px rgba(0,0,0,.25); }
+.calibration-label { position: absolute; top: .75rem; z-index: 2; padding: .25rem .55rem; border-radius: 999px; color: #fff; background: rgba(0,0,0,.65); font-size: .75rem; }
+.calibration-label.is-original { left: .75rem; }
+.calibration-label.is-corrected { right: .75rem; }
+.calibration-control { padding: .65rem 0; border-bottom: 1px solid #edf1ee; }
+.calibration-control label { font-weight: 600; }
+.calibration-control input[type="number"] { width: 5.5rem; }
+.calibration-live { overflow: hidden; border-radius: 1rem; background: #17211a; }
+.calibration-live img { display: block; width: 100%; min-height: 18rem; object-fit: contain; }
+@media (max-width: 767.98px) { .calibration-modes { grid-template-columns: 1fr; } }
+
 @media (max-width: 479.98px) {
   .garden-metadata-strip, .garden-config-grid, .garden-sensor-grid { grid-template-columns: 1fr; }
   .garden-metadata-strip > div, .garden-config-grid > div { border-right: 0; border-bottom: 1px solid #e2e8f0; }

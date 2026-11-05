@@ -1,0 +1,36 @@
+{% extends 'base.html' %}
+{% load static %}
+{% block title %}Calibração de cores{% endblock %}
+{% block area_name %}Gestão da câmera{% endblock %}
+{% block content %}
+<div class="page-header"><div><span class="eyebrow">Câmera ESP32-CAM</span><h1>Calibração de cores</h1><p class="text-muted">{{ camera.name }} · {{ camera.serial_number }}</p></div>{% if camera.garden_id %}<a class="btn btn-light" href="{% url 'ops-garden-devices' camera.garden_id %}"><i class="bi bi-arrow-left"></i> Voltar aos dispositivos</a>{% endif %}</div>
+
+<div class="alert alert-warning" role="note"><strong>Correção digital aproximada.</strong> Sob iluminação rosa ou magenta, a calibração não é cientificamente precisa sem uma referência neutra e não substitui uma captura sob luz branca. As fotografias originais nunca são alteradas.</div>
+
+<form method="post" class="camera-calibration" data-camera-calibration>{% csrf_token %}
+  <section class="content-card mb-4"><div class="section-heading compact"><div><span class="eyebrow">Modo de visualização</span><h2 class="h4">Como exibir a imagem</h2></div><span class="badge-soft">Somente administração</span></div><div class="calibration-modes">
+    {% for value,label in form.mode.field.choices %}<label class="calibration-mode"><input type="radio" name="mode" value="{{ value }}" {% if form.mode.value == value %}checked{% endif %}><span><strong>{{ label }}</strong><small>{% if value == 'original' %}Sem processamento adicional.{% elif value == 'automatic' %}Reduz moderadamente a dominante magenta, preservando manchas e amarelecimento.{% else %}Utiliza os ajustes individuais abaixo.{% endif %}</small></span></label>{% endfor %}
+  </div></section>
+
+  <div class="row g-4 mb-4"><div class="col-xl-7"><section class="content-card h-100"><div class="section-heading compact"><div><span class="eyebrow">Comparação</span><h2 class="h4">Original e correção digital</h2></div><span class="badge-soft">Imagem corrigida digitalmente</span></div>
+    <svg width="0" height="0" aria-hidden="true"><filter id="cameraColorMatrix"><feColorMatrix data-calibration-matrix type="matrix" values="1 0 0 0 0 0 1 0 0 0 0 0 1 0 0 0 0 0 1 0"/></filter></svg>
+    {% if latest_photo %}<div class="calibration-compare" data-calibration-compare><img src="{% url 'garden-photo' latest_photo.pk %}" alt="Fotografia original"><div class="calibration-corrected" data-calibration-corrected><img src="{% url 'garden-photo' latest_photo.pk %}" alt="Prévia com correção digital" data-calibration-image></div><span class="calibration-label is-original">Original</span><span class="calibration-label is-corrected">Corrigida</span><span class="calibration-divider" data-calibration-divider></span></div><label class="form-label mt-3" for="comparison-position">Divisor da comparação</label><input class="form-range" id="comparison-position" type="range" min="0" max="100" value="50" data-comparison-position>{% else %}<div class="empty-state"><i class="bi bi-camera"></i><p class="mb-0 mt-2">A câmera ainda não enviou uma fotografia para comparação.</p></div>{% endif %}
+    {% if stream_url %}<details class="mt-4"><summary class="btn btn-sm btn-outline-brand">Testar na prévia ao vivo</summary><p class="small text-muted mt-3">A prévia depende de acesso à mesma rede local da câmera. O processamento é apenas visual no navegador.</p><div class="calibration-live"><img src="{{ stream_url }}" alt="Prévia ao vivo com correção digital" data-calibration-image></div></details>{% endif %}
+  </section></div>
+  <div class="col-xl-5"><section class="content-card h-100"><div class="section-heading compact"><div><span class="eyebrow">Ajustes manuais</span><h2 class="h4">Parâmetros</h2></div></div>
+    {% include 'admin_portal/camera_calibration_control.html' with field=form.temperature label='Temperatura de cor' min='-100' max='100' %}
+    {% include 'admin_portal/camera_calibration_control.html' with field=form.hue label='Matiz (Hue)' min='-180' max='180' %}
+    {% include 'admin_portal/camera_calibration_control.html' with field=form.saturation label='Saturação' min='0' max='200' %}
+    {% include 'admin_portal/camera_calibration_control.html' with field=form.contrast label='Contraste' min='50' max='150' %}
+    {% include 'admin_portal/camera_calibration_control.html' with field=form.brightness label='Brilho' min='50' max='150' %}
+    {% include 'admin_portal/camera_calibration_control.html' with field=form.green_intensity label='Intensidade do verde' min='50' max='150' %}
+    {% include 'admin_portal/camera_calibration_control.html' with field=form.magenta_compensation label='Compensação de magenta' min='-100' max='100' %}
+    <div class="form-check form-switch mt-3"><input class="form-check-input" type="checkbox" role="switch" id="id_white_balance" name="white_balance" {% if form.white_balance.value %}checked{% endif %}><label class="form-check-label" for="id_white_balance">Balanço de branco digital</label><small class="d-block text-muted">Ajuste aproximado no navegador; não altera o sensor da câmera.</small></div>
+    <div class="soft-card mt-4"><strong>Referência branca ou cinza</strong><p class="small text-muted mt-1">Fotografe uma superfície neutra sob a mesma iluminação. O arquivo é analisado somente neste navegador e não é enviado nem salvo.</p><label class="btn btn-sm btn-outline-brand" for="neutral-reference">Selecionar referência</label><input class="visually-hidden" id="neutral-reference" type="file" accept="image/jpeg,image/png,image/webp" data-neutral-reference><small class="d-block mt-2" role="status" data-neutral-reference-status></small></div>
+    {% if form.errors %}<div class="alert alert-danger mt-3">Revise os valores informados.</div>{% endif %}
+  </section></div></div>
+  <div class="d-flex flex-wrap gap-2"><button class="btn btn-brand" type="submit" name="action" value="save">Salvar perfil da câmera</button><button class="btn btn-outline-secondary" type="submit" name="action" value="reset" formnovalidate onclick="return confirm('Restaurar a visualização original e todos os valores padrão?');">Restaurar padrão</button></div>
+</form>
+{{ defaults|json_script:'camera-calibration-defaults' }}
+{% endblock %}
+{% block scripts %}<script src="{% static 'js/camera-color-calibration.js' %}"></script>{% endblock %}

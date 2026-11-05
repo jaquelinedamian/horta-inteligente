@@ -24,6 +24,7 @@ urlpatterns = [
     path("hortas/<uuid:garden_id>/culturas/<uuid:cycle_id>/editar/", ops_views.garden_crop_edit, name="ops-garden-crop-edit"),
     path("hortas/<uuid:garden_id>/culturas-contratadas/", ops_views.garden_contracted_crops, name="ops-garden-contracted-crops"),
     path("hortas/<uuid:garden_id>/dispositivos/", ops_views.garden_devices, name="ops-garden-devices"),
+    path("cameras/<uuid:device_id>/calibracao/", ops_views.camera_color_calibration, name="ops-camera-color-calibration"),
     path("dispositivos/<uuid:device_id>/credencial/", ops_views.credential_issue, name="ops-credential-issue"),
     path("credenciais/<uuid:pk>/revogar/", ops_views.credential_revoke, name="ops-credential-revoke"),
     path("demonstracao/criar/", ops_views.create_demo, name="ops-create-demo"),

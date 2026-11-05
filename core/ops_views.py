@@ -69,6 +69,64 @@ class GardenAdministrationForm(forms.ModelForm):
         self.fields["primary_technician"].queryset = User.objects.filter(employee_role=User.EmployeeRole.TECHNICIAN, is_active=True).order_by("full_name")
 
 
+CAMERA_COLOR_DEFAULTS = {
+    "mode": "original", "temperature": 0, "hue": 0, "saturation": 100,
+    "contrast": 100, "brightness": 100, "green_intensity": 100,
+    "magenta_compensation": 0, "white_balance": True,
+}
+
+
+class CameraColorCalibrationForm(forms.Form):
+    mode = forms.ChoiceField(choices=(
+        ("original", "Original"), ("automatic", "Correção automática"),
+        ("manual", "Calibração manual"),
+    ))
+    temperature = forms.IntegerField(min_value=-100, max_value=100)
+    hue = forms.IntegerField(min_value=-180, max_value=180)
+    saturation = forms.IntegerField(min_value=0, max_value=200)
+    contrast = forms.IntegerField(min_value=50, max_value=150)
+    brightness = forms.IntegerField(min_value=50, max_value=150)
+    green_intensity = forms.IntegerField(min_value=50, max_value=150)
+    magenta_compensation = forms.IntegerField(min_value=-100, max_value=100)
+    white_balance = forms.BooleanField(required=False)
+
+
+@admin_required
+def camera_color_calibration(request, device_id):
+    camera = get_object_or_404(
+        Device.objects.select_related("garden", "organization"),
+        pk=device_id, kind=Device.Kind.CAMERA,
+    )
+    metadata = camera.metadata if isinstance(camera.metadata, dict) else {}
+    saved = metadata.get("color_calibration", {})
+    profile = {**CAMERA_COLOR_DEFAULTS, **(saved if isinstance(saved, dict) else {})}
+    form = CameraColorCalibrationForm(request.POST or None, initial=profile)
+    if request.method == "POST":
+        if request.POST.get("action") == "reset":
+            updated_metadata = {**metadata, "color_calibration": CAMERA_COLOR_DEFAULTS.copy()}
+            camera.metadata = updated_metadata
+            camera.save(update_fields=["metadata", "updated_at"])
+            messages.success(request, "Calibração restaurada para o padrão original.")
+            return redirect("ops-camera-color-calibration", device_id=camera.pk)
+        if form.is_valid():
+            updated_metadata = {**metadata, "color_calibration": form.cleaned_data}
+            camera.metadata = updated_metadata
+            camera.save(update_fields=["metadata", "updated_at"])
+            messages.success(request, "Perfil de calibração salvo para esta câmera.")
+            return redirect("ops-camera-color-calibration", device_id=camera.pk)
+
+    latest_photo = camera.photos.order_by("-captured_at", "-created_at").first()
+    stream_url = None
+    if camera.local_ip:
+        host = f"[{camera.local_ip}]" if ":" in camera.local_ip else camera.local_ip
+        stream_url = f"http://{host}/stream"
+    return render(request, "admin_portal/camera_color_calibration.html", {
+        "camera": camera, "form": form, "profile": profile,
+        "latest_photo": latest_photo, "stream_url": stream_url,
+        "defaults": CAMERA_COLOR_DEFAULTS,
+    })
+
+
 class ContractedCropsForm(forms.Form):
     crops = forms.ModelMultipleChoiceField(
         label="Culturas contratadas",

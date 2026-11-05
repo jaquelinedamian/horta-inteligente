@@ -133,6 +133,7 @@
                 {% csrf_token %}<input type="hidden" name="next" value="{{ request.get_full_path }}">
                 <button class="btn btn-sm btn-outline-brand" type="submit" {% if not panel.snapshot.camera.is_online %}disabled title="Câmera offline"{% endif %}>Tirar foto</button>
               </form>
+              {% if request.user.is_hortaviva_admin %}<a class="btn btn-sm btn-light" href="{% url 'ops-camera-color-calibration' panel.snapshot.camera.pk %}">Calibração de cores</a>{% endif %}
             {% endif %}
           </span>
         </div>
