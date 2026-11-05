@@ -122,6 +122,7 @@
             <h3>Imagem mais recente</h3>
           </div>
           <span class="inline-actions">
+            {% if request.user.is_hortaviva_admin %}<a class="btn btn-sm btn-light" href="{% url 'ops-photo-batch-manager' %}?garden={{ panel.garden.pk }}&amp;period=30d">Gerenciar fotografias</a>{% endif %}
             <a class="btn btn-sm btn-outline-brand" href="{% url 'garden-gallery' panel.garden.pk %}?period=all&amp;order=asc&amp;limit=all">Ver desenvolvimento</a>
             {% if panel.snapshot.camera and panel.camera_stream_url %}
               <a class="btn btn-sm btn-brand" href="{{ panel.camera_stream_url }}" target="_blank" rel="noopener noreferrer">Ver ao vivo</a>

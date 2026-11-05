@@ -1,7 +1,9 @@
 import os
 import base64
+import logging
 from datetime import timedelta
 from io import BytesIO
+from uuid import UUID
 
 from django.conf import settings
 from django import forms
@@ -10,16 +12,18 @@ from django.core.exceptions import PermissionDenied, ValidationError
 from django.contrib import messages
 from django.core.management import call_command
 from django.core.paginator import Paginator
+from django.db import transaction
 from django.db.models import Count, F, Q
 from django.http import Http404, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
+from django.utils.dateparse import parse_date
 from django.views.decorators.http import require_POST
 
 from accounts.models import Membership, Organization, User
 from crops.models import Crop, CropLightingSchedule, Cultivar, PlantingCycle
-from devices.models import Alert, Device, DeviceCredential
+from devices.models import Alert, Device, DeviceCredential, GardenPhoto
 from gardens.models import Garden, GardenModule, ModuleInstallation
 from gardens.selectors import get_active_installations
 from gardens.configuration import effective_garden_configuration
@@ -39,6 +43,8 @@ from .deletion_services import (
     deactivate_object, delete_administrative_object, delete_customer_completely,
     object_deletion_summary, requires_strong_confirmation,
 )
+
+logger = logging.getLogger(__name__)
 
 
 AREAS = {
@@ -124,6 +130,93 @@ def camera_color_calibration(request, device_id):
         "camera": camera, "form": form, "profile": profile,
         "latest_photo": latest_photo, "stream_url": stream_url,
         "defaults": CAMERA_COLOR_DEFAULTS,
+    })
+
+
+def _filtered_admin_photos(params):
+    photos = GardenPhoto.objects.select_related("garden", "garden__organization", "device")
+    garden_id = params.get("garden", "").strip()
+    camera_id = params.get("camera", "").strip()
+    period = params.get("period", "30d").strip()
+    date_from = parse_date(params.get("date_from", ""))
+    date_to = parse_date(params.get("date_to", ""))
+    try:
+        garden_uuid = UUID(garden_id) if garden_id else None
+        camera_uuid = UUID(camera_id) if camera_id else None
+    except (TypeError, ValueError):
+        return photos.none()
+    if garden_uuid:
+        photos = photos.filter(garden_id=garden_id)
+    if camera_uuid:
+        photos = photos.filter(device_id=camera_id, device__kind=Device.Kind.CAMERA)
+    today = timezone.localdate()
+    if period == "today":
+        photos = photos.filter(captured_at__date=today)
+    elif period in {"7d", "30d"}:
+        days = 7 if period == "7d" else 30
+        photos = photos.filter(captured_at__gte=timezone.now() - timedelta(days=days))
+    elif period == "custom":
+        if date_from:
+            photos = photos.filter(captured_at__date__gte=date_from)
+        if date_to:
+            photos = photos.filter(captured_at__date__lte=date_to)
+    return photos.order_by("-captured_at", "-created_at")
+
+
+@admin_required
+def photo_batch_manager(request):
+    filtered = _filtered_admin_photos(request.POST if request.method == "POST" else request.GET)
+    if request.method == "POST":
+        scope = request.POST.get("selection_scope", "selected")
+        selected_ids = list(dict.fromkeys(request.POST.getlist("photo_ids")))
+        try:
+            selected_ids = [str(UUID(value)) for value in selected_ids]
+        except (TypeError, ValueError):
+            messages.error(request, "A seleção contém identificadores inválidos. Nenhuma imagem foi excluída.")
+            return redirect(f"{reverse('ops-photo-batch-manager')}?{request.POST.get('return_query', '')}")
+        target = filtered if scope == "filtered" else GardenPhoto.objects.filter(pk__in=selected_ids)
+        target_ids = list(target.values_list("pk", flat=True))
+        if scope != "filtered" and len(target_ids) != len(selected_ids):
+            messages.error(request, "A seleção contém fotografias inexistentes. Nenhuma imagem foi excluída.")
+            return redirect(f"{reverse('ops-photo-batch-manager')}?{request.POST.get('return_query', '')}")
+        if not target_ids:
+            messages.warning(request, "Nenhuma fotografia foi selecionada.")
+            return redirect(f"{reverse('ops-photo-batch-manager')}?{request.POST.get('return_query', '')}")
+        deleted_count = 0
+        failed_count = 0
+        try:
+            with transaction.atomic():
+                # GardenPhoto armazena os bytes no próprio banco. A exclusão do
+                # registro remove a imagem persistente sem deixar arquivo órfão.
+                for start in range(0, len(target_ids), 500):
+                    batch = target_ids[start:start + 500]
+                    result, details = GardenPhoto.objects.filter(pk__in=batch).delete()
+                    deleted_count += details.get("devices.GardenPhoto", result)
+        except Exception:
+            failed_count = len(target_ids)
+            deleted_count = 0
+            logger.exception(
+                "admin_photo_batch_delete_failed user_id=%s requested=%d scope=%s",
+                request.user.pk, failed_count, scope,
+            )
+            messages.error(request, f"Nenhuma fotografia foi excluída. Falharam: {failed_count}.")
+        else:
+            logger.info(
+                "admin_photo_batch_deleted user_id=%s deleted=%d failed=%d scope=%s",
+                request.user.pk, deleted_count, failed_count, scope,
+            )
+            messages.success(request, f"Fotografias excluídas: {deleted_count}. Falhas: {failed_count}.")
+        return redirect(f"{reverse('ops-photo-batch-manager')}?{request.POST.get('return_query', '')}")
+
+    paginator = Paginator(filtered, 24)
+    page = paginator.get_page(request.GET.get("page"))
+    query_without_page = request.GET.copy()
+    query_without_page.pop("page", None)
+    return render(request, "admin_portal/photo_batch_manager.html", {
+        "photos": page, "filtered_count": paginator.count,
+        "gardens": Garden.objects.select_related("organization").order_by("organization__name", "name"),
+        "cameras": Device.objects.filter(kind=Device.Kind.CAMERA).select_related("garden").order_by("name"),
+        "filters": request.GET, "return_query": query_without_page.urlencode(),
     })
 
 
