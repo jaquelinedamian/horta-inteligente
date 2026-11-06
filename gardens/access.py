@@ -14,20 +14,21 @@ def gardens_for_user(user):
     if user.is_hortaviva_admin:
         return Garden.objects.all()
 
-    customer_orgs = user.memberships.filter(
-        is_active=True, role__in=CUSTOMER_ROLES
-    ).values("organization_id")
     is_technician = user.employee_role == user.EmployeeRole.TECHNICIAN or user.memberships.filter(
         is_active=True, role=Membership.Role.TECHNICIAN
     ).exists()
-    scope = Q(organization_id__in=customer_orgs) | Q(members__user=user)
     if is_technician:
-        scope |= (
-            Q(primary_technician=user)
+        return Garden.objects.filter(
+            Q(members__user=user)
+            | Q(primary_technician=user)
             | Q(visits__technician=user)
             | Q(work_orders__assignments__user=user)
-        )
-    return Garden.objects.filter(scope).distinct()
+        ).distinct()
+
+    customer_orgs = user.memberships.filter(
+        is_active=True, role__in=CUSTOMER_ROLES
+    ).values("organization_id")
+    return Garden.objects.filter(Q(organization_id__in=customer_orgs) | Q(members__user=user)).distinct()
 
 
 def user_can_access_garden(user, garden):
