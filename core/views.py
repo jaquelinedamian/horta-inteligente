@@ -88,12 +88,22 @@ def plans(request):
     feature_names = []
     feature_maps = []
     for version in public_plans:
-        features = list(version.plan.garden_model.visible_physical_features[:6]) if version.plan.garden_model_id else []
-        feature_maps.append({feature.name: feature for feature in features})
+        features = version.plan.garden_model.technical_summary if version.plan.garden_model_id else []
+        feature_maps.append({feature["name"]: feature for feature in features})
         for feature in features:
-            if feature.name not in feature_names and len(feature_names) < 6:
-                feature_names.append(feature.name)
-    comparison_features = [{"name": name, "cells": [feature_map.get(name) for feature_map in feature_maps]} for name in feature_names]
+            if feature["name"] not in feature_names:
+                feature_names.append(feature["name"])
+    comparison_features = [
+        {"name": "Taxa de instalação", "cells": [
+            {"value": f"R$ {version.installation_fee_cents / 100:.2f}", "unit": ""} if version.installation_fee_cents else None
+            for version in public_plans
+        ]},
+        {"name": "Modelo de horta", "cells": [
+            {"value": version.plan.garden_model.name, "unit": ""} if version.plan.garden_model_id else None
+            for version in public_plans
+        ]},
+        *[{"name": name, "cells": [feature_map.get(name) for feature_map in feature_maps]} for name in feature_names],
+    ]
     return render(request, "public/plans.html", {"plans": public_plans, "comparison_features": comparison_features, "comparison_benefits": comparison_benefits})
 
 

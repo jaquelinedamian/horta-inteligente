@@ -34,6 +34,7 @@ urlpatterns = [
     path("planos/<uuid:plan_id>/duplicar/", ops_views.plan_duplicate, name="ops-plan-duplicate"),
     path("planos/<uuid:plan_id>/alternar/", ops_views.plan_toggle, name="ops-plan-toggle"),
     path("planos/<uuid:plan_id>/publicar/", ops_views.plan_publish, name="ops-plan-publish"),
+    path("planos/<uuid:plan_id>/excluir/", ops_views.plan_delete, name="ops-plan-delete"),
     path("planos/<uuid:plan_id>/preco/", ops_views.plan_price_update, name="ops-plan-price-update"),
     path("dispositivos/<uuid:device_id>/credencial/", ops_views.credential_issue, name="ops-credential-issue"),
     path("credenciais/<uuid:pk>/revogar/", ops_views.credential_revoke, name="ops-credential-revoke"),

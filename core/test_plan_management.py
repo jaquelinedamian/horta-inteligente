@@ -248,11 +248,11 @@ class PlanManagementTests(TestCase):
         self.assertContains(response, "Plano Base")
         self.assertEqual(self.client.get(reverse("plan-detail", args=["99"])).status_code, 404)
 
-    def test_publication_diagnostics_explain_missing_version_and_model(self):
+    def test_publication_diagnostics_allow_missing_model(self):
         self.version.retired_at = timezone.now() - timedelta(minutes=1); self.version.save()
         diagnostic = plan_publication_diagnostics(self.plan)
         self.assertNotIn("Preço não cadastrado", diagnostic["issues"])
-        self.assertIn("Cadastro incompleto: modelo físico associado", diagnostic["issues"])
+        self.assertNotIn("modelo físico associado", " ".join(diagnostic["issues"]))
         self.assertTrue(diagnostic["is_published"])
 
     def test_garden_model_values_are_reflected_publicly(self):
@@ -405,13 +405,13 @@ class PlanManagementTests(TestCase):
         response = self.client.get(reverse("plans"))
         self.assertEqual(list(response.context["plans"]), [])
 
-    def test_publish_is_blocked_with_clear_pending_requirements(self):
+    def test_publish_without_model_or_complementary_content(self):
         self.plan.is_public = False; self.plan.description = ""; self.plan.short_copy = ""; self.plan.commercial_title = ""; self.plan.save()
         self.client.force_login(self.admin)
         response = self.client.post(reverse("ops-plan-publish", args=[self.plan.pk]), {"action": "publish"}, follow=True)
         self.plan.refresh_from_db()
-        self.assertFalse(self.plan.is_public)
-        self.assertContains(response, "modelo físico associado")
+        self.assertTrue(self.plan.is_public)
+        self.assertContains(response, "publicado com sucesso")
 
     def test_model_data_endpoint_updates_selected_model_without_saving_plan(self):
         model = GardenModel.objects.create(
@@ -434,14 +434,52 @@ class PlanManagementTests(TestCase):
         self.client.force_login(user)
         self.assertEqual(self.client.get(reverse("ops-plan-model-data", args=[model.pk])).status_code, 403)
 
-    def test_incomplete_legacy_public_plan_is_identified_but_not_rewritten(self):
+    def test_inactive_legacy_model_still_loads_in_plan_editor(self):
+        model = GardenModel.objects.create(name="Modelo legado", code="modelo-legado-endpoint", capacity=4, is_active=False)
+        self.client.force_login(self.admin)
+        response = self.client.get(reverse("ops-plan-model-data", args=[model.pk]))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["name"], "Modelo legado")
+
+    def test_plan_code_is_generated_when_omitted(self):
+        form = PlanAdminForm(self._plan_payload(name="Plano Código Automático", code=""))
+        self.assertTrue(form.is_valid(), form.errors)
+        plan = form.save()
+        self.assertEqual(plan.code, "plano-codigo-automatico")
+
+    def test_delete_unused_plan_and_archive_used_plan(self):
+        unused = Plan.objects.create(name="Descartável", code="descartavel")
+        PlanVersion.objects.create(plan=unused, version=1, price_cents=5000, effective_from=timezone.now())
+        self.client.force_login(self.admin)
+        response = self.client.post(reverse("ops-plan-delete", args=[unused.pk]))
+        self.assertRedirects(response, reverse("ops-plan-management"))
+        self.assertFalse(Plan.objects.filter(pk=unused.pk).exists())
+
+        organization = Organization.objects.create(name="Histórico", slug="historico-plano")
+        subscription = Subscription.objects.create(
+            organization=organization, plan_version=self.version, status=Subscription.Status.ACTIVE,
+            current_period_start=timezone.now(), current_period_end=timezone.now() + timedelta(days=30),
+        )
+        response = self.client.post(reverse("ops-plan-delete", args=[self.plan.pk]))
+        self.assertRedirects(response, reverse("ops-plan-management"))
+        self.plan.refresh_from_db(); subscription.refresh_from_db()
+        self.assertFalse(self.plan.is_active)
+        self.assertFalse(self.plan.is_public)
+        self.assertEqual(subscription.plan_version_id, self.version.pk)
+
+    def test_non_admin_cannot_delete_plan(self):
+        user = User.objects.create_user(email="sem-permissao-plan@example.test", password="Strong-pass-2026!")
+        self.client.force_login(user)
+        self.assertEqual(self.client.post(reverse("ops-plan-delete", args=[self.plan.pk])).status_code, 403)
+        self.assertTrue(Plan.objects.filter(pk=self.plan.pk).exists())
+
+    def test_legacy_public_plan_without_dimensions_remains_publishable(self):
         model = GardenModel.objects.create(name="Legado", code="legado-incompleto", capacity=4)
         self.plan.garden_model = model
         self.plan.save(update_fields=["garden_model", "updated_at"])
         diagnostic = plan_publication_diagnostics(self.plan)
-        self.assertEqual(diagnostic["publication_state"], "incomplete")
-        self.assertIn("capacidade do reservatório", diagnostic["blocking_issues"])
-        self.assertIn("altura do modelo", diagnostic["blocking_issues"])
+        self.assertEqual(diagnostic["publication_state"], "published")
+        self.assertEqual(diagnostic["blocking_issues"], [])
         self.plan.refresh_from_db()
         self.assertTrue(self.plan.is_public)
 

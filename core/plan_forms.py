@@ -6,6 +6,7 @@ from django.forms import inlineformset_factory
 from django.utils import timezone
 from django.db import transaction
 from django.db.models import Max, Q
+from django.utils.text import slugify
 
 from subscriptions.models import Plan, PlanEntitlement, PlanVersion
 
@@ -29,6 +30,8 @@ class PlanAdminForm(forms.ModelForm):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self.fields["code"].required = False
+        self.fields["code"].help_text = "Opcional. Se ficar vazio, será gerado automaticamente a partir do nome."
         current = self.instance.versions.filter(retired_at__isnull=True).order_by("-version").first() if self.instance.pk else None
         if current and not self.is_bound:
             self.initial["monthly_price"] = current.price_cents / 100
@@ -43,6 +46,21 @@ class PlanAdminForm(forms.ModelForm):
         if len(value) > 256:
             raise forms.ValidationError("Use no máximo 256 caracteres.")
         return value
+
+    def clean_code(self):
+        value = slugify(self.cleaned_data.get("code") or self.cleaned_data.get("name") or "plano")[:80] or "plano"
+        candidate, suffix = value, 2
+        queryset = Plan.objects.filter(code=candidate)
+        if self.instance.pk:
+            queryset = queryset.exclude(pk=self.instance.pk)
+        while queryset.exists():
+            tail = f"-{suffix}"
+            candidate = f"{value[:80 - len(tail)]}{tail}"
+            suffix += 1
+            queryset = Plan.objects.filter(code=candidate)
+            if self.instance.pk:
+                queryset = queryset.exclude(pk=self.instance.pk)
+        return candidate
 
     def clean_image(self):
         image = self.cleaned_data.get("image")

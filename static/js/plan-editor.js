@@ -55,7 +55,7 @@ document.addEventListener("DOMContentLoaded", () => {
     try {
       const url = modelSection.dataset.modelUrlBase.replace("00000000-0000-0000-0000-000000000000", modelId);
       const response = await fetch(url, {headers: {"Accept": "application/json"}});
-      if (!response.ok) throw new Error("Não foi possível carregar o modelo.");
+      if (!response.ok) throw new Error("Características físicas não cadastradas. Você pode continuar editando e publicar este plano.");
       const model = await response.json();
       if (requestId !== modelRequest) return;
       model.features.forEach((feature) => {
@@ -67,10 +67,10 @@ document.addEventListener("DOMContentLoaded", () => {
         item.append(icon, value, name); modelGrid.append(item);
       });
       modelEdit.href = model.edit_url;
-      modelEdit.textContent = model.is_complete ? "Editar modelo físico" : "Completar cadastro do modelo físico";
+      modelEdit.textContent = "Editar modelo físico";
       modelEdit.classList.remove("d-none");
       if (!model.is_complete) {
-        modelIncomplete.textContent = `Para publicar, complete: ${model.missing.join(", ")}.`;
+        modelIncomplete.textContent = `Características opcionais não cadastradas: ${model.missing.join(", ")}. Você pode continuar editando e publicar este plano.`;
         modelIncomplete.classList.remove("d-none");
       }
       if (!model.features.length) {

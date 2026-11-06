@@ -102,7 +102,7 @@ def _serialize_garden_model(model):
 
 @admin_required
 def plan_model_data(request, model_id):
-    model = get_object_or_404(GardenModel.objects.prefetch_related("physical_features"), pk=model_id, is_active=True)
+    model = get_object_or_404(GardenModel.objects.prefetch_related("physical_features"), pk=model_id)
     return JsonResponse(_serialize_garden_model(model))
 
 
@@ -221,6 +221,27 @@ def plan_publish(request, plan_id):
     plan.is_public = True
     plan.save(update_fields=["is_active", "is_public", "updated_at"])
     messages.success(request, f"{plan.name} foi publicado com sucesso.")
+    return redirect("ops-plan-management")
+
+
+@admin_required
+@require_POST
+@transaction.atomic
+def plan_delete(request, plan_id):
+    plan = get_object_or_404(Plan, pk=plan_id)
+    name = plan.name
+    versions = plan.versions.all()
+    used = Subscription.objects.filter(plan_version__in=versions).exists() or CheckoutRequest.objects.filter(plan_version__in=versions).exists()
+    if used:
+        plan.is_active = False
+        plan.is_public = False
+        plan.save(update_fields=["is_active", "is_public", "updated_at"])
+        logger.info("plan_archived user_id=%s plan_id=%s", request.user.pk, plan.pk)
+        messages.success(request, f"{name} foi arquivado. Assinaturas e dados financeiros foram preservados.")
+    else:
+        delete_administrative_object("plans", plan)
+        logger.info("plan_deleted user_id=%s plan_id=%s", request.user.pk, plan_id)
+        messages.success(request, f"{name} foi excluído com sucesso.")
     return redirect("ops-plan-management")
 
 
@@ -642,6 +663,12 @@ def detail(request, section, pk):
 @operations_required
 def create(request, section):
     if section == "plans":
+        if request.method == "POST":
+            form = resource_form_class(get_resource("plans"))(request.POST, request.FILES or None)
+            if form.is_valid():
+                plan = form.save()
+                messages.success(request, "Plano criado com sucesso.")
+                return redirect("ops-plan-detail", plan_id=plan.pk)
         return redirect("ops-plan-create")
     resource = get_resource(section)
     if not resource or resource.readonly or section == "credentials":

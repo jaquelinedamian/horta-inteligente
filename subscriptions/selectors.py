@@ -36,20 +36,8 @@ def plan_publication_diagnostics(plan, at=None):
     elif version.price_cents <= 0:
         issues.append("Preço inválido")
     blocking_issues = []
-    if not plan.name or not plan.code:
-        blocking_issues.append("nome e código do plano")
-    if not plan.garden_model_id:
-        blocking_issues.append("modelo físico associado")
-    else:
-        model = plan.garden_model
-        if not model.capacity:
-            blocking_issues.append("quantidade máxima de plantas")
-        if not model.reservoir_liters:
-            blocking_issues.append("capacidade do reservatório")
-        if not model.height_cm:
-            blocking_issues.append("altura do modelo")
-    if not (plan.commercial_title or plan.short_copy or plan.description):
-        blocking_issues.append("informações comerciais")
+    if not plan.name:
+        blocking_issues.append("nome do plano")
     if not version or version.price_cents <= 0:
         blocking_issues.append("mensalidade válida")
     issues.extend(f"Cadastro incompleto: {issue}" for issue in blocking_issues)
