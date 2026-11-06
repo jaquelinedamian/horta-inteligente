@@ -103,7 +103,7 @@ class PlanManagementTests(TestCase):
         self.assertEqual(plan.versions.get().price_cents, 14990)
         self.assertEqual(plan.versions.get().entitlements.get().name, "Suporte técnico")
 
-    def test_create_plan_persists_physical_features_on_selected_model(self):
+    def test_create_plan_does_not_mutate_selected_model_features(self):
         model = GardenModel.objects.create(name="Modelo de criacao", code="modelo-criacao", capacity=4)
         self.client.force_login(self.admin)
         payload = self._plan_payload(garden_model=str(model.pk), **{
@@ -115,8 +115,7 @@ class PlanManagementTests(TestCase):
         self.assertEqual(response.status_code, 302)
         created_plan = Plan.objects.get(code="plano-visual")
         self.assertEqual(created_plan.garden_model_id, model.pk)
-        persisted = GardenModelFeature.objects.get(garden_model_id=model.pk, name="Material")
-        self.assertEqual(persisted.value, "PLA/PETG")
+        self.assertFalse(GardenModelFeature.objects.filter(garden_model_id=model.pk, name="Material").exists())
 
     def test_image_upload_replace_and_remove(self):
         def uploaded(color):
@@ -253,7 +252,7 @@ class PlanManagementTests(TestCase):
         self.version.retired_at = timezone.now() - timedelta(minutes=1); self.version.save()
         diagnostic = plan_publication_diagnostics(self.plan)
         self.assertNotIn("Preço não cadastrado", diagnostic["issues"])
-        self.assertIn("Associe um modelo de horta", diagnostic["issues"])
+        self.assertIn("Cadastro incompleto: modelo físico associado", diagnostic["issues"])
         self.assertTrue(diagnostic["is_published"])
 
     def test_garden_model_values_are_reflected_publicly(self):
@@ -267,7 +266,7 @@ class PlanManagementTests(TestCase):
         self.assertContains(response, "20")
         self.assertContains(response, "260")
 
-    def test_plan_editor_persists_and_updates_physical_features(self):
+    def test_plan_editor_does_not_mutate_shared_physical_features(self):
         model = GardenModel.objects.create(name="Modelo bÃ¡sico", code="modelo-basico", capacity=1)
         untouched_model = GardenModel.objects.create(name="Outro modelo", code="outro-modelo", capacity=9)
         untouched = GardenModelFeature.objects.create(garden_model=untouched_model, name="Peso", value="4,5", unit="kg")
@@ -286,6 +285,11 @@ class PlanManagementTests(TestCase):
         )
         response = self.client.post(reverse("ops-plan-edit", args=[self.plan.pk]), payload)
         self.assertEqual(response.status_code, 302)
+        self.assertFalse(model.physical_features.exists())
+        self.assertEqual(shared_plan.garden_model_id, model.pk)
+        untouched.refresh_from_db()
+        self.assertEqual(untouched.value, "4,5")
+        return
         self.assertEqual(model.physical_features.get(name="Quantidade de mudas").value, "4")
         self.assertEqual(model.physical_features.get(name="ReservatÃ³rio").value, "5")
         height = model.physical_features.get(name="Altura")
@@ -320,7 +324,7 @@ class PlanManagementTests(TestCase):
         for url in (reverse("ops-plan-edit", args=[self.plan.pk]), reverse("ops-plan-detail", args=[self.plan.pk]), reverse("plan-detail", args=[self.plan.code])):
             self.assertNotContains(self.client.get(url), "5 L")
 
-    def test_invalid_physical_feature_does_not_partially_save_plan(self):
+    def test_plan_editor_ignores_physical_feature_payload(self):
         model = GardenModel.objects.create(name="Modelo validaÃ§Ã£o", code="modelo-validacao", capacity=4)
         feature = GardenModelFeature.objects.create(garden_model=model, name="Altura", value="60", unit="cm", icon="bi-arrows-vertical")
         self.plan.garden_model = model
@@ -336,7 +340,11 @@ class PlanManagementTests(TestCase):
             },
         )
         response = self.client.post(reverse("ops-plan-edit", args=[self.plan.pk]), payload)
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, 302)
+        self.plan.refresh_from_db(); feature.refresh_from_db()
+        self.assertNotEqual(self.plan.description, "Descrição original")
+        self.assertEqual(feature.value, "60")
+        return
         self.plan.refresh_from_db(); feature.refresh_from_db()
         self.assertEqual(self.plan.description, "DescriÃ§Ã£o original")
         self.assertEqual(feature.value, "60")
@@ -403,7 +411,57 @@ class PlanManagementTests(TestCase):
         response = self.client.post(reverse("ops-plan-publish", args=[self.plan.pk]), {"action": "publish"}, follow=True)
         self.plan.refresh_from_db()
         self.assertFalse(self.plan.is_public)
-        self.assertContains(response, "Associe um modelo de horta")
+        self.assertContains(response, "modelo físico associado")
+
+    def test_model_data_endpoint_updates_selected_model_without_saving_plan(self):
+        model = GardenModel.objects.create(
+            name="Modelo completo", code="modelo-endpoint", capacity=6,
+            reservoir_liters="12.50", height_cm="82.00", width_cm="40.00", depth_cm="35.00",
+        )
+        self.client.force_login(self.admin)
+        response = self.client.get(reverse("ops-plan-model-data", args=[model.pk]))
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["is_complete"])
+        self.assertEqual(payload["missing"], [])
+        self.assertEqual({item["key"] for item in payload["features"]}, {"capacity", "reservoir_liters", "height_cm", "width_cm", "depth_cm"})
+        self.plan.refresh_from_db()
+        self.assertIsNone(self.plan.garden_model_id)
+
+    def test_model_data_endpoint_is_admin_only(self):
+        model = GardenModel.objects.create(name="Restrito", code="modelo-restrito", capacity=4)
+        user = User.objects.create_user(email="cliente-modelo@example.test", password="Strong-pass-2026!")
+        self.client.force_login(user)
+        self.assertEqual(self.client.get(reverse("ops-plan-model-data", args=[model.pk])).status_code, 403)
+
+    def test_incomplete_legacy_public_plan_is_identified_but_not_rewritten(self):
+        model = GardenModel.objects.create(name="Legado", code="legado-incompleto", capacity=4)
+        self.plan.garden_model = model
+        self.plan.save(update_fields=["garden_model", "updated_at"])
+        diagnostic = plan_publication_diagnostics(self.plan)
+        self.assertEqual(diagnostic["publication_state"], "incomplete")
+        self.assertIn("capacidade do reservatório", diagnostic["blocking_issues"])
+        self.assertIn("altura do modelo", diagnostic["blocking_issues"])
+        self.plan.refresh_from_db()
+        self.assertTrue(self.plan.is_public)
+
+    def test_model_measurements_persist_and_reject_zero(self):
+        data = {
+            "name": "Modelo técnico", "code": "modelo-tecnico", "capacity": "8",
+            "reservoir_liters": "15.75", "height_cm": "90.50", "width_cm": "42.25",
+            "depth_cm": "31.10", "photos_per_day": "4", "monitoring_interval_minutes": "60", "is_active": "on",
+        }
+        form = GardenModelForm(data)
+        self.assertTrue(form.is_valid(), form.errors)
+        model = form.save()
+        persisted = GardenModel.objects.get(pk=model.pk)
+        self.assertEqual(str(persisted.reservoir_liters), "15.75")
+        self.assertEqual(str(persisted.height_cm), "90.50")
+        data["code"] = "modelo-invalido"
+        data["reservoir_liters"] = "0"
+        invalid = GardenModelForm(data)
+        self.assertFalse(invalid.is_valid())
+        self.assertIn("reservoir_liters", invalid.errors)
 
     def test_deactivation_keeps_versions(self):
         self.client.force_login(self.admin)

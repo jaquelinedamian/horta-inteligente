@@ -228,6 +228,17 @@ class GardenModelForm(OperationalModelForm):
     class Meta:
         model = GardenModel
         fields = ("name", "code", "description", "capacity", "reservoir_liters", "height_cm", "width_cm", "depth_cm", "module_count", "light_hours_per_day", "irrigation_frequency_count", "irrigation_frequency_period", "pump_duration_seconds", "photos_per_day", "monitoring_interval_minutes", "is_active")
+        labels = {
+            "capacity": "Quantidade máxima de plantas", "reservoir_liters": "Capacidade do reservatório (L)",
+            "height_cm": "Altura (cm)", "width_cm": "Largura (cm)", "depth_cm": "Profundidade (cm)",
+            "module_count": "Quantidade de módulos",
+        }
+        widgets = {
+            "reservoir_liters": forms.NumberInput(attrs={"min": "0.01", "step": "0.01"}),
+            "height_cm": forms.NumberInput(attrs={"min": "0.01", "step": "0.01"}),
+            "width_cm": forms.NumberInput(attrs={"min": "0.01", "step": "0.01"}),
+            "depth_cm": forms.NumberInput(attrs={"min": "0.01", "step": "0.01"}),
+        }
 
     def clean_image(self):
         image = self.cleaned_data.get("image")

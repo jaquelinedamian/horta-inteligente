@@ -35,11 +35,27 @@ def plan_publication_diagnostics(plan, at=None):
         issues.append("Preço não cadastrado")
     elif version.price_cents <= 0:
         issues.append("Preço inválido")
+    blocking_issues = []
+    if not plan.name or not plan.code:
+        blocking_issues.append("nome e código do plano")
     if not plan.garden_model_id:
-        issues.append("Associe um modelo de horta")
+        blocking_issues.append("modelo físico associado")
+    else:
+        model = plan.garden_model
+        if not model.capacity:
+            blocking_issues.append("quantidade máxima de plantas")
+        if not model.reservoir_liters:
+            blocking_issues.append("capacidade do reservatório")
+        if not model.height_cm:
+            blocking_issues.append("altura do modelo")
+    if not (plan.commercial_title or plan.short_copy or plan.description):
+        blocking_issues.append("informações comerciais")
+    if not version or version.price_cents <= 0:
+        blocking_issues.append("mensalidade válida")
+    issues.extend(f"Cadastro incompleto: {issue}" for issue in blocking_issues)
     published = bool(plan.is_active and plan.is_public and version and version.price_cents > 0)
-    state = "published" if published else ("unpublished" if plan.is_active and not plan.is_public else "draft")
-    return {"version": version, "issues": issues, "is_published": published, "publication_state": state, "price": get_plan_price_state(plan)}
+    state = "incomplete" if blocking_issues else ("published" if published else ("unpublished" if plan.is_active and not plan.is_public else "draft"))
+    return {"version": version, "issues": issues, "blocking_issues": blocking_issues, "can_publish": not blocking_issues, "is_published": published, "publication_state": state, "price": get_plan_price_state(plan)}
 
 
 def get_customer_subscription(organization):

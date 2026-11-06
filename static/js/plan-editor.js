@@ -32,15 +32,59 @@ document.addEventListener("DOMContentLoaded", () => {
   };
   price?.addEventListener("input", updatePrice); updatePrice();
   const modelSelect = document.getElementById("id_garden_model");
-  const modelDataNode = document.getElementById("garden-model-data");
-  const models = modelDataNode ? JSON.parse(modelDataNode.textContent) : [];
-  const setText = (selector, value) => { const node = document.querySelector(selector); if (node) node.textContent = value; };
-  const updateModelPreview = () => {
-    const model = models.find((item) => String(item.id) === modelSelect?.value);
-    setText("[data-model-capacity]", `${model?.capacity ?? "—"} mudas`);
-    setText("[data-model-reservoir]", `${model?.reservoir_liters ?? "—"} L`);
-    setText("[data-model-height]", `${model?.height_cm ?? "—"} cm`);
-    setText("[data-model-modules]", `${model?.module_count ?? "—"} módulos`);
+  const modelSection = document.getElementById("model-technical-section");
+  const modelGrid = document.getElementById("model-feature-grid");
+  const modelEmpty = document.getElementById("model-empty");
+  const modelLoading = document.getElementById("model-loading");
+  const modelIncomplete = document.getElementById("model-incomplete");
+  const modelEdit = document.getElementById("edit-garden-model");
+  let modelRequest = 0;
+  const updateModelPreview = async () => {
+    const modelId = modelSelect?.value;
+    const requestId = ++modelRequest;
+    modelGrid.replaceChildren();
+    modelIncomplete.classList.add("d-none");
+    modelEdit.classList.add("d-none");
+    if (!modelId) {
+      modelEmpty.classList.remove("d-none");
+      modelLoading.classList.add("d-none");
+      return;
+    }
+    modelEmpty.classList.add("d-none");
+    modelLoading.classList.remove("d-none");
+    try {
+      const url = modelSection.dataset.modelUrlBase.replace("00000000-0000-0000-0000-000000000000", modelId);
+      const response = await fetch(url, {headers: {"Accept": "application/json"}});
+      if (!response.ok) throw new Error("Não foi possível carregar o modelo.");
+      const model = await response.json();
+      if (requestId !== modelRequest) return;
+      model.features.forEach((feature) => {
+        const item = document.createElement("div");
+        item.className = "garden-feature-preview-item";
+        const icon = document.createElement("i"); icon.className = `bi ${feature.icon || "bi-info-circle"}`;
+        const value = document.createElement("strong"); value.textContent = `${feature.value}${feature.unit ? ` ${feature.unit}` : ""}`;
+        const name = document.createElement("small"); name.textContent = feature.name;
+        item.append(icon, value, name); modelGrid.append(item);
+      });
+      modelEdit.href = model.edit_url;
+      modelEdit.textContent = model.is_complete ? "Editar modelo físico" : "Completar cadastro do modelo físico";
+      modelEdit.classList.remove("d-none");
+      if (!model.is_complete) {
+        modelIncomplete.textContent = `Para publicar, complete: ${model.missing.join(", ")}.`;
+        modelIncomplete.classList.remove("d-none");
+      }
+      if (!model.features.length) {
+        modelEmpty.textContent = "Nenhuma característica técnica foi cadastrada neste modelo.";
+        modelEmpty.classList.remove("d-none");
+      }
+    } catch (error) {
+      if (requestId === modelRequest) {
+        modelEmpty.textContent = error.message;
+        modelEmpty.classList.remove("d-none");
+      }
+    } finally {
+      if (requestId === modelRequest) modelLoading.classList.add("d-none");
+    }
   };
   modelSelect?.addEventListener("change", updateModelPreview);
   updateModelPreview();

@@ -28,6 +28,7 @@ urlpatterns = [
     path("fotografias/", ops_views.photo_batch_manager, name="ops-photo-batch-manager"),
     path("planos/", ops_views.plan_management, name="ops-plan-management"),
     path("planos/novo/", ops_views.plan_create, name="ops-plan-create"),
+    path("planos/modelos/<uuid:model_id>/dados/", ops_views.plan_model_data, name="ops-plan-model-data"),
     path("planos/<uuid:plan_id>/", ops_views.plan_detail_admin, name="ops-plan-detail"),
     path("planos/<uuid:plan_id>/editar/", ops_views.plan_edit, name="ops-plan-edit"),
     path("planos/<uuid:plan_id>/duplicar/", ops_views.plan_duplicate, name="ops-plan-duplicate"),

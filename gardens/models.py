@@ -3,6 +3,7 @@ from django.core.exceptions import ValidationError
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from django.db.models import Q
+from decimal import Decimal
 
 from accounts.models import Address, Organization
 from core.models import BaseModel
@@ -30,10 +31,10 @@ class GardenModel(BaseModel):
     code = models.SlugField(max_length=80, unique=True)
     description = models.TextField(blank=True)
     capacity = models.PositiveSmallIntegerField(default=4)
-    reservoir_liters = models.DecimalField(max_digits=8, decimal_places=2, null=True, blank=True)
-    height_cm = models.DecimalField(max_digits=8, decimal_places=2, null=True, blank=True)
-    width_cm = models.DecimalField(max_digits=8, decimal_places=2, null=True, blank=True)
-    depth_cm = models.DecimalField(max_digits=8, decimal_places=2, null=True, blank=True)
+    reservoir_liters = models.DecimalField(max_digits=8, decimal_places=2, null=True, blank=True, validators=[MinValueValidator(Decimal("0.01"))])
+    height_cm = models.DecimalField(max_digits=8, decimal_places=2, null=True, blank=True, validators=[MinValueValidator(Decimal("0.01"))])
+    width_cm = models.DecimalField(max_digits=8, decimal_places=2, null=True, blank=True, validators=[MinValueValidator(Decimal("0.01"))])
+    depth_cm = models.DecimalField(max_digits=8, decimal_places=2, null=True, blank=True, validators=[MinValueValidator(Decimal("0.01"))])
     module_count = models.PositiveSmallIntegerField(null=True, blank=True)
     image_data = models.BinaryField(null=True, blank=True, editable=False)
     image_content_type = models.CharField(max_length=80, blank=True)
@@ -59,6 +60,24 @@ class GardenModel(BaseModel):
     @property
     def visible_physical_features(self):
         return self.physical_features.filter(is_visible=True).exclude(value="").order_by("display_order", "created_at")
+
+    @property
+    def technical_summary(self):
+        values = (
+            ("Quantidade de plantas", self.capacity, "plantas", "bi-flower1", "capacity"),
+            ("Capacidade do reservatório", self.reservoir_liters, "L", "bi-droplet", "reservoir_liters"),
+            ("Altura", self.height_cm, "cm", "bi-arrows-vertical", "height_cm"),
+            ("Largura", self.width_cm, "cm", "bi-arrows", "width_cm"),
+            ("Profundidade", self.depth_cm, "cm", "bi-box", "depth_cm"),
+            ("Quantidade de módulos", self.module_count, "módulos", "bi-boxes", "module_count"),
+        )
+        summary = [{"name": name, "value": value, "unit": unit, "icon": icon, "key": key}
+                   for name, value, unit, icon, key in values if value not in (None, "")]
+        canonical = {"quantidade de plantas", "quantidade de mudas", "capacidade do reservatório", "reservatório", "altura", "largura", "profundidade", "quantidade de módulos"}
+        for feature in self.physical_features.filter(is_visible=True).exclude(value="").order_by("display_order", "created_at"):
+            if feature.name.strip().casefold() not in canonical:
+                summary.append({"name": feature.name, "value": feature.value, "unit": feature.unit, "icon": feature.icon, "key": "custom"})
+        return summary
 
 
 class GardenModelFeature(BaseModel):

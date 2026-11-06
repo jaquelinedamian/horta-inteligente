@@ -14,7 +14,7 @@ from django.core.management import call_command
 from django.core.paginator import Paginator
 from django.db import transaction
 from django.db.models import Count, F, Q
-from django.http import Http404, HttpResponse
+from django.http import Http404, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
@@ -86,6 +86,26 @@ def _garden_model_preview_data():
     return list(GardenModel.objects.filter(is_active=True).values("id", "capacity", "reservoir_liters", "height_cm", "module_count"))
 
 
+def _serialize_garden_model(model):
+    return {
+        "id": str(model.pk), "name": model.name, "description": model.description,
+        "edit_url": reverse("ops-edit", args=["garden-models", model.pk]),
+        "is_complete": bool(model.capacity and model.reservoir_liters and model.height_cm),
+        "missing": [label for value, label in (
+            (model.capacity, "quantidade máxima de plantas"),
+            (model.reservoir_liters, "capacidade do reservatório"),
+            (model.height_cm, "altura"),
+        ) if not value],
+        "features": [{**feature, "value": str(feature["value"])} for feature in model.technical_summary],
+    }
+
+
+@admin_required
+def plan_model_data(request, model_id):
+    model = get_object_or_404(GardenModel.objects.prefetch_related("physical_features"), pk=model_id, is_active=True)
+    return JsonResponse(_serialize_garden_model(model))
+
+
 def _copy_entitlements(formset, version):
     position = 0
     for item_form in formset.forms:
@@ -131,23 +151,16 @@ def plan_create(request):
     form = PlanAdminForm(request.POST or None, request.FILES or None)
     formset = PlanEntitlementFormSet(request.POST or None, prefix="benefits")
     form_valid = form.is_valid() if request.method == "POST" else False
-    selected_model = form.cleaned_data.get("garden_model") if form_valid else None
-    feature_formset = GardenModelFeatureFormSet(request.POST or None, instance=selected_model, prefix="features") if selected_model else None
-    feature_formset_valid = feature_formset.is_valid() if request.method == "POST" and feature_formset is not None else True
-    if request.method == "POST" and feature_formset is not None and not feature_formset_valid:
-        _log_invalid_garden_model_features(feature_formset, selected_model, source="plan_create")
-    if request.method == "POST" and form_valid and formset.is_valid() and feature_formset_valid:
+    if request.method == "POST" and form_valid and formset.is_valid():
         plan = form.save(commit=False)
         plan.is_active, plan.is_public = True, False
         plan.save()
         form.save_image(plan)
-        if feature_formset is not None:
-            _save_garden_model_features(feature_formset, selected_model, source="plan_create")
         version = form.create_version(plan)
         _copy_entitlements(formset, version)
         messages.success(request, "Plano criado como rascunho. Revise os dados antes de publicar.")
         return redirect("ops-plan-detail", plan_id=plan.pk)
-    return render(request, "admin_portal/plan_form.html", {"form": form, "formset": formset, "feature_formset": feature_formset, "selected_model": selected_model, "shared_plan_count": selected_model.plans.exclude(pk=getattr(form.instance, "pk", None)).count() if selected_model else 0, "title": "Novo plano", "garden_model_data": _garden_model_preview_data()})
+    return render(request, "admin_portal/plan_form.html", {"form": form, "formset": formset, "title": "Novo plano"})
 
 
 @admin_required
@@ -158,21 +171,14 @@ def plan_edit(request, plan_id):
     form = PlanAdminForm(request.POST or None, request.FILES or None, instance=plan)
     formset = PlanEntitlementFormSet(request.POST or None, instance=current, prefix="benefits") if current else PlanEntitlementFormSet(request.POST or None, prefix="benefits")
     form_valid = form.is_valid() if request.method == "POST" else False
-    selected_model = form.cleaned_data.get("garden_model") if form_valid else plan.garden_model
-    feature_formset = GardenModelFeatureFormSet(request.POST or None, instance=selected_model, prefix="features") if selected_model else None
-    feature_formset_valid = feature_formset.is_valid() if request.method == "POST" and feature_formset is not None else True
-    if request.method == "POST" and feature_formset is not None and not feature_formset_valid:
-        _log_invalid_garden_model_features(feature_formset, selected_model, source="plan_edit")
-    if request.method == "POST" and form_valid and formset.is_valid() and feature_formset_valid:
+    if request.method == "POST" and form_valid and formset.is_valid():
         plan = form.save()
         form.save_image(plan)
-        if feature_formset is not None:
-            _save_garden_model_features(feature_formset, selected_model, source="plan_edit")
         version = form.create_version(plan, current)
         _copy_entitlements(formset, version)
         messages.success(request, f"Alterações salvas na versão {version.version}; contratos anteriores foram preservados.")
         return redirect("ops-plan-detail", plan_id=plan.pk)
-    return render(request, "admin_portal/plan_form.html", {"form": form, "formset": formset, "feature_formset": feature_formset, "selected_model": selected_model, "shared_plan_count": selected_model.plans.exclude(pk=plan.pk).count() if selected_model else 0, "title": f"Editar {plan.name}", "plan": plan, "garden_model_data": _garden_model_preview_data()})
+    return render(request, "admin_portal/plan_form.html", {"form": form, "formset": formset, "title": f"Editar {plan.name}", "plan": plan})
 
 
 @admin_required
@@ -194,26 +200,7 @@ def plan_toggle(request, plan_id):
 
 
 def _publication_requirements(plan):
-    problems = []
-    diagnostic = plan_publication_diagnostics(plan)
-    if not plan.name or not plan.code:
-        problems.append("Defina o nome e o código do plano.")
-    if not plan.garden_model_id:
-        problems.append("Associe um modelo de horta.")
-    else:
-        model = plan.garden_model
-        if not model.capacity:
-            problems.append("Defina a capacidade de mudas do modelo.")
-        if not model.reservoir_liters:
-            problems.append("Defina a capacidade do reservatório.")
-        if not model.height_cm:
-            problems.append("Defina a altura do modelo.")
-    if not (plan.commercial_title or plan.short_copy or plan.description):
-        problems.append("Preencha os dados comerciais do plano.")
-    price = diagnostic["price"]
-    if not price["current"]:
-        problems.append("Defina o preço do plano.")
-    return problems
+    return plan_publication_diagnostics(plan)["blocking_issues"]
 
 
 @admin_required
@@ -228,7 +215,7 @@ def plan_publish(request, plan_id):
         return redirect("ops-plan-management")
     problems = _publication_requirements(plan)
     if problems:
-        messages.error(request, f"Não foi possível publicar {plan.name}: " + " ".join(problems))
+        messages.error(request, f"Não foi possível publicar {plan.name}. Complete: " + ", ".join(problems) + ".")
         return redirect("ops-plan-management")
     plan.is_active = True
     plan.is_public = True
