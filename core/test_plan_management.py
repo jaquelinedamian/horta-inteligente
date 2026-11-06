@@ -241,10 +241,10 @@ class PlanManagementTests(TestCase):
             response = self.client.get(url)
             self.assertContains(response, "Plano Base")
         detail = self.client.get(reverse("plan-detail", args=[self.plan.code]))
-        for label in ("Irrigação automatizada", "Iluminação LED grow", "Monitoramento online", "Câmera Wi-Fi", "Suporte técnico", "Acesso à plataforma"):
+        for label in ("Acesso à plataforma", "Relatórios e históricos", "Programação de iluminação", "Programação de irrigação", "Suporte técnico"):
             self.assertContains(detail, label)
-        for label in ("Relatórios e históricos", "Programação de iluminação", "Programação de irrigação"):
-            self.assertContains(detail, label)
+        self.assertContains(detail, "Assinar este plano")
+        self.assertNotContains(detail, "Para quem é este plano")
         self.assertNotContains(detail, "Visita mensal")
 
     def test_admin_detail_uses_standard_catalog_and_hides_commercial_history(self):
