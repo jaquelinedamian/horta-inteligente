@@ -258,15 +258,38 @@ class PlanManagementTests(TestCase):
             height_cm="90", width_cm="45", depth_cm="35",
         )
         self.plan.garden_model = model
-        self.plan.save(update_fields=["garden_model", "updated_at"])
+        self.plan.description = "Descrição completa e sincronizada do plano."
+        self.plan.save(update_fields=["garden_model", "description", "updated_at"])
+        PlanEntitlement.objects.create(
+            plan_version=self.version, benefit_type="technical-support", name="Suporte técnico",
+            description="Atendimento técnico cadastrado para este plano.", is_included=True,
+        )
         self.client.force_login(self.admin)
         response = self.client.get(reverse("ops-plan-detail", args=[self.plan.pk]))
-        self.assertContains(response, "Características do plano")
-        self.assertContains(response, "Serviços incluídos")
+        self.assertContains(response, "Características físicas")
+        self.assertContains(response, "O que está incluído")
         self.assertContains(response, "7 plantas")
         self.assertContains(response, "18,50 L")
-        self.assertContains(response, "90 × 45 × 35 cm")
+        for label in ("Altura", "Largura", "Profundidade", "90 cm", "45 cm", "35 cm"):
+            self.assertContains(response, label)
+        self.assertContains(response, "Descrição completa e sincronizada do plano.")
+        self.assertContains(response, "Atendimento técnico cadastrado para este plano.")
+        self.assertContains(response, "Apenas demonstração")
+        self.assertNotContains(response, "Dimensões externas")
+        self.assertNotContains(response, "Prévia do plano no site")
         self.assertNotContains(response, "Histórico comercial")
+
+    def test_unpublished_plan_keeps_full_admin_preview_and_is_hidden_publicly(self):
+        self.plan.is_public = False
+        self.plan.save(update_fields=["is_public", "updated_at"])
+        self.client.force_login(self.admin)
+        admin_detail = self.client.get(reverse("ops-plan-detail", args=[self.plan.pk]))
+        self.assertEqual(admin_detail.status_code, 200)
+        self.assertContains(admin_detail, "Despublicado")
+        self.assertContains(admin_detail, "Assinar este plano")
+        self.assertContains(admin_detail, "Apenas demonstração")
+        self.client.logout()
+        self.assertEqual(self.client.get(reverse("plan-detail", args=[self.plan.code])).status_code, 404)
 
     def test_public_model_specs_are_isolated_and_missing_values_are_omitted(self):
         model = GardenModel.objects.create(name="Modelo A specs", code="modelo-a-specs", capacity=4, reservoir_liters="8")

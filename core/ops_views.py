@@ -202,7 +202,9 @@ def plan_detail_admin(request, plan_id):
     plan = get_object_or_404(Plan.objects.select_related("garden_model").prefetch_related("garden_model__physical_features"), pk=plan_id)
     diagnostic = plan_publication_diagnostics(plan)
     context = {"plan": plan, "current": diagnostic["price"]["current"], "diagnostic": diagnostic}
-    context.update(shared_plan_context(plan.garden_model, include_missing=True))
+    context.update(shared_plan_context(
+        plan.garden_model, version=diagnostic["price"]["current"], separate_dimensions=True,
+    ))
     return render(request, "admin_portal/plan_detail.html", context)
 
 

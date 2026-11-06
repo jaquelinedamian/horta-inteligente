@@ -1,0 +1,32 @@
+{% load static %}
+<div class="plan-detail-page{% if is_admin_preview %} plan-admin-preview{% endif %}">
+  <section class="plan-product-hero">
+    <div class="container plan-detail-container">
+      <div class="row align-items-center g-4 g-lg-5">
+        <div class="col-lg-5"><div class="plan-product-copy">
+          <span class="plan-product-kicker">{{ plan.name }}</span>
+          <h1>{% if plan.commercial_title %}{{ plan.commercial_title }}{% elif plan.garden_model %}{{ plan.garden_model.name }}{% else %}{{ plan.name }}{% endif %}</h1>
+          {% if plan.description or plan.short_copy or plan.subtitle %}<p class="plan-product-description">{{ plan.description|default:plan.short_copy|default:plan.subtitle }}</p>{% endif %}
+          {% if version %}
+          <div class="plan-product-price" aria-label="Mensalidade de R$ {{ version.price_cents|stringformat:'d'|slice:':-2' }},{{ version.price_cents|stringformat:'d'|slice:'-2:' }} por mês"><span>R$</span> {{ version.price_cents|stringformat:'d'|slice:':-2' }},{{ version.price_cents|stringformat:'d'|slice:'-2:' }} <small>/mês</small></div>
+          {% if version.installation_fee_cents %}<p class="plan-installation-price">Instalação: <strong>R$ {{ version.installation_fee_cents|stringformat:'d'|slice:':-2' }},{{ version.installation_fee_cents|stringformat:'d'|slice:'-2:' }}</strong></p>{% endif %}
+          {% if is_admin_preview %}<span class="btn btn-brand btn-lg plan-subscribe-button disabled" aria-disabled="true">Assinar este plano <small class="d-block">Apenas demonstração</small></span>{% else %}<a class="btn btn-brand btn-lg plan-subscribe-button" href="{% url 'checkout-plan' version.pk %}">Assinar este plano</a>{% endif %}
+          {% else %}<p class="text-warning mb-0">Mensalidade não cadastrada.</p>{% endif %}
+        </div></div>
+        <div class="col-lg-7"><figure class="plan-product-media">
+          {% if plan.display_image_url %}<img src="{{ plan.display_image_url }}" alt="{{ plan.commercial_title|default:plan.name }}" loading="eager">{% else %}<img src="{% static 'img/garden-placeholder.svg' %}" alt="Imagem do produto indisponível" loading="eager">{% endif %}
+        </figure></div>
+      </div>
+    </div>
+  </section>
+  {% if model_specifications %}
+  <section class="plan-detail-section" aria-labelledby="physical-specs-title{% if is_admin_preview %}-admin{% endif %}"><div class="container plan-detail-container">
+    <div class="plan-section-heading"><span class="eyebrow">O equipamento</span><h2 id="physical-specs-title{% if is_admin_preview %}-admin{% endif %}">Características físicas</h2><p>Medidas e capacidades do modelo selecionado.</p></div>
+    <div class="plan-physical-grid">{% for item in model_specifications %}<article class="plan-physical-card" aria-label="{{ item.name }}: {{ item.value }}{% if item.unit %} {{ item.unit }}{% endif %}"><span class="plan-card-icon"><i class="bi {{ item.icon }}"></i></span><div class="plan-physical-value"><span class="visually-hidden">{{ item.value }}{% if item.unit %} {{ item.unit }}{% endif %}</span><span aria-hidden="true">{{ item.value }}{% if item.unit %} <small>{{ item.unit }}</small>{% endif %}</span></div><h3>{{ item.name }}</h3></article>{% endfor %}</div>
+  </div></section>
+  {% endif %}
+  <section class="plan-detail-section plan-services-section" aria-labelledby="included-services-title{% if is_admin_preview %}-admin{% endif %}"><div class="container plan-detail-container">
+    <div class="plan-section-heading"><span class="eyebrow">Cuidado completo</span><h2 id="included-services-title{% if is_admin_preview %}-admin{% endif %}">O que está incluído</h2><p>Serviços e funcionalidades que acompanham este plano.</p></div>
+    <div class="plan-services-grid">{% for item in standard_plan_services %}<article class="plan-service-card"><span class="plan-card-icon"><i class="bi {{ item.icon }}"></i></span><div><h3>{{ item.title }}</h3>{% if item.description %}<p>{{ item.description }}</p>{% endif %}</div></article>{% endfor %}</div>
+  </div></section>
+</div>
