@@ -31,6 +31,7 @@ from devices.selectors import garden_snapshot
 from operations.models import InventoryItem, SupportTicket, Visit, WorkOrder
 from subscriptions.models import CheckoutRequest, Payment, Plan, PlanEntitlement, Subscription
 from subscriptions.selectors import plan_publication_diagnostics
+from subscriptions.catalog import shared_plan_context
 
 from .backoffice import get_resource
 from .backoffice_forms import ClientOnboardingForm, CustomerModuleForm, CustomerModuleInstallationForm, GardenModelFeatureFormSet, resource_form_class
@@ -126,6 +127,17 @@ def _copy_entitlements(formset, version):
         position += 1
 
 
+def _preserve_entitlements(source, version):
+    if not source:
+        return
+    fields = ("benefit_type", "name", "description", "quantity", "unit", "period", "unlimited",
+              "carries_balance", "is_featured", "icon", "is_included", "display_order")
+    PlanEntitlement.objects.bulk_create(
+        [PlanEntitlement(plan_version=version, **{field: getattr(item, field) for field in fields})
+         for item in source.entitlements.all()]
+    )
+
+
 @admin_required
 def plan_management(request):
     plans = Plan.objects.select_related("garden_model").prefetch_related("versions__entitlements").order_by("display_order", "name")
@@ -149,15 +161,16 @@ def plan_management(request):
 @transaction.atomic
 def plan_create(request):
     form = PlanAdminForm(request.POST or None, request.FILES or None)
-    formset = PlanEntitlementFormSet(request.POST or None, prefix="benefits")
+    formset = PlanEntitlementFormSet(request.POST, prefix="benefits") if request.method == "POST" and "benefits-TOTAL_FORMS" in request.POST else None
     form_valid = form.is_valid() if request.method == "POST" else False
-    if request.method == "POST" and form_valid and formset.is_valid():
+    if request.method == "POST" and form_valid and (formset is None or formset.is_valid()):
         plan = form.save(commit=False)
         plan.is_active, plan.is_public = True, False
         plan.save()
         form.save_image(plan)
         version = form.create_version(plan)
-        _copy_entitlements(formset, version)
+        if formset is not None:
+            _copy_entitlements(formset, version)
         messages.success(request, "Plano criado como rascunho. Revise os dados antes de publicar.")
         return redirect("ops-plan-detail", plan_id=plan.pk)
     return render(request, "admin_portal/plan_form.html", {"form": form, "formset": formset, "title": "Novo plano"})
@@ -169,13 +182,16 @@ def plan_edit(request, plan_id):
     plan = get_object_or_404(Plan, pk=plan_id)
     current = plan.versions.order_by("-version", "-created_at").first()
     form = PlanAdminForm(request.POST or None, request.FILES or None, instance=plan)
-    formset = PlanEntitlementFormSet(request.POST or None, instance=current, prefix="benefits") if current else PlanEntitlementFormSet(request.POST or None, prefix="benefits")
+    formset = PlanEntitlementFormSet(request.POST, instance=current, prefix="benefits") if request.method == "POST" and "benefits-TOTAL_FORMS" in request.POST else None
     form_valid = form.is_valid() if request.method == "POST" else False
-    if request.method == "POST" and form_valid and formset.is_valid():
+    if request.method == "POST" and form_valid and (formset is None or formset.is_valid()):
         plan = form.save()
         form.save_image(plan)
         version = form.create_version(plan, current)
-        _copy_entitlements(formset, version)
+        if formset is not None:
+            _copy_entitlements(formset, version)
+        else:
+            _preserve_entitlements(current, version)
         messages.success(request, f"Alterações salvas na versão {version.version}; contratos anteriores foram preservados.")
         return redirect("ops-plan-detail", plan_id=plan.pk)
     return render(request, "admin_portal/plan_form.html", {"form": form, "formset": formset, "title": f"Editar {plan.name}", "plan": plan})
@@ -184,9 +200,10 @@ def plan_edit(request, plan_id):
 @admin_required
 def plan_detail_admin(request, plan_id):
     plan = get_object_or_404(Plan.objects.select_related("garden_model").prefetch_related("garden_model__physical_features"), pk=plan_id)
-    versions = plan.versions.prefetch_related("entitlements").order_by("-version")
     diagnostic = plan_publication_diagnostics(plan)
-    return render(request, "admin_portal/plan_detail.html", {"plan": plan, "versions": versions, "current": diagnostic["price"]["current"], "scheduled": diagnostic["price"]["scheduled"]})
+    context = {"plan": plan, "current": diagnostic["price"]["current"], "diagnostic": diagnostic}
+    context.update(shared_plan_context(plan.garden_model, include_missing=True))
+    return render(request, "admin_portal/plan_detail.html", context)
 
 
 @admin_required

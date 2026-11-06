@@ -30,6 +30,7 @@ from gardens.access import gardens_for_user
 from gardens.models import Garden, GardenModule, ModuleInstallation
 from operations.models import ChecklistExecution, InventoryItem, SupportTicket, Visit, WorkOrder
 from subscriptions.models import CheckoutRequest, Payment, Plan, PlanVersion, Subscription
+from subscriptions.catalog import model_specifications, shared_plan_context
 from subscriptions.selectors import get_available_plan_versions, get_customer_subscription, get_public_plans
 from crops.selectors import get_available_crops, get_customer_cycles, get_public_crops
 from gardens.selectors import get_customer_devices, get_customer_gardens
@@ -70,25 +71,14 @@ def public_page(request, page):
 
 def plans(request):
     public_plans = list(get_public_plans())
-    benefit_names = []
     for version in public_plans:
-        for benefit in version.entitlements.all():
-            if benefit.name not in benefit_names:
-                benefit_names.append(benefit.name)
         version.monthly_visits = next((item for item in version.entitlements.all() if item.benefit_type == "maintenance-visits"), None)
         if not version.monthly_visits:
             version.monthly_visits = next((item for item in version.entitlements.all() if item.unit.lower() in {"visita/mês", "visitas/mês"}), None)
-    comparison_benefits = []
-    for name in benefit_names:
-        cells = []
-        for version in public_plans:
-            benefit = next((item for item in version.entitlements.all() if item.name == name), None)
-            cells.append({"included": bool(benefit and benefit.is_included), "value": benefit})
-        comparison_benefits.append({"name": name, "cells": cells})
     feature_names = []
     feature_maps = []
     for version in public_plans:
-        features = version.plan.garden_model.technical_summary if version.plan.garden_model_id else []
+        features = model_specifications(version.plan.garden_model)
         feature_maps.append({feature["name"]: feature for feature in features})
         for feature in features:
             if feature["name"] not in feature_names:
@@ -104,12 +94,16 @@ def plans(request):
         ]},
         *[{"name": name, "cells": [feature_map.get(name) for feature_map in feature_maps]} for name in feature_names],
     ]
-    return render(request, "public/plans.html", {"plans": public_plans, "comparison_features": comparison_features, "comparison_benefits": comparison_benefits})
+    context = {"plans": public_plans, "comparison_features": comparison_features}
+    context.update(shared_plan_context())
+    return render(request, "public/plans.html", context)
 
 
 def plan_detail(request, code):
     version = get_object_or_404(get_public_plans(), plan__code=code)
-    return render(request, "public/plan_detail.html", {"version": version, "plan": version.plan})
+    context = {"version": version, "plan": version.plan}
+    context.update(shared_plan_context(version.plan.garden_model))
+    return render(request, "public/plan_detail.html", context)
 
 
 def plan_image(request, plan_id):

@@ -80,7 +80,8 @@ class PlanManagementTests(TestCase):
         self.assertEqual(self.client.get(reverse("ops-plan-create")).status_code, 200)
         response = self.client.get(reverse("ops-plan-edit", args=[self.plan.pk]))
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Serviços incluídos")
+        self.assertNotContains(response, "Adicionar benefício")
+        self.assertNotContains(response, "Tipo de benefício")
 
     def _plan_payload(self, **changes):
         data = {
@@ -239,7 +240,42 @@ class PlanManagementTests(TestCase):
         for url in (reverse("plans"), reverse("plan-detail", args=[self.plan.code])):
             response = self.client.get(url)
             self.assertContains(response, "Plano Base")
-            self.assertContains(response, "Visita mensal")
+        detail = self.client.get(reverse("plan-detail", args=[self.plan.code]))
+        for label in ("Irrigação automatizada", "Iluminação LED grow", "Monitoramento online", "Câmera Wi-Fi", "Suporte técnico", "Acesso à plataforma"):
+            self.assertContains(detail, label)
+        for label in ("Relatórios e históricos", "Programação de iluminação", "Programação de irrigação"):
+            self.assertContains(detail, label)
+        self.assertNotContains(detail, "Visita mensal")
+
+    def test_admin_detail_uses_standard_catalog_and_hides_commercial_history(self):
+        model = GardenModel.objects.create(
+            name="Modelo specs", code="modelo-specs", capacity=7, reservoir_liters="18.50",
+            height_cm="90", width_cm="45", depth_cm="35",
+        )
+        self.plan.garden_model = model
+        self.plan.save(update_fields=["garden_model", "updated_at"])
+        self.client.force_login(self.admin)
+        response = self.client.get(reverse("ops-plan-detail", args=[self.plan.pk]))
+        self.assertContains(response, "Características do plano")
+        self.assertContains(response, "Serviços incluídos")
+        self.assertContains(response, "7 plantas")
+        self.assertContains(response, "18,50 L")
+        self.assertContains(response, "90 × 45 × 35 cm")
+        self.assertNotContains(response, "Histórico comercial")
+
+    def test_public_model_specs_are_isolated_and_missing_values_are_omitted(self):
+        model = GardenModel.objects.create(name="Modelo A specs", code="modelo-a-specs", capacity=4, reservoir_liters="8")
+        other = GardenModel.objects.create(name="Modelo B specs", code="modelo-b-specs", capacity=12, reservoir_liters="25", height_cm="120", width_cm="50", depth_cm="40")
+        self.plan.garden_model = model
+        self.plan.save(update_fields=["garden_model", "updated_at"])
+        other_plan = Plan.objects.create(name="Outro plano specs", code="outro-plano-specs", garden_model=other, is_active=True, is_public=True)
+        PlanVersion.objects.create(plan=other_plan, version=1, price_cents=20000, effective_from=timezone.now())
+        first = self.client.get(reverse("plan-detail", args=[self.plan.code]))
+        second = self.client.get(reverse("plan-detail", args=[other_plan.code]))
+        self.assertContains(first, "4 plantas")
+        self.assertNotContains(first, "120 × 50 × 40")
+        self.assertContains(second, "12 plantas")
+        self.assertContains(second, "120 × 50 × 40 cm")
 
     def test_numeric_code_opens_the_correct_eligible_plan(self):
         self.plan.code = "02"; self.plan.save(update_fields=["code"])
@@ -262,9 +298,9 @@ class PlanManagementTests(TestCase):
         GardenModelFeature.objects.create(garden_model=model, name="Altura", value="260", unit="cm", display_order=2)
         self.plan.garden_model = model; self.plan.save()
         response = self.client.get(reverse("plans"))
-        self.assertContains(response, "12 mudas")
+        self.assertContains(response, "12 plantas")
         self.assertContains(response, "20")
-        self.assertContains(response, "260")
+        self.assertNotContains(response, "260 cm")
 
     def test_plan_editor_does_not_mutate_shared_physical_features(self):
         model = GardenModel.objects.create(name="Modelo bÃ¡sico", code="modelo-basico", capacity=1)

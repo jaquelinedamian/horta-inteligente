@@ -51,12 +51,16 @@ class GardenModelFeatureTests(TestCase):
         self.assertFalse(GardenModelFeature.objects.filter(pk=self.feature.pk).exists())
         self.assertTrue(GardenModelFeature.objects.filter(pk=foreign.pk).exists())
 
-    def test_public_page_only_shows_visible_non_empty_features(self):
+    def test_public_page_uses_only_standardized_model_specs(self):
         GardenModelFeature.objects.create(garden_model=self.model, name="ReservatÃ³rio", value="15", unit="L", display_order=0)
         GardenModelFeature.objects.create(garden_model=self.model, name="Oculta", value="segredo", is_visible=False)
         plan = Plan.objects.create(garden_model=self.model, name="Plano", code="plano-features", is_active=True, is_public=True)
         PlanVersion.objects.create(plan=plan, version=1, price_cents=10000, effective_from=timezone.now())
         response = self.client.get(reverse("plans"))
+        self.assertContains(response, "Quantidade de plantas")
+        self.assertNotContains(response, "15 L")
+        self.assertNotContains(response, "segredo")
+        return
         self.assertContains(response, "ReservatÃ³rio")
         self.assertContains(response, "15 L")
         self.assertNotContains(response, "segredo")
