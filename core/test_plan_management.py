@@ -237,6 +237,10 @@ class PlanManagementTests(TestCase):
 
     def test_public_plan_and_detail_use_the_same_data(self):
         PlanEntitlement.objects.create(plan_version=self.version, benefit_type="item-1", name="Visita mensal", is_included=True)
+        PlanEntitlement.objects.create(
+            plan_version=self.version, benefit_type="platform-access", name="Acesso à plataforma",
+            description="Acompanhe sua horta e seus dados pela plataforma HortaViva.", is_included=True,
+        )
         for url in (reverse("plans"), reverse("plan-detail", args=[self.plan.code])):
             response = self.client.get(url)
             self.assertContains(response, "Plano Base")
@@ -244,6 +248,7 @@ class PlanManagementTests(TestCase):
         for label in ("Acesso à plataforma", "Relatórios e históricos", "Programação de iluminação", "Programação de irrigação", "Suporte técnico"):
             self.assertContains(detail, label)
         self.assertContains(detail, "Assinar este plano")
+        self.assertContains(detail, "Acompanhe sua horta e seus dados pela plataforma HortaViva.")
         self.assertNotContains(detail, "Para quem é este plano")
         self.assertNotContains(detail, "Visita mensal")
 
@@ -273,9 +278,11 @@ class PlanManagementTests(TestCase):
         first = self.client.get(reverse("plan-detail", args=[self.plan.code]))
         second = self.client.get(reverse("plan-detail", args=[other_plan.code]))
         self.assertContains(first, "4 plantas")
-        self.assertNotContains(first, "120 × 50 × 40")
+        self.assertNotContains(first, "120 cm")
         self.assertContains(second, "12 plantas")
-        self.assertContains(second, "120 × 50 × 40 cm")
+        for label in ("120 cm", "50 cm", "40 cm"):
+            self.assertContains(second, label)
+        self.assertNotContains(second, "Dimensões externas")
 
     def test_numeric_code_opens_the_correct_eligible_plan(self):
         self.plan.code = "02"; self.plan.save(update_fields=["code"])

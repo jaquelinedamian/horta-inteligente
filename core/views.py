@@ -102,7 +102,7 @@ def plans(request):
 def plan_detail(request, code):
     version = get_object_or_404(get_public_plans(), plan__code=code)
     context = {"version": version, "plan": version.plan}
-    context.update(shared_plan_context(version.plan.garden_model))
+    context.update(shared_plan_context(version.plan.garden_model, version=version, separate_dimensions=True))
     return render(request, "public/plan_detail.html", context)
 
 
